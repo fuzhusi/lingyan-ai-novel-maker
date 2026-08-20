@@ -223,20 +223,52 @@ app/
 - **小说/章节/角色/世界观/伏笔/大纲/短篇** 全 CRUD
 - **质量审计：** `quick_audit`, `get_knowledge_context`
 
-### CLI (15 个命令组，免登录)
+### CLI (17 个命令组，免登录)
 ```bash
 python cli.py whoami                 # 查看当前用户（恒为默认管理员）
 
 # 业务命令
 python cli.py novel list              # 小说列表
 python cli.py novel create --title X  # 创建小说
+python cli.py novel update --id 1 --title X --genre X  # 更新小说
 python cli.py chapter list --novel 1  # 章节列表
+python cli.py chapter update --novel 1 --number 1 --title X  # 更新章节
+python cli.py chapter delete --novel 1 --number 1 -y  # 删除章节
 python cli.py character create --novel 1 --name X
+python cli.py character update --id 1 --personality X  # 更新角色
+python cli.py character delete --id 1 -y               # 删除角色
 python cli.py world create --novel 1 --category X --title X
+python cli.py world update --id 1 --title X    # 更新世界观（用 --id，不需 --novel）
+python cli.py world delete --id 1 -y           # 删除世界观
 python cli.py foreshadow create --novel 1 --title X
+python cli.py foreshadow delete --id 1 -y      # 删除伏笔
+python cli.py relation create --novel 1 --char-a 1 --char-b 2
+python cli.py relation delete --id 1 -y        # 删除关系
 python cli.py short create --title X --mode inspiration
-python cli.py setting list            # 查看配置
+python cli.py short delete --id 1 -y           # 删除短篇
+python cli.py setting list            # 查看配置（全局+Agent）
 python cli.py setting apply-recommended  # 应用推荐配置
+python cli.py setting clear-agent     # 清除所有 Agent 自定义配置（含 llm_model_*）
+# LLM 厂商与模型配置（对齐 Web /settings/llm）
+python cli.py llm provider-list                              # 厂商列表
+python cli.py llm provider-add --name X --base-url URL --api-key KEY --provider-type deepseek
+python cli.py llm provider-update --provider 1 --enabled false
+python cli.py llm provider-delete --provider 1
+python cli.py llm fetch-models --provider 1                 # 拉取模型列表
+python cli.py llm model-list [--provider 1]                 # 模型列表（●/○ 勾选状态）
+python cli.py llm model-toggle --model 2                    # 勾选/取消单个模型
+python cli.py llm model-toggle-all --provider 1 --enabled true
+python cli.py llm test --provider 1                         # 测试厂商连接
+# Per-Agent 模型配置
+python cli.py llm agent-list                                # 16 个 Agent 生效模型+来源
+python cli.py llm agent-set --agent-type critic --llm-model 1:deepseek-v4-pro
+python cli.py llm agent-clear --agent-type critic           # 清除回退默认
+python cli.py llm agent-param --agent-type writer --temperature 0.9 --max-tokens 4096
+python cli.py llm effective --agent-type writer [--novel 1] # 实际生效配置（含 per-novel 覆盖）
+# 写作技巧
+python cli.py skill list              # 写作技巧列表（按分类：作者文风协议/通用/自定义）
+python cli.py skill toggle --skill jiangnan_fingerprint  # 切换激活
+python cli.py skill preview --task-type write           # 预览实际注入Writer的完整提示词
 python cli.py audit run --novel 1 --number 1  # AI 痕迹审计
 python cli.py optimize diagnose --novel 1     # 全书诊断
 python cli.py sys info                # 系统统计

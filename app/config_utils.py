@@ -162,13 +162,17 @@ def get_auto_default_model(agent_type=None):
     return result
 
 
-def _explicit_agent_cfg(agent_type, base):
+def _explicit_agent_cfg(agent_type, base, novel_overridden_keys=None):
     """收集 Agent 级显式配置（仅实际设置的键）。
 
     - llm_model_{agent}: 厂商模型（api_key/base_url/model_name/provider_type）
     - temperature_/max_tokens_: 参数覆盖
     - model_name_{agent}: 裸模型名，仅在无自动默认时生效（避免与厂商 key 错配）
+    - 自动默认：get_effective_config 用 agent_type=None 算 base（避免冲掉 novel override），
+      导致 deep/fast 组的分组自动默认丢失。这里在无显式 llm_model 且该键未被 novel override
+      覆盖时，补上该 agent 分组的自动默认 model_name/provider_type，使 deep 组正确落到 pro。
     """
+    novel_overridden_keys = novel_overridden_keys or set()
     cfg = {}
     temp_override = get_setting(f"temperature_{agent_type}", "")
     if temp_override:
@@ -179,10 +183,21 @@ def _explicit_agent_cfg(agent_type, base):
     provider_cfg = _resolve_llm_model(get_setting(f"llm_model_{agent_type}", ""))
     if provider_cfg:
         cfg.update(provider_cfg)
-    elif not get_auto_default_model(agent_type):
-        model_override = get_setting(f"model_name_{agent_type}", "")
-        if model_override:
-            cfg["model_name"] = model_override
+    else:
+        auto = get_auto_default_model(agent_type)
+        if auto:
+            # 用该 agent 分组的自动默认覆盖 base 的 model_name（base 来自 agent_type=None，
+            # 其自动默认未按分组匹配，可能是 flash；这里纠正为 deep 组的 pro）
+            # 但若 novel override 已覆盖该键，则尊重 novel override，不冲掉
+            if "model_name" not in novel_overridden_keys and auto.get("model_name") != base.get("model_name"):
+                cfg["model_name"] = auto["model_name"]
+            if ("provider_type" not in novel_overridden_keys
+                    and auto.get("provider_type") and auto.get("provider_type") != base.get("provider_type")):
+                cfg["provider_type"] = auto["provider_type"]
+        else:
+            model_override = get_setting(f"model_name_{agent_type}", "")
+            if model_override:
+                cfg["model_name"] = model_override
     return cfg
 
 
@@ -224,20 +239,22 @@ def get_effective_config(novel=None, agent_type=None):
     Agent 层只覆盖实际显式配置的键，避免 Agent 无配置时
     把 novel.model_override 的 api_key/base_url 冲掉。
     """
-    # 第一层：全局配置 + 自动默认
+    # 第一层：全局配置 + 自动默认（用 None 避免 deep 组的 pro 冲掉 novel override）
     base = get_model_config(agent_type=None)
-    # 第二层：novel.model_override
+    # 第二层：novel.model_override（记录被覆盖的键，供第三层判断）
+    novel_overridden_keys = set()
     if novel and novel.model_override:
         try:
             overrides = json.loads(novel.model_override)
             for k, v in overrides.items():
                 if v and str(v).strip():
                     base[k] = v
+                    novel_overridden_keys.add(k)
         except json.JSONDecodeError:
             pass
-    # 第三层（最高优先级）：agent_type 显式配置的键
+    # 第三层（最高优先级）：agent_type 显式配置的键 + 分组自动默认（不冲 novel override）
     if agent_type:
-        base.update(_explicit_agent_cfg(agent_type, base))
+        base.update(_explicit_agent_cfg(agent_type, base, novel_overridden_keys))
     return base
 
 

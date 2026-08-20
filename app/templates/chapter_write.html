@@ -94,6 +94,10 @@
                 </div>
             </details>
             {% endif %}
+            <details id="skills-details">
+                <summary>已载入技巧 <span id="skills-status" style="font-size:0.78rem;color:var(--text-dim)">（加载中...）</span></summary>
+                <div id="skills-content">正在加载...</div>
+            </details>
         </div>
 
         <!-- Review Panel -->
@@ -788,7 +792,54 @@
         } catch(e) { $('kb-context-content').innerHTML = '<div class="meta-block">加载失败</div>'; }
     }
 
+    // --- 已载入技巧（生成时注入 Writer 的活跃技巧） ---
+    async function loadSkills() {
+        try {
+            const resp = await fetch('/api/skills');
+            const data = await resp.json();
+            const active = (data || []).filter(s => s.active);
+            const cnt = active.length;
+            $('skills-status').textContent = cnt > 0 ? `（${cnt} 个已激活）` : '（未激活任何技巧）';
+            if (cnt === 0) {
+                $('skills-content').innerHTML =
+                    '<div class="meta-block empty">未激活任何写作技巧。可在「写作技巧」页开启内置/作者文风协议技巧，生成时将自动注入。</div>';
+                return;
+            }
+            // 按分类分组：通用技法 / 作者文风协议 / 自定义
+            const groups = {};
+            active.forEach(s => {
+                const cat = s.category || '通用技法';
+                (groups[cat] = groups[cat] || []).push(s);
+            });
+            const catOrder = ['作者文风协议', '通用技法', '自定义'];
+            const sortedCats = Object.keys(groups).sort((a, b) => {
+                const ia = catOrder.indexOf(a), ib = catOrder.indexOf(b);
+                return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+            });
+            let html = '';
+            sortedCats.forEach(cat => {
+                const items = groups[cat];
+                const isProtocol = cat === '作者文风协议';
+                html += `<div class="meta-block" style="margin-bottom:0.6rem">` +
+                    `<div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:0.3rem">${isProtocol ? '🖋 ' : ''}${escapeHtml(cat)}（${items.length}）</div>`;
+                items.forEach(s => {
+                    const authorTag = s.author ? `<span style="color:var(--accent-dim);font-size:0.78rem"> ${escapeHtml(s.author)}</span>` : '';
+                    const protocolTag = s.protocol_pack ? '<span style="font-size:0.68rem;padding:0.05rem 0.35rem;border-radius:6px;background:var(--accent-ghost);color:var(--accent-dim);border:1px solid var(--accent-dim);margin-left:0.3rem">完整协议</span>' : '';
+                    html += `<div style="display:flex;align-items:center;gap:0.4rem;padding:0.2rem 0;font-size:0.84rem">` +
+                        `<span style="color:var(--success)">●</span>` +
+                        `<span style="color:var(--text)">${escapeHtml(s.name)}</span>${authorTag}${protocolTag}</div>`;
+                });
+                html += `</div>`;
+            });
+            $('skills-content').innerHTML = html;
+        } catch (e) {
+            $('skills-status').textContent = '（加载失败）';
+            $('skills-content').innerHTML = '<div class="meta-block">加载失败</div>';
+        }
+    }
+
     loadKbContext();
+    loadSkills();
     renderVersions();
 
     // --- Multi-Dimensional Audit ---
