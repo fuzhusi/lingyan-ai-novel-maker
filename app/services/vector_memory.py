@@ -18,6 +18,47 @@ from app.models import (db, Novel, Chapter, ChapterVersion, ChapterSummary,
 memory_bp = Blueprint("memory", __name__, url_prefix="/api")
 
 
+def _cjk_tokenize(text):
+    """为 FTS5 unicode61 分词器预处理中文文本。
+
+    SQLite FTS5 的 unicode61 不识别 CJK 词边界，会把连续中文当成一个
+    不可分的超长 token，导致中文检索几乎失效。这里把每个 CJK 字符前后
+    加空格，使 unicode61 按单字分词，从而支持中文逐字检索。
+    英文/数字保持原样（unicode61 本就能正确按空白/标点分词）。
+    """
+    if not text:
+        return ""
+    out = []
+    for ch in text:
+        cp = ord(ch)
+        # CJK 统一汉字 + 扩展A + 兼容汉字 + 日文假名 + 韩文音节
+        if (0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF
+                or 0x3040 <= cp <= 0x30FF or 0xAC00 <= cp <= 0xD7AF):
+            out.append(" " + ch + " ")
+        else:
+            out.append(ch)
+    return " ".join("".join(out).split())
+
+
+def _cjk_detokenize(text):
+    """还原 _cjk_tokenize 加的空格：删去非 ASCII 字符（CJK/标点）之间的空格。
+
+    保留 ASCII 与非 ASCII 之间的空格（中英混排边界），只删两个非 ASCII
+    字符之间的空格（这些是 tokenize 时给 CJK 加的）。
+    """
+    if not text:
+        return ""
+    out = []
+    for i, ch in enumerate(text):
+        if ch == " ":
+            prev_nonascii = i > 0 and ord(text[i - 1]) > 127
+            next_nonascii = i + 1 < len(text) and ord(text[i + 1]) > 127
+            if prev_nonascii and next_nonascii:
+                continue
+        out.append(ch)
+    return "".join(out)
+
+
 def init_fts():
     """Create FTS5 virtual tables for memory search."""
     with db.engine.connect() as conn:
@@ -50,7 +91,7 @@ def index_memory(novel_id):
                 conn.execute(db.text(
                     "INSERT INTO memory_fts (content, memory_type, novel_id, source_id, chapter_number) "
                     "VALUES (:content, 'chapter_summary', :nid, :sid, :cn)"
-                ), {"content": summary.summary, "nid": novel_id, "sid": ch.id, "cn": ch.chapter_number})
+                ), {"content": _cjk_tokenize(summary.summary), "nid": novel_id, "sid": ch.id, "cn": ch.chapter_number})
 
             # Index chapter memory scenes
             memory = ChapterMemory.query.filter_by(chapter_id=ch.id).first()
@@ -63,7 +104,7 @@ def index_memory(novel_id):
                                 conn.execute(db.text(
                                     "INSERT INTO memory_fts (content, memory_type, novel_id, source_id, chapter_number) "
                                     "VALUES (:content, 'scene', :nid, :sid, :cn)"
-                                ), {"content": scene["summary"], "nid": novel_id, "sid": ch.id, "cn": ch.chapter_number})
+                                ), {"content": _cjk_tokenize(scene["summary"]), "nid": novel_id, "sid": ch.id, "cn": ch.chapter_number})
                     except json.JSONDecodeError:
                         pass
 
@@ -82,7 +123,7 @@ def index_memory(novel_id):
                 conn.execute(db.text(
                     "INSERT INTO memory_fts (content, memory_type, novel_id, source_id) "
                     "VALUES (:content, 'character', :nid, :sid)"
-                ), {"content": content, "nid": novel_id, "sid": c.id})
+                ), {"content": _cjk_tokenize(content), "nid": novel_id, "sid": c.id})
 
         # Index world settings
         ws_items = WorldSetting.query.filter_by(novel_id=novel_id).all()
@@ -92,7 +133,7 @@ def index_memory(novel_id):
                 conn.execute(db.text(
                     "INSERT INTO memory_fts (content, memory_type, novel_id, source_id) "
                     "VALUES (:content, 'world_setting', :nid, :sid)"
-                ), {"content": content, "nid": novel_id, "sid": ws.id})
+                ), {"content": _cjk_tokenize(content), "nid": novel_id, "sid": ws.id})
 
         # Index foreshadowing
         fs_items = Foreshadowing.query.filter_by(novel_id=novel_id).all()
@@ -102,16 +143,27 @@ def index_memory(novel_id):
                 conn.execute(db.text(
                     "INSERT INTO memory_fts (content, memory_type, novel_id, source_id) "
                     "VALUES (:content, 'foreshadowing', :nid, :sid)"
-                ), {"content": content, "nid": novel_id, "sid": fs.id})
+                ), {"content": _cjk_tokenize(content), "nid": novel_id, "sid": fs.id})
 
         conn.commit()
 
 
 def _sanitize_fts_query(query):
-    """Sanitize user input for FTS5 MATCH to prevent syntax errors."""
-    # Strip special FTS5 operators and wrap in quotes for safe phrase matching
-    clean = query.replace('"', '""').replace('*', '').replace('(', '').replace(')', '')
-    return '"' + clean + '"'
+    """Sanitize user input for FTS5 MATCH to prevent syntax errors.
+
+    配合 _cjk_tokenize：中文内容已按单字加空格索引，查询也先按字加空格，
+    再按空白拆成单字短语用 OR 连接 —— 任一字命中即可召回（中文逐字检索）。
+    英文/数字保留原词作为短语。
+    """
+    clean = query.replace('"', '""').replace('*', '').replace('(', '').replace(')', '').strip()
+    if not clean:
+        return '""'
+    # 中文按字拆开（与索引侧 _cjk_tokenize 一致），英文保持
+    tokenized = _cjk_tokenize(clean)
+    terms = [t for t in tokenized.split() if t.strip()]
+    if not terms:
+        return '""'
+    return " OR ".join('"' + t + '"' for t in terms)
 
 
 def search_memory(novel_id, query, memory_type=None, limit=10):
@@ -137,7 +189,7 @@ def search_memory(novel_id, query, memory_type=None, limit=10):
 
         rows = result.fetchall()
         return [{
-            "content": row[0],
+            "content": _cjk_detokenize(row[0]),
             "memoryType": row[1],
             "sourceId": row[2],
             "chapterNumber": row[3],
@@ -148,45 +200,19 @@ def search_memory(novel_id, query, memory_type=None, limit=10):
 def build_context_for_chapter(novel_id, chapter_number, query="", limit=10):
     """Build context for chapter generation using memory search.
 
-    Combines:
-    1. Recent chapter summaries (time-based)
-    2. FTS search results (relevance-based)
-    3. Character states
-    4. Active foreshadowing
+    只负责 FTS 语义检索（按本章大纲/相关性召回历史片段）。
+    近章摘要、活跃伏笔等结构化上下文已由 assemble_chapter_context +
+    build_writer_prompt 统一负责，此处不再重复注入，避免同一内容在
+    prompt 中出现两次。
     """
-    context_parts = []
-
-    # 1. Recent summaries (last 5 chapters)
-    recent_chapters = (Chapter.query
-                       .filter_by(novel_id=novel_id)
-                       .filter(Chapter.chapter_number < chapter_number)
-                       .order_by(Chapter.chapter_number.desc())
-                       .limit(5).all())
-    if recent_chapters:
-        summaries = []
-        for ch in reversed(recent_chapters):
-            cs = ChapterSummary.query.filter_by(chapter_id=ch.id).first()
-            if cs and cs.summary:
-                summaries.append(f"第{ch.chapter_number}章：{cs.summary}")
-        if summaries:
-            context_parts.append("【前情提要】\n" + "\n".join(summaries))
-
-    # 2. FTS search (if query provided)
-    if query:
-        results = search_memory(novel_id, query, limit=limit)
-        if results:
-            search_lines = [f"- {r['content'][:100]}" for r in results[:5]]
-            context_parts.append("【相关记忆】\n" + "\n".join(search_lines))
-
-    # 3. Active foreshadowing
-    fs_items = Foreshadowing.query.filter_by(novel_id=novel_id).filter(
-        Foreshadowing.status.in_(["open", "planned", "buried", "advancing", "reclaimable"])
-    ).all()
-    if fs_items:
-        fs_lines = [f"- {f.title or (f.description or '')[:50]}" for f in fs_items[:5]]
-        context_parts.append("【活跃伏笔】\n" + "\n".join(fs_lines))
-
-    return "\n\n".join(context_parts)
+    if not query:
+        return ""
+    results = search_memory(novel_id, query, limit=limit)
+    if not results:
+        return ""
+    # 直接列片段（外层 build_writer_prompt 已用 _section 加标题）
+    search_lines = [f"- {r['content'][:150]}" for r in results[:5]]
+    return "\n".join(search_lines)
 
 
 # ---------------------------------------------------------------------------

@@ -69,6 +69,7 @@ def generate_stream():
             "foreshadowing_items": ctx["foreshadowing_items"],
             "synopsis": ctx["synopsis"],
             "world_intro": ctx["world_intro"],
+            "genre": ctx["genre"],
             "outline_node_context": ctx["outline_node_context"],
         }
 

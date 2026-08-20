@@ -192,11 +192,16 @@ def assemble_chapter_context(novel_id, chapter_number, db, character_ids=None):
             merged = merged[:600] + "……（更早章节概要已截断）"
         earlier_merged = merged
 
+    # 待回收伏笔：注入所有"未回收/未放弃"状态的伏笔（open→planned→buried→advancing→reclaimable）
+    # 仅排除 resolved（已回收）和 abandoned（已放弃）
     foreshadowing_items = Foreshadowing.query.filter_by(
-        novel_id=novel_id, status="open"
+        novel_id=novel_id
+    ).filter(
+        Foreshadowing.status.in_(["open", "planned", "buried", "advancing", "reclaimable"])
     ).all()
     foreshadowing_data = [
-        {"description": f.description, "planted_chapter": f.planted_chapter}
+        {"description": f.description, "planted_chapter": f.planted_chapter,
+         "status": f.status, "title": f.title}
         for f in foreshadowing_items
     ]
 

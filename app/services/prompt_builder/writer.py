@@ -17,8 +17,7 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
                         characters=None, world_settings=None, summaries=None,
                         foreshadowing_items=None, synopsis="", world_intro="",
                         outline_node_context=None, causal_chain="", memory_context="",
-                        prev_ending="", earlier_summaries="",
-                        db=None):
+                        prev_ending="", earlier_summaries="", genre="", db=None):
     system_prompt = _load_system_prompt(db, "writer", (
         "你是一位专业的小说作家，擅长用生动的语言和细腻的描写创作引人入胜的故事。"
         "根据提供的创作指引，写出高质量的小说章节内容。严格遵守世界观设定和人物设定，"
@@ -41,6 +40,8 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
     blocks = []
     if novel_title:
         blocks.append(_section("小说名称", novel_title))
+    if genre:
+        blocks.append(_section("小说类型", genre))
     if synopsis:
         blocks.append(_section("小说简介", synopsis))
     if world_intro:
@@ -103,8 +104,16 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
         blocks.append(_section("更早章节概要（粗粒度记忆）", earlier_summaries))
 
     if foreshadowing_items:
-        fs_lines = [f"• {f['description']}" for f in foreshadowing_items]
-        blocks.append(_section("待回收伏笔（请在写作中自然融入）", "\n".join(fs_lines)))
+        fs_lines = []
+        for f in foreshadowing_items:
+            title = f.get("title") or ""
+            desc = f.get("description") or ""
+            status = f.get("status") or "open"
+            planted = f.get("planted_chapter")
+            label = f"[{title}] " if title else ""
+            planted_note = f"（第{planted}章埋）" if planted else ""
+            fs_lines.append(f"• {label}{desc}{planted_note} [{status}]")
+        blocks.append(_section("待回收伏笔（请在写作中自然融入，勿遗忘）", "\n".join(fs_lines)))
 
     if causal_chain:
         blocks.append(_section("因果链（前几章的因果关系，请延续逻辑）", causal_chain))
