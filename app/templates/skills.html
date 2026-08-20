@@ -33,8 +33,9 @@
     <!-- 说明卡片 -->
     <div class="card" style="margin-bottom:2rem; border-left:3px solid var(--accent-dim); background:var(--accent-ghost);">
         <p style="color:var(--text-dim); font-size:0.85rem; line-height:1.8; margin:0;">
-            技巧是可复用的写作指令片段，激活后会自动注入到 Writer Agent 的提示词中。
+            技巧是可复用的写作指令片段，激活后会自动注入到 Writer Agent 的提示词中（长篇与短篇均生效）。
             你可以在内置技巧的基础上创建自定义技巧，打造属于自己的写作风格。
+            「作者文风协议」由公开写作技法协议提炼（如 jiangnan.skill，CC BY-NC 4.0），默认不激活，按需开启。
         </p>
     </div>
 
@@ -80,6 +81,59 @@
         </div>
         {% endfor %}
     </div>
+
+    <!-- 作者文风协议 -->
+    {% if author_protocol_skills %}
+    <h2 style="font-family:var(--font-display); font-size:1.2rem; color:var(--text-bright); margin-bottom:0.4rem;">
+        🖋 作者文风协议 <span style="font-size:0.8rem; color:var(--text-dim); font-weight:400;">{{ author_protocol_skills|length }}</span>
+    </h2>
+    <p style="color:var(--text-dim); font-size:0.8rem; line-height:1.7; margin:0 0 1rem 0;">
+        由公开技法协议提炼的作者文风技巧，默认不激活。组合建议：只想要文味开「江南文风」；想要完整叙事质感加开「江南叙事」；写龙族同人再开「龙族专用补丁」。
+    </p>
+    <div class="skill-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:1rem; margin-bottom:2.5rem;">
+        {% for skill in author_protocol_skills %}
+        <div class="skill-card card" data-key="{{ skill.key }}" data-active="{{ 'true' if skill.active else 'false' }}"
+             style="padding:1.25rem; cursor:pointer; transition:all 0.2s; position:relative;
+                    {% if skill.active %}border-color:var(--accent-dim); box-shadow:0 0 12px var(--accent-glow);{% endif %}"
+             onclick="toggleSkill('{{ skill.key }}', this)">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:0.6rem;">
+                <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                    <span style="font-size:1.1rem;">🖋</span>
+                    <strong style="color:var(--text-bright); font-size:0.95rem;">{{ skill.name }}</strong>
+                    {% if skill.tag %}
+                    <span style="font-size:0.68rem; padding:0.1rem 0.4rem; border-radius:8px; background:var(--danger-bg); color:var(--danger); border:1px solid var(--danger);">{{ skill.tag }}</span>
+                    {% endif %}
+                </div>
+                <div class="skill-toggle" style="width:36px; height:20px; border-radius:10px; position:relative; flex-shrink:0;
+                     background:{% if skill.active %}var(--accent){% else %}var(--border){% endif %}; transition:background 0.2s;">
+                    <div style="width:16px; height:16px; border-radius:50%; background:#f0ebe0; position:absolute; top:2px;
+                         left:{% if skill.active %}18px{% else %}2px{% endif %}; transition:left 0.2s; box-shadow:var(--shadow-sm);"></div>
+                </div>
+            </div>
+            <div style="font-size:0.72rem; color:var(--accent-dim); margin-bottom:0.4rem;">
+                {{ skill.author }} · {{ skill.source }}
+            </div>
+            <p style="color:var(--text-dim); font-size:0.82rem; line-height:1.6; margin:0;">{{ skill.description }}</p>
+            <div class="skill-detail" style="display:none; margin-top:0.8rem; padding-top:0.8rem; border-top:1px solid var(--border);">
+                <div style="background:var(--bg); border-radius:var(--radius); padding:0.8rem; margin-bottom:0.5rem;">
+                    <label style="font-size:0.75rem; color:var(--accent-dim); display:block; margin-bottom:0.3rem;">提示词片段</label>
+                    <pre style="color:var(--text); font-size:0.78rem; font-family:var(--font-mono); white-space:pre-wrap; margin:0; line-height:1.6;">{{ skill.prompt }}</pre>
+                </div>
+                {% if skill.constraints %}
+                <div style="background:var(--danger-bg); border-radius:var(--radius); padding:0.8rem;">
+                    <label style="font-size:0.75rem; color:var(--danger); display:block; margin-bottom:0.3rem;">约束规则</label>
+                    <pre style="color:var(--text); font-size:0.78rem; font-family:var(--font-mono); white-space:pre-wrap; margin:0;">{{ skill.constraints }}</pre>
+                </div>
+                {% endif %}
+            </div>
+            <div style="text-align:right; margin-top:0.5rem;">
+                <span class="toggle-detail-btn" style="font-size:0.75rem; color:var(--text-faint); cursor:pointer;"
+                      onclick="event.stopPropagation(); toggleDetail(this)">展开详情 ▾</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
 
     <!-- 自定义技巧 -->
     <h2 style="font-family:var(--font-display); font-size:1.2rem; color:var(--text-bright); margin-bottom:1rem;">
