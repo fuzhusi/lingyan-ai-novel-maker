@@ -153,12 +153,13 @@ def delete_version(novel_id, chapter_number, version_id):
 @chapter_bp.route("/chapter/<int:chapter_number>/delete", methods=["POST"])
 def delete_chapter(novel_id, chapter_number):
     chapter = Chapter.query.filter_by(novel_id=novel_id, chapter_number=chapter_number).first_or_404()
-    # Delete associated reviews, versions, summary
-    from app.models import CriticReview, ChapterSummary
+    # Delete associated reviews, versions, summary, memory
+    from app.models import CriticReview, ChapterSummary, ChapterMemory
     for v in chapter.versions:
         CriticReview.query.filter_by(version_id=v.id).delete()
     ChapterVersion.query.filter_by(chapter_id=chapter.id).delete()
     ChapterSummary.query.filter_by(chapter_id=chapter.id).delete()
+    ChapterMemory.query.filter_by(chapter_id=chapter.id).delete()
     db.session.delete(chapter)
     db.session.commit()
     return redirect(url_for("chapter.chapter_list", novel_id=novel_id))

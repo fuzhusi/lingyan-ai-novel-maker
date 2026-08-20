@@ -27,7 +27,9 @@ class Chapter(db.Model):
     created_at = db.Column(db.String(20), default=now)
 
     novel = db.relationship("Novel", back_populates="chapters")
-    versions = db.relationship("ChapterVersion", back_populates="chapter", order_by="ChapterVersion.version_number")
+    # 删除章节时连带删除版本与评审（chapter_id/version_id 均非空，防 nullify IntegrityError）
+    versions = db.relationship("ChapterVersion", back_populates="chapter",
+                               order_by="ChapterVersion.version_number", cascade="all, delete-orphan")
     outline_node = db.relationship("OutlineNode", backref="linked_chapter", uselist=False)
 
     __table_args__ = (db.UniqueConstraint("novel_id", "chapter_number", name="uq_chapter_number"),)
@@ -46,7 +48,8 @@ class ChapterVersion(db.Model):
     created_at = db.Column(db.String(20), default=now)
 
     chapter = db.relationship("Chapter", back_populates="versions")
-    reviews = db.relationship("CriticReview", back_populates="version", lazy="dynamic")
+    reviews = db.relationship("CriticReview", back_populates="version", lazy="dynamic",
+                              cascade="all, delete-orphan")
 
     __table_args__ = (db.UniqueConstraint("chapter_id", "version_number", name="uq_version_number"),)
 

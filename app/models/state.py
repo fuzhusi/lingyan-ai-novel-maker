@@ -70,7 +70,9 @@ class ChapterMemory(db.Model):
     created_at = db.Column(db.String(20), default=now)
 
     novel = db.relationship("Novel", backref="chapter_memories")
-    chapter = db.relationship("Chapter", backref="memory")
+    # 删除章节时连带删除记忆（否则 flush 会尝试置 NULL 而 chapter_id 非空，触发 IntegrityError）
+    # cascade 配置在 backref（Chapter.memory 一对多方向）
+    chapter = db.relationship("Chapter", backref=db.backref("memory", cascade="all, delete-orphan"))
 
 
 class ChapterSummary(db.Model):
@@ -81,4 +83,5 @@ class ChapterSummary(db.Model):
     causal_chain_json = db.Column(db.Text, default="")  # cause/event/effect/decision
     generated_at = db.Column(db.String(20), default=now)
 
-    chapter = db.relationship("Chapter", backref="summary")
+    # 删除章节时连带删除摘要（chapter_id 非空，防 nullify IntegrityError）
+    chapter = db.relationship("Chapter", backref=db.backref("summary", cascade="all, delete-orphan"))
