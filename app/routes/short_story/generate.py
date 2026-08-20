@@ -317,6 +317,9 @@ def write_from_concept(story_id):
     cfg = get_model_config(agent_type="short_story")
     app = current_app._get_current_object()
     word_target = story.word_target or 10000
+    # 生成前捕获为纯文本：流式响应阶段请求 session 已销毁，
+    # generator 内再访问过期 ORM 实例属性会抛 DetachedInstanceError
+    concept = story.concept or ""
 
     def _single_round(messages, max_tokens):
         """单轮生成，流式返回文本片段（委托模块级实现）。"""
@@ -351,7 +354,8 @@ def write_from_concept(story_id):
                     with app.app_context():
                         s = db.session.get(ShortStory, story_id)
                         messages = build_node_prompt(s, node_list, idx, all_text)
-                    node_tokens = min(int(node.get("word_count", 1200)) * 2, 12000)
+                    # word_count 可能为 None/浮点串（旧数据/AI 输出），float() 容错
+                    node_tokens = min(int(float(node.get("word_count") or 1200)) * 2, 12000)
                     for token in _stream_ai_tokens(cfg, messages, node_tokens):
                         node_text += token
                         yield token
@@ -374,12 +378,14 @@ def write_from_concept(story_id):
                         s.content = all_text
                         db.session.commit()
 
-            # 全部完成（每节点已单独做过去AI处理，这里只收尾状态）
+            # 收尾：全部节点完成才置 done；有失败/未完成节点回退 concept_ready，
+            # 保持可从断点续写（避免空内容 + "已完成"的死状态）
             with app.app_context():
                 s = db.session.get(ShortStory, story_id)
                 if s:
                     s.content = all_text
-                    s.status = "done"
+                    pending = [n for n in node_list if n.get("status") != "done"]
+                    s.status = "concept_ready" if pending else "done"
                     db.session.commit()
             return
 
@@ -412,7 +418,7 @@ def write_from_concept(story_id):
                     "2. 构思中列出的每个情节点都必须写到，不得跳过\n"
                     "3. 直接接续前文写下去，不要重复已有内容，不要输出任何说明\n"
                     f"4. 还需要写约 {remaining} 字\n\n"
-                    f"【原始构思 — 必须严格遵守】\n{story.concept}"
+                    f"【原始构思 — 必须严格遵守】\n{concept}"
                 )},
                 {"role": "user", "content": (
                     f"【前文内容（最近部分）】\n{all_text[-4000:]}\n\n"
@@ -435,7 +441,7 @@ def write_from_concept(story_id):
                 {"role": "system", "content": (
                     "你是一位才华横溢的短篇小说作家。这篇小说即将完结。\n"
                     "请根据原始构思，为故事写一个完整的结尾，收束所有线索。\n\n"
-                    f"【原始构思】\n{story.concept}\n\n"
+                    f"【原始构思】\n{concept}\n\n"
                     "不要添加构思之外的新情节，专注于收尾。"
                 )},
                 {"role": "user", "content": (
@@ -666,6 +672,7 @@ def rewrite_selection(story_id):
 def generate_story(story_id):
     """直接生成短篇（设定模式/细心模式）"""
     story = ShortStory.query.get_or_404(story_id)
+    prev_status = story.status
     story.status = "generating"
     db.session.commit()
 
@@ -681,11 +688,17 @@ def generate_story(story_id):
     def generate():
         full_text = ""
         try:
-            for token in _stream_ai_tokens(cfg, messages, word_target * 2):
+            for token in _stream_ai_tokens(cfg, messages, min(word_target * 2, 16000)):
                 full_text += token
                 yield token
         except LLMError as e:
             yield f"\n[生成失败: {e}]"
+            # 失败时回退状态，避免永远卡在"生成中"
+            with app.app_context():
+                s = db.session.get(ShortStory, story_id)
+                if s and s.status == "generating":
+                    s.status = prev_status
+                    db.session.commit()
             return
         with app.app_context():
             s = db.session.get(ShortStory, story_id)
@@ -727,7 +740,7 @@ def rewrite_story(story_id):
     def generate():
         full_text = ""
         try:
-            for token in _stream_ai_tokens(cfg, messages, word_target * 2):
+            for token in _stream_ai_tokens(cfg, messages, min(word_target * 2, 16000)):
                 full_text += token
                 yield token
         except LLMError as e:
@@ -757,6 +770,7 @@ def generate_section(story_id):
     if not section:
         return jsonify({"error": f"未知段落类型: {section_type}"}), 400
 
+    prev_status = story.status
     story.status = "generating"
     db.session.commit()
 
@@ -815,11 +829,17 @@ def generate_section(story_id):
     def generate():
         full_text = ""
         try:
-            for token in _stream_ai_tokens(cfg, messages, target_words * 2):
+            for token in _stream_ai_tokens(cfg, messages, min(target_words * 2, 16000)):
                 full_text += token
                 yield token
         except LLMError as e:
             yield f"\n[生成失败: {e}]"
+            # 失败时回退状态，避免永远卡在"生成中"
+            with app.app_context():
+                s = db.session.get(ShortStory, story_id)
+                if s and s.status == "generating":
+                    s.status = prev_status
+                    db.session.commit()
             return
         full = deai_process(clean_ai_text(full_text))
         with app.app_context():

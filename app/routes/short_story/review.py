@@ -305,7 +305,8 @@ def _rewrite_by_nodes(story, nodes, done_nodes, critic_feedback, cfg, app, story
                 n.get("content", "") for n in front if n.get("content"))
             original_node = node.get("content", "")
             node_len = len(original_node)
-            target_len = max(node_len, int(node.get("word_count", 1200) * 0.8))
+            # word_count 可能为 None/浮点串（旧数据/AI 输出），float() 容错
+            target_len = max(node_len, int(float(node.get("word_count") or 1200) * 0.8))
 
             # 单节点重写提示词：评审意见 + 前文 + 节点原内容 + 节点大纲
             system = (
