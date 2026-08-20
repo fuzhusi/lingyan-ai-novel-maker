@@ -44,18 +44,38 @@ PROVIDER_DEFAULTS = {
 def fetch_models_from_provider(base_url: str, api_key: str, provider_type: str = "custom") -> list[dict]:
     """调用 GET /v1/models 拉取厂商可用模型列表。
 
+    对间歇性网络/SSL 错误（TLS 记录损坏 BAD_RECORD_MAC、连接抖动、超时）
+    自动重试最多 3 次（间隔 1 秒）；HTTP 状态错误（401 无效 key 等）
+    重试无意义，直接抛出。
+
     Returns:
         [{"id": "model-id", "owned_by": "provider"}, ...] 或抛出异常
     """
+    import time
+
     url = base_url.rstrip("/") + "/models"
     # Ollama 不需要 Bearer token
     headers = {}
     if api_key and provider_type != "ollama":
         headers["Authorization"] = f"Bearer {api_key}"
 
-    resp = httpx.get(url, headers=headers, timeout=30.0, verify=False)
-    resp.raise_for_status()
-    data = resp.json()
+    data = None
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = httpx.get(url, headers=headers, timeout=30.0, verify=False)
+            resp.raise_for_status()
+            data = resp.json()
+            break
+        except httpx.HTTPStatusError:
+            raise  # 响应类错误（401/403/404...）不重试
+        except Exception as e:
+            # 网络层异常（TransportError/SSL/超时/JSON截断）：短暂等待后重试
+            last_err = e
+            if attempt < 2:
+                time.sleep(1.0)
+    if data is None:
+        raise last_err
 
     # OpenAI 格式: {"data": [{"id": "...", "owned_by": "..."}]}
     if isinstance(data, dict) and "data" in data:

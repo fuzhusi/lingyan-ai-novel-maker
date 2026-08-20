@@ -246,6 +246,8 @@ function testProvider(pid, btn) {
 
 function fetchModels(pid, btn) {
     btn.disabled = true; btn.textContent = '拉取中...';
+    const card = btn.closest('.provider-card');
+    const result = card.querySelector('.test-result');
     fetch(`/settings/llm/provider/${pid}/fetch-models`, {method:'POST'})
         .then(r => r.json())
         .then(data => {
@@ -270,11 +272,12 @@ function fetchModels(pid, btn) {
                 }
                 html += '</div>';
                 list.innerHTML = html;
+                result.innerHTML = `<span style="color:var(--success)">✓ 已拉取 ${data.total} 个模型（新增 ${data.added} 个）</span>`;
             } else {
-                alert('拉取失败：' + (data.error || '未知错误'));
+                result.innerHTML = `<span style="color:var(--danger)">✗ 拉取失败：${escapeHtml(data.error || '未知错误')}</span>`;
             }
         })
-        .catch(e => { alert('拉取失败：' + e.message); })
+        .catch(e => { result.innerHTML = `<span style="color:var(--danger)">✗ 拉取失败：${escapeHtml(e.message)}</span>`; })
         .finally(() => { btn.disabled = false; btn.textContent = '📥 拉取模型'; });
 }
 
