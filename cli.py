@@ -44,6 +44,7 @@ from app.models import (
 )
 from app.routes.settings import AGENT_TYPES, get_model_config
 from app.routes.auth import DEFAULT_USERS
+from app.routes.llm_settings import PRESET_PROVIDERS, get_preset_by_type
 
 app = create_app()
 
@@ -875,22 +876,47 @@ def cmd_llm(args):
                 print(f"      api_key:  {_mask_key(p.api_key)}")
                 print(f"      模型: {ec}/{mc} 个已勾选")
 
+        elif action == "preset-list":
+            print("【常用厂商预设】（provider-add --preset <type> --api-key KEY 即用）")
+            for p in PRESET_PROVIDERS:
+                key_note = "无需 Key" if p.get("needs_key") is False else "需要 API Key"
+                print(f"  {p['type']:<12} {p['name']}")
+                print(f"  {'':<12}   {p['base_url'] or '(手动填写)'}  [{key_note}]")
+                if p.get("key_url"):
+                    print(f"  {'':<12}   获取 Key: {p['key_url']}")
+
         elif action == "provider-add":
-            name = (args.name or "").strip()
-            base_url = (args.base_url or "").strip()
+            preset = None
+            if args.preset:
+                preset = get_preset_by_type(args.preset)
+                if not preset:
+                    print(f"✗ 未知预设: {args.preset}")
+                    print("  可用: " + ", ".join(p["type"] for p in PRESET_PROVIDERS))
+                    return
+            name = (args.name or (preset["name"].replace("（", "(").split("(")[0] if preset else "")).strip()
+            base_url = (args.base_url or (preset["base_url"] if preset else "")).strip()
+            provider_type = args.provider_type or (preset["type"] if preset else "custom")
+            api_key = args.api_key
+            if preset and preset.get("needs_key") is False and not api_key:
+                api_key = "ollama"  # 占位：本地无需真实 key，但调用层要求非空
             if not name or not base_url:
-                print("✗ 需要 --name 和 --base-url")
+                print("✗ 需要 --name 和 --base-url（或用 --preset <预设类型> 自动填充）")
+                print("  预设列表: `llm preset-list`")
                 return
+            if not api_key and provider_type != "ollama":
+                print("⚠ 未设置 --api-key，厂商将无法调用（可稍后 provider-update 补充）")
             p = LLMProvider(
                 name=name,
-                provider_type=args.provider_type or "custom",
+                provider_type=provider_type,
                 base_url=base_url,
-                api_key=args.api_key or "",
+                api_key=api_key or "",
             )
             db.session.add(p)
             db.session.commit()
-            print(f"✓ 已添加厂商 #{p.id}: {name} ({p.provider_type})")
-            print(f"  用 `llm fetch-models --provider {p.id}` 拉取模型列表")
+            print(f"✓ 已添加厂商 #{p.id}: {name} ({provider_type})")
+            if preset and preset.get("key_url"):
+                print(f"  获取 Key: {preset['key_url']}")
+            print(f"  下一步: `llm fetch-models --provider {p.id}` 拉取模型，再 `llm model-toggle` 勾选")
 
         elif action == "provider-update":
             p = db.session.get(LLMProvider, args.provider)
@@ -1563,11 +1589,12 @@ def main():
     # ========== LLM 厂商与模型配置 ==========
     p_llm = subparsers.add_parser("llm", help="LLM 厂商/模型/Per-Agent 配置（对齐 Web /settings/llm）")
     p_llm.add_argument("action", choices=[
-        "provider-list", "provider-add", "provider-update", "provider-delete",
+        "preset-list", "provider-list", "provider-add", "provider-update", "provider-delete",
         "fetch-models", "model-list", "model-toggle", "model-toggle-all", "test",
         "agent-list", "agent-set", "agent-clear", "agent-param", "effective",
-    ], help="厂商: provider-list/add/update/delete · 模型: fetch-models/model-list/toggle/toggle-all/test · Agent: agent-list/set/clear/param/effective")
+    ], help="预设: preset-list · 厂商: provider-list/add/update/delete · 模型: fetch-models/model-list/toggle/toggle-all/test · Agent: agent-list/set/clear/param/effective")
     p_llm.add_argument("--provider", type=int, help="厂商 ID")
+    p_llm.add_argument("--preset", help="常用厂商预设类型（provider-add 用，如 deepseek/openai/moonshot/zhipu/qwen/siliconflow/volcengine/openrouter/groq/ollama）")
     p_llm.add_argument("--model", type=int, help="模型 ID（数据库主键）")
     p_llm.add_argument("--name", help="厂商/模型名")
     p_llm.add_argument("--base-url", dest="base_url", help="厂商 API 地址")

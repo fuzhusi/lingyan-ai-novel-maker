@@ -7,13 +7,46 @@ from app.services.llm import fetch_models_from_provider, test_provider_connectio
 llm_settings_bp = Blueprint("llm_settings", __name__)
 
 
+# ---- 常用厂商预设表（OpenAI 兼容协议，选预设填 key 即用）----
+
+PRESET_PROVIDERS = [
+    {"type": "deepseek", "name": "DeepSeek（深度求索）", "base_url": "https://api.deepseek.com",
+     "key_url": "https://platform.deepseek.com/api_keys", "hint": "国内直连，性价比高"},
+    {"type": "openai", "name": "OpenAI", "base_url": "https://api.openai.com/v1",
+     "key_url": "https://platform.openai.com/api-keys", "hint": "GPT 系列"},
+    {"type": "moonshot", "name": "月之暗面 Kimi", "base_url": "https://api.moonshot.cn/v1",
+     "key_url": "https://platform.moonshot.cn/console/api-keys", "hint": "长上下文"},
+    {"type": "zhipu", "name": "智谱 GLM", "base_url": "https://open.bigmodel.cn/api/paas/v4",
+     "key_url": "https://open.bigmodel.cn/usercenter/apikeys", "hint": "GLM 系列，有免费额度"},
+    {"type": "qwen", "name": "阿里通义千问", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+     "key_url": "https://bailian.console.aliyun.com/", "hint": "Qwen 系列"},
+    {"type": "siliconflow", "name": "硅基流动 SiliconFlow", "base_url": "https://api.siliconflow.cn/v1",
+     "key_url": "https://cloud.siliconflow.cn/account/ak", "hint": "聚合多厂商模型，含免费模型"},
+    {"type": "volcengine", "name": "火山方舟（豆包）", "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+     "key_url": "https://console.volcengine.com/ark", "hint": "豆包系列"},
+    {"type": "openrouter", "name": "OpenRouter", "base_url": "https://openrouter.ai/api/v1",
+     "key_url": "https://openrouter.ai/settings/keys", "hint": "聚合全球厂商模型，一个 key 用多家"},
+    {"type": "groq", "name": "Groq", "base_url": "https://api.groq.com/openai/v1",
+     "key_url": "https://console.groq.com/keys", "hint": "推理速度极快，有免费额度"},
+    {"type": "ollama", "name": "Ollama（本地）", "base_url": "http://127.0.0.1:11434/v1",
+     "key_url": "", "needs_key": False, "hint": "本地部署，无需 API Key"},
+    {"type": "custom", "name": "自定义（OpenAI 兼容）", "base_url": "",
+     "key_url": "", "hint": "手动填写全部字段"},
+]
+
+
+def get_preset_by_type(provider_type):
+    """按 provider_type 查预设（找不到返回 None）。"""
+    return next((p for p in PRESET_PROVIDERS if p["type"] == provider_type), None)
+
+
 # ---- 页面 ----
 
 @llm_settings_bp.route("/settings/llm")
 def llm_settings_page():
     """厂商模型配置页。"""
     providers = LLMProvider.query.order_by(LLMProvider.id).all()
-    return render_template("settings_llm.html", providers=providers)
+    return render_template("settings_llm.html", providers=providers, presets=PRESET_PROVIDERS)
 
 
 # ---- 厂商 CRUD ----
@@ -66,6 +99,12 @@ def delete_provider(pid):
 
 
 # ---- 拉取模型 ----
+
+@llm_settings_bp.route("/settings/llm/preset-providers")
+def preset_providers():
+    """返回常用厂商预设列表（供 CLI/外部工具查询）。"""
+    return jsonify({"ok": True, "presets": PRESET_PROVIDERS})
+
 
 @llm_settings_bp.route("/settings/llm/provider/<int:pid>/fetch-models", methods=["POST"])
 def fetch_models(pid):

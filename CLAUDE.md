@@ -140,6 +140,7 @@ app/
 
 ### 配置管理
 - **厂商配置：** `/settings/llm` 添加厂商（key/base_url）+ 勾选模型，配好即全局生效
+- **常用厂商预设：** 内置 11 个 OpenAI 兼容厂商预设（DeepSeek/OpenAI/Kimi/智谱/通义/硅基流动/火山方舟/OpenRouter/Groq/Ollama/自定义）--Web 弹窗「快速选择」或 CLI `provider-add --preset <type>`，填 key 即可拉模型使用；预设表在 `app/routes/llm_settings.py` 的 `PRESET_PROVIDERS`，含 base_url 与获取 key 的入口链接；Ollama 无需 key（自动填占位）
 - **自动默认：** 未显式配置的 Agent 自动使用已启用厂商的模型 —— 快速生成类（writer/outline/summary/short_story 等）优先匹配 flash/lite/mini 关键词，深度分析类（critic/audit/rewrite/editor 等）优先匹配 pro/max/plus 关键词，无匹配用第一个勾选模型
 - **Per-Agent 配置：** 16 种 Agent 可在 `/settings/` 显式指定厂商模型（`llm_model_{agent}`，格式 `provider_id:model_id`）及温度/Token
 - **Per-Novel 配置：** 通过 `Novel.model_override` (JSON) 覆盖
@@ -252,8 +253,11 @@ python cli.py setting list            # 查看配置（全局+Agent）
 python cli.py setting apply-recommended  # 应用推荐配置
 python cli.py setting clear-agent     # 清除所有 Agent 自定义配置（含 llm_model_*）
 # LLM 厂商与模型配置（对齐 Web /settings/llm）
+python cli.py llm preset-list                                   # 常用厂商预设表（11 个）
+python cli.py llm provider-add --preset moonshot --api-key KEY  # 按预设添加，填 key 即用
+python cli.py llm provider-add --preset ollama                  # 本地 Ollama 无需 key
 python cli.py llm provider-list                              # 厂商列表
-python cli.py llm provider-add --name X --base-url URL --api-key KEY --provider-type deepseek
+python cli.py llm provider-add --name X --base-url URL --api-key KEY --provider-type deepseek  # 全手动
 python cli.py llm provider-update --provider 1 --enabled false
 python cli.py llm provider-delete --provider 1
 python cli.py llm fetch-models --provider 1                 # 拉取模型列表
