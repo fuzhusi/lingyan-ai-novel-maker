@@ -1,0 +1,323 @@
+{% extends "base.html" %}
+{% block title %}数据面板 — {{ novel.title }}{% endblock %}
+
+{% block nav %}
+<a href="/novel/{{ novel.id }}/">&larr; 章节列表</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/characters">人物</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/world-settings">世界观</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/outline">大纲</a>
+<span class="sep">|</span>
+<span>数据面板</span>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- 顶部统计卡片 (P1-2 + P2-5) -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:0.75rem">
+        <div class="card" style="text-align:center;padding:1.25rem">
+            <div style="font-size:2rem;font-weight:700;color:var(--accent);font-family:var(--font-mono)">{{ "{:,}".format(total_words) }}</div>
+            <div style="font-size:0.82rem;color:var(--text-dim);margin-top:0.25rem">总字数</div>
+        </div>
+        <div class="card" style="text-align:center;padding:1.25rem">
+            <div style="font-size:2rem;font-weight:700;color:var(--text-bright);font-family:var(--font-mono)">{{ chapter_stats|length }}<span style="font-size:0.85rem;color:var(--text-faint)">/{{ target_chapters }}</span></div>
+            <div style="font-size:0.82rem;color:var(--text-dim);margin-top:0.25rem">章节进度</div>
+        </div>
+        <div class="card" style="text-align:center;padding:1.25rem">
+            <div style="font-size:2rem;font-weight:700;color:var(--success);font-family:var(--font-mono)">{{ completion_pct }}<span style="font-size:0.85rem">%</span></div>
+            <div style="font-size:0.82rem;color:var(--text-dim);margin-top:0.25rem">完成度</div>
+        </div>
+        <div class="card" style="text-align:center;padding:1.25rem">
+            <div style="font-size:2rem;font-weight:700;color:#fbbf24;font-family:var(--font-mono)">🔥 {{ streak }}</div>
+            <div style="font-size:0.82rem;color:var(--text-dim);margin-top:0.25rem">连续创作</div>
+        </div>
+        <div class="card" style="text-align:center;padding:1.25rem">
+            <div style="font-size:2rem;font-weight:700;color:#06b6d4;font-family:var(--font-mono)">{{ "{:,}".format(week_chars) }}</div>
+            <div style="font-size:0.82rem;color:var(--text-dim);margin-top:0.25rem">本周字数</div>
+        </div>
+        <div class="card" style="text-align:center;padding:1.25rem">
+            <div style="font-size:2rem;font-weight:700;color:#8b5cf6;font-family:var(--font-mono)">{{ "{:,}".format(avg_chars) }}</div>
+            <div style="font-size:0.82rem;color:var(--text-dim);margin-top:0.25rem">平均每章</div>
+        </div>
+    </div>
+
+    <!-- 进度条 + 警告 -->
+    {% if chapter_stats %}
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.6rem">
+            <h2 style="margin:0">总体进度</h2>
+            <span style="font-size:0.85rem;color:var(--text-dim)">还剩 {{ remaining_chapters }} 章到达目标</span>
+        </div>
+        <div style="height:24px;background:var(--bg);border-radius:12px;overflow:hidden;position:relative">
+            <div style="height:100%;width:{{ progress_pct }}%;background:linear-gradient(90deg,var(--accent-dim),var(--accent));border-radius:12px;transition:width 0.5s ease;display:flex;align-items:center;justify-content:flex-end;padding-right:0.5rem">
+                <span style="font-size:0.78rem;color:var(--bg);font-weight:600">{{ progress_pct }}%</span>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 超时伏笔警告 -->
+    {% if foreshadowing_timeout > 0 %}
+    <div class="card" style="border-color:var(--danger)">
+        <h2 style="color:var(--danger)">⚠ 超时伏笔 ({{ foreshadowing_timeout }})</h2>
+        <p style="color:var(--text-dim);font-size:0.85rem;margin-bottom:0.6rem">以下伏笔埋设已久，建议在近期章节推进或回收</p>
+        <div style="display:flex;flex-direction:column;gap:0.4rem">
+            {% for f in timeout_items %}
+            <div style="padding:0.5rem 0.75rem;background:var(--bg);border-left:3px solid var(--danger);border-radius:0 4px 4px 0">
+                <strong>{{ f.title }}</strong>
+                <span style="color:var(--text-faint);font-size:0.78rem;margin-left:0.5rem">第{{ f.planted_chapter or '?' }}章埋设 · 超时阈值 {{ f.timeout_threshold }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Chapter Progress Bar -->
+    {% if chapter_stats %}
+    <div class="card">
+        <h2>章节字数分布</h2>
+        {% set max_words = chapter_stats|map(attribute='word_count')|max %}
+        {% if max_words > 0 %}
+        <div style="display:flex;flex-direction:column;gap:0.35rem;margin-top:0.75rem">
+            {% for cs in chapter_stats %}
+            <div style="display:flex;align-items:center;gap:0.75rem">
+                <span style="min-width:3.5rem;font-size:0.78rem;color:var(--text-dim);text-align:right;font-family:var(--font-mono)">
+                    第{{ cs.chapter.chapter_number }}章
+                </span>
+                <div style="flex:1;height:20px;background:var(--bg);border-radius:3px;overflow:hidden;position:relative">
+                    <div style="height:100%;width:{{ (cs.word_count / max_words * 100)|int }}%;background:{% if cs.approved %}var(--success){% else %}var(--accent-dim){% endif %};border-radius:3px;transition:width 0.5s var(--ease)"></div>
+                </div>
+                <span style="min-width:4rem;font-size:0.75rem;color:var(--text-faint);font-family:var(--font-mono)">
+                    {{ "{:,}".format(cs.word_count) }}字
+                </span>
+                {% if cs.approved %}
+                <span style="font-size:0.7rem;color:var(--success)">&#x2713;</span>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty" style="margin-top:0.5rem">尚无章节内容</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- 字数趋势线 (P2-5) -->
+    {% if char_trend|length >= 3 %}
+    <div class="card">
+        <h2>字数趋势</h2>
+        <div style="margin-top:0.75rem;position:relative;height:120px">
+            {% set max_trend = char_trend|map(attribute='chars')|max %}
+            {% set points = [] %}
+            {% for ct in char_trend %}
+                {% set x = (loop.index0 / (char_trend|length - 1) * 100)|round(1) %}
+                {% set y = (100 - (ct.chars / max_trend * 100))|round(1) %}
+                {% set _ = points.append(x|string + ',' + y|string) %}
+            {% endfor %}
+            <svg width="100%" height="120" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;top:0;left:0">
+                <polyline points="{{ points|join(' ') }}" fill="none" stroke="var(--accent)" stroke-width="0.5" vector-effect="non-scaling-stroke"/>
+                {% for ct in char_trend %}
+                    {% set x = (loop.index0 / (char_trend|length - 1) * 100)|round(1) %}
+                    {% set y = (100 - (ct.chars / max_trend * 100))|round(1) %}
+                    <circle cx="{{ x }}" cy="{{ y }}" r="0.8" fill="var(--accent)"/>
+                {% endfor %}
+            </svg>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-faint);margin-top:0.4rem">
+            <span>第1章</span>
+            <span>第{{ char_trend|length }}章</span>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Chapter Detail Table -->
+    {% if chapter_stats %}
+    <div class="card">
+        <h2>章节详情</h2>
+        <div style="overflow-x:auto;margin-top:0.75rem">
+            <table style="width:100%;border-collapse:collapse;font-size:0.88rem">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--border)">
+                        <th style="text-align:left;padding:0.5rem 0;color:var(--text-dim)">章节</th>
+                        <th style="text-align:left;padding:0.5rem 0;color:var(--text-dim)">标题</th>
+                        <th style="text-align:center;padding:0.5rem 0;color:var(--text-dim)">版本数</th>
+                        <th style="text-align:center;padding:0.5rem 0;color:var(--text-dim)">最新版</th>
+                        <th style="text-align:right;padding:0.5rem 0;color:var(--text-dim)">字数</th>
+                        <th style="text-align:center;padding:0.5rem 0;color:var(--text-dim)">状态</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cs in chapter_stats %}
+                    <tr style="border-bottom:1px solid var(--border)">
+                        <td style="padding:0.5rem 0">
+                            <a href="/novel/{{ novel.id }}/chapter/{{ cs.chapter.chapter_number }}/write" style="color:var(--accent);font-family:var(--font-mono);font-size:0.82rem">
+                                第{{ cs.chapter.chapter_number }}章
+                            </a>
+                        </td>
+                        <td style="padding:0.5rem 0;color:var(--text-bright)">{{ cs.chapter.title or '无标题' }}</td>
+                        <td style="padding:0.5rem 0;text-align:center;font-family:var(--font-mono);font-size:0.82rem">{{ cs.version_count }}</td>
+                        <td style="padding:0.5rem 0;text-align:center;font-family:var(--font-mono);font-size:0.82rem">V{{ cs.latest_version }}</td>
+                        <td style="padding:0.5rem 0;text-align:right;font-family:var(--font-mono);font-size:0.82rem">{{ "{:,}".format(cs.word_count) }}</td>
+                        <td style="padding:0.5rem 0;text-align:center">
+                            {% if cs.approved %}
+                            <span style="color:var(--success);font-size:0.78rem;font-weight:600">已批准</span>
+                            {% elif cs.version_count > 0 %}
+                            <span style="color:var(--warning);font-size:0.78rem">待审</span>
+                            {% else %}
+                            <span style="color:var(--text-faint);font-size:0.78rem">未写</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Knowledge Base Summary -->
+    <div class="card">
+        <h2>知识库概览</h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:0.75rem;font-size:0.9rem">
+            <div>
+                <div style="color:var(--text-dim);margin-bottom:0.25rem">人物设定</div>
+                <div style="font-size:1.5rem;font-weight:700;color:var(--text-bright)">{{ character_count }}</div>
+            </div>
+            <div>
+                <div style="color:var(--text-dim);margin-bottom:0.25rem">世界观条目</div>
+                <div style="font-size:1.5rem;font-weight:700;color:var(--text-bright)">{{ world_setting_count }}</div>
+            </div>
+            <div>
+                <div style="color:var(--text-dim);margin-bottom:0.25rem">大纲节点</div>
+                <div style="font-size:1.5rem;font-weight:700;color:var(--text-bright)">{{ outline_node_count }}</div>
+            </div>
+            <div>
+                <div style="color:var(--text-dim);margin-bottom:0.25rem">伏笔 ({{ foreshadowing_open }} 待回收)</div>
+                <div style="font-size:1.5rem;font-weight:700;color:var(--text-bright)">{{ foreshadowing_total }}</div>
+            </div>
+            <div>
+                <div style="color:var(--text-dim);margin-bottom:0.25rem">已生成摘要</div>
+                <div style="font-size:1.5rem;font-weight:700;color:var(--text-bright)">{{ summary_count }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Full Book Optimizer -->
+    <div class="card">
+        <h2>全书优化</h2>
+        <p style="color:var(--text-dim);font-size:0.85rem;margin-bottom:0.75rem">对全书进行质量诊断。</p>
+        <button id="btn-diagnose" class="btn-primary btn-sm" style="margin-bottom:0.5rem">全书诊断</button>
+        <div id="diagnose-result" style="display:none">
+            <div id="diagnose-summary" style="margin-bottom:0.5rem"></div>
+            <div id="diagnose-detail" style="max-height:300px;overflow-y:auto;font-size:0.82rem"></div>
+        </div>
+    </div>
+
+    <!-- Causal Chain -->
+    <div class="card">
+        <h2>因果链</h2>
+        <button id="btn-load-chain" class="btn-secondary btn-sm" style="margin-bottom:0.5rem">加载因果链</button>
+        <div id="chain-list" style="max-height:400px;overflow-y:auto;font-size:0.85rem"></div>
+    </div>
+
+    <!-- Temporal Truths -->
+    <div class="card">
+        <h2>时间真相库</h2>
+        <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem">
+            <button id="btn-extract-truths" class="btn-secondary btn-sm">AI 提取最新章事实</button>
+            <button id="btn-load-truths" class="btn-secondary btn-sm">查看全部</button>
+        </div>
+        <div id="truth-list" style="max-height:300px;overflow-y:auto;font-size:0.82rem"></div>
+    </div>
+
+    <!-- Export -->
+    <div class="card">
+        <h2>导出</h2>
+        <div style="display:flex;gap:0.75rem;margin-top:0.5rem">
+            <a href="/novel/{{ novel.id }}/export/txt" class="btn btn-edit">导出 TXT</a>
+            <a href="/novel/{{ novel.id }}/export/docx" class="btn btn-primary">导出 DOCX</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const novelId = {{ novel.id }};
+
+    document.getElementById('btn-diagnose').addEventListener('click', async function() {
+        this.disabled = true;
+        this.textContent = '诊断中...';
+        document.getElementById('diagnose-result').style.display = 'block';
+        try {
+            const resp = await fetch(`/api/novels/${novelId}/optimize/diagnose`, {method: 'POST'});
+            const data = await resp.json();
+            const color = data.average_score >= 8 ? 'var(--success)' : data.average_score >= 6 ? 'var(--accent)' : 'var(--danger)';
+            document.getElementById('diagnose-summary').innerHTML =
+                `<span style="color:${color};font-weight:700">${data.average_score}/10</span> | ${data.total_issues} 个问题 | ${data.high_issues} 个高优先级`;
+            let html = '';
+            for (const ch of (data.chapters || [])) {
+                if (ch.issues && ch.issues.length) {
+                    html += `<div style="margin-bottom:0.4rem;padding:0.4rem;background:var(--bg);border-radius:6px">`;
+                    html += `<div style="font-weight:600">第${ch.chapter_number}章 ${ch.title||''} <span style="color:var(--text-dim);font-weight:400">${ch.grade} ${ch.audit_score}/10</span></div>`;
+                    for (const issue of ch.issues.slice(0, 3)) {
+                        html += `<div style="font-size:0.78rem;color:var(--accent);margin-left:0.5rem">[${issue.dimension}] ${issue.issue}</div>`;
+                    }
+                    html += `</div>`;
+                }
+            }
+            document.getElementById('diagnose-detail').innerHTML = html || '<div style="color:var(--success)">无问题</div>';
+        } catch(e) {
+            document.getElementById('diagnose-summary').textContent = '失败: ' + e.message;
+        }
+        this.disabled = false;
+        this.textContent = '全书诊断';
+    });
+
+    document.getElementById('btn-load-chain').addEventListener('click', async function() {
+        const resp = await fetch(`/api/novels/${novelId}/causal-chain/full`);
+        const chain = await resp.json();
+        const list = document.getElementById('chain-list');
+        if (!chain.length) { list.innerHTML = '<div style="color:var(--text-faint)">暂无数据</div>'; return; }
+        let html = '';
+        for (const c of chain) {
+            html += `<div style="margin-bottom:0.5rem;padding:0.5rem;background:var(--bg);border-radius:6px;border-left:3px solid var(--accent-dim)">`;
+            html += `<div style="font-weight:600">第${c.chapter_number}章 ${c.title||''}</div>`;
+            if (c.cause) html += `<div style="font-size:0.82rem"><span style="color:var(--accent)">起因：</span>${c.cause}</div>`;
+            if (c.event) html += `<div style="font-size:0.82rem"><span style="color:var(--text-bright)">经过：</span>${c.event}</div>`;
+            if (c.effect) html += `<div style="font-size:0.82rem"><span style="color:var(--success)">结果：</span>${c.effect}</div>`;
+            if (c.decision) html += `<div style="font-size:0.82rem"><span style="color:#8b5cf6">决策：</span>${c.decision}</div>`;
+            html += `</div>`;
+        }
+        list.innerHTML = html;
+    });
+
+    document.getElementById('btn-load-truths').addEventListener('click', async function() {
+        const resp = await fetch(`/api/novels/${novelId}/truths`);
+        const truths = await resp.json();
+        const list = document.getElementById('truth-list');
+        if (!truths.length) { list.innerHTML = '<div style="color:var(--text-faint)">暂无数据</div>'; return; }
+        let html = '';
+        for (const t of truths) {
+            const to = t.to_chapter ? `→第${t.to_chapter}章` : '(持续中)';
+            html += `<div style="padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.82rem">`;
+            html += `<span style="font-weight:600">${t.subject}</span> <span style="color:var(--text-dim)">${t.property}=</span><span style="color:var(--accent)">${t.value}</span> <span style="color:var(--text-faint);font-size:0.75rem">(第${t.from_chapter}章${to})</span>`;
+            html += `</div>`;
+        }
+        list.innerHTML = html;
+    });
+
+    document.getElementById('btn-extract-truths').addEventListener('click', async function() {
+        this.disabled = true; this.textContent = '提取中...';
+        const fd = new FormData();
+        fd.append('chapter_number', {{ chapter_stats[-1].chapter_number if chapter_stats else 0 }});
+        await fetch(`/api/novels/${novelId}/truths/extract`, {method: 'POST', body: fd});
+        document.getElementById('btn-load-truths').click();
+        this.disabled = false; this.textContent = 'AI 提取最新章事实';
+    });
+})();
+</script>
+{% endblock %}

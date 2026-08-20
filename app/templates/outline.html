@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block title %}大纲树 — {{ novel.title }}{% endblock %}
+
+{% block nav %}
+<a href="/novel/{{ novel.id }}/">&larr; 章节列表</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/characters">人物</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/world-settings">世界观</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/foreshadowing">伏笔</a>
+<span class="sep">|</span>
+<span>大纲</span>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="card">
+        <div class="card-header" id="create-toggle">
+            <h2>+ 添加节点</h2>
+        </div>
+        <form method="POST" action="/novel/{{ novel.id }}/outline/create" class="form-stack" id="create-form">
+            <div class="form-inline-row">
+                <div class="form-row" style="flex:1">
+                    <label>父节点（留空为根节点）</label>
+                    <select name="parent_id">
+                        <option value="">（根节点）</option>
+                        {% for n in nodes %}
+                        <option value="{{ n.id }}">
+                            {{ n.node_type }}: {{ n.title }}
+                            {% if n.node_type == 'volume' %}{% for child in nodes %}{% if child.parent_id == n.id %}  &rarr; {{ child.node_type }}: {{ child.title }}{% endif %}{% endfor %}{% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-row" style="flex:1">
+                    <label>类型</label>
+                    <select name="node_type">
+                        <option value="volume">卷 — 组织章节的大分组</option>
+                        <option value="chapter" selected>章 — 对应一个实际章节</option>
+                        <option value="scene">场景 — 章内的分幕/场景</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <label>标题 <span class="required">*</span></label>
+                <input type="text" name="title" required placeholder="如：第1章 灵气初现">
+            </div>
+            <div class="form-row">
+                <label>摘要（用于生成时注入 prompt）</label>
+                <textarea name="summary" rows="4" placeholder="这一章/卷/场景要发生什么...&#10;&#10;提示：chapter/scene 节点的摘要会在生成章节正文时自动作为【大纲树规划】注入 prompt。"></textarea>
+            </div>
+            <button type="submit">添加节点</button>
+        </form>
+    </div>
+
+    <h3>大纲树 <span class="count-badge">{{ nodes|length }}</span></h3>
+    <div class="outline-legend">
+        <span class="legend-item"><span class="outline-type type-volume">卷</span> 分组</span>
+        <span class="legend-item"><span class="outline-type type-chapter">章</span> 可创建章节</span>
+        <span class="legend-item"><span class="outline-type type-scene">场景</span> 分幕指引</span>
+        <span class="legend-item"><span class="status-tag linked">已有章节</span></span>
+        <span class="legend-item"><span class="status-tag unlinked">未关联</span></span>
+    </div>
+
+    {% if nodes %}
+    <div class="outline-tree">
+        {% for n in nodes %}
+            {% if n.parent_id is none %}
+                {{ render_node(n, nodes, 0, novel, node_chapter_map)|safe }}
+            {% endif %}
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <p class="empty-desc">还没有大纲节点。建议先创建「卷」&rarr;「章」&rarr;「场景」三层结构，然后从章节点一键创建写作章节。</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% macro render_node(node, all_nodes, depth, novel, node_chapter_map) %}
+{% set linked_ch = node_chapter_map.get(node.id) %}
+<div class="outline-node depth-{{ depth }}">
+    <div class="outline-item">
+        <span class="outline-type type-{{ node.node_type }}">{{ node.node_type }}</span>
+        <span class="outline-title">{{ node.title }}</span>
+        {% if node.node_type == 'chapter' %}
+            {% if linked_ch %}
+            <a href="/novel/{{ novel.id }}/chapter/{{ linked_ch.chapter_number }}/write"
+               class="btn-sm status-btn-linked" title="进入写作">第{{ linked_ch.chapter_number }}章 &#x2713;</a>
+            {% else %}
+            <form method="POST" action="/novel/{{ novel.id }}/outline/{{ node.id }}/create-chapter"
+                  style="display:inline">
+                <button type="submit" class="btn-sm status-btn-create" title="从此节点创建章节">创建章节</button>
+            </form>
+            {% endif %}
+        {% endif %}
+        <div class="outline-actions">
+            <button class="btn-sm" onclick="document.getElementById('edit-on-{{ node.id }}').style.display='block'">编辑</button>
+            <form method="POST" action="/novel/{{ novel.id }}/outline/{{ node.id }}/delete"
+                  onsubmit="return confirm('确定删除节点 ' + {{ node.title|tojson }} + ' 及其所有子节点？')" style="display:inline">
+                <button type="submit" class="btn-sm btn-danger">删除</button>
+            </form>
+        </div>
+    </div>
+    {% if node.summary %}
+    <div class="outline-summary">{{ node.summary }}</div>
+    {% endif %}
+
+    {% if linked_ch %}
+    <div class="outline-linked-info">
+        &#x1F4C4; <a href="/novel/{{ novel.id }}/chapter/{{ linked_ch.chapter_number }}/write">
+            第{{ linked_ch.chapter_number }}章：{{ linked_ch.title or '无标题' }}
+        </a>
+        <span class="meta">{{ linked_ch.versions|length }} 个版本</span>
+    </div>
+    {% endif %}
+
+    <div id="edit-on-{{ node.id }}" style="display:none;margin:0.5rem 0;padding:0.85rem;background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius)">
+        <form method="POST" action="/novel/{{ novel.id }}/outline/{{ node.id }}/edit" class="form-stack">
+            <div class="form-inline-row">
+                <select name="node_type" style="flex:1">
+                    <option value="volume" {% if node.node_type == 'volume' %}selected{% endif %}>卷</option>
+                    <option value="chapter" {% if node.node_type == 'chapter' %}selected{% endif %}>章</option>
+                    <option value="scene" {% if node.node_type == 'scene' %}selected{% endif %}>场景</option>
+                </select>
+                <input type="text" name="title" value="{{ node.title }}" style="flex:2" required>
+            </div>
+            <textarea name="summary" rows="3">{{ node.summary }}</textarea>
+            <button type="submit" class="btn-sm">保存</button>
+        </form>
+    </div>
+
+    {% for child in all_nodes %}
+        {% if child.parent_id == node.id %}
+            {{ render_node(child, all_nodes, depth + 1, novel, node_chapter_map)|safe }}
+        {% endif %}
+    {% endfor %}
+</div>
+{% endmacro %}
+
+{% block scripts %}
+<style>
+.outline-tree { display:flex;flex-direction:column;gap:0.1rem }
+.outline-node { }
+.outline-node.depth-0 { }
+.outline-node.depth-1 { padding-left:2.5rem }
+.outline-node.depth-2 { padding-left:5rem }
+.outline-node.depth-3 { padding-left:7.5rem }
+.outline-item { display:flex;align-items:center;gap:0.5rem;padding:0.55rem 0.8rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius) }
+.outline-item:hover { border-color:var(--accent-dim) }
+.outline-type { font-size:0.65rem;padding:0.1rem 0.45rem;border-radius:var(--radius-sm);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;white-space:nowrap }
+.type-volume { background:#3d2a5c;color:#b9a0e0 }
+.type-chapter { background:#1d3d2a;color:#80d0a0 }
+.type-scene { background:#1d3040;color:#90b8d0 }
+.outline-title { flex:1;font-weight:600;color:var(--text-bright);font-size:0.9rem }
+.outline-summary { font-size:0.82rem;color:var(--text-dim);padding:0.15rem 2.5rem 0.4rem;line-height:1.5 }
+.outline-actions { display:flex;gap:0.3rem;flex-shrink:0 }
+.outline-legend { display:flex;gap:1.2rem;flex-wrap:wrap;margin-bottom:1rem;font-size:0.8rem;color:var(--text-dim) }
+.legend-item { display:flex;align-items:center;gap:0.35rem }
+.status-tag { font-size:0.7rem;padding:0.08rem 0.45rem;border-radius:var(--radius-sm);font-weight:600 }
+.status-tag.linked { background:#1d3d2a;color:#80d0a0 }
+.status-tag.unlinked { background:var(--surface-alt);color:var(--text-dim) }
+.status-btn-linked { background:#2a4a3a;font-size:0.72rem;padding:0.18rem 0.55rem;text-decoration:none;color:#80d0a0!important;white-space:nowrap;border-radius:var(--radius-sm) }
+.status-btn-linked:hover { background:#3a5a4a }
+.status-btn-create { background:#3a5a2a;font-size:0.72rem;padding:0.18rem 0.55rem;white-space:nowrap;border-radius:var(--radius-sm) }
+.status-btn-create:hover { background:#4a6a3a }
+.outline-linked-info { font-size:0.78rem;color:var(--success);padding:0.1rem 2.5rem 0.25rem }
+.outline-linked-info a { color:var(--success);text-decoration:none }
+.outline-linked-info a:hover { text-decoration:underline }
+.outline-linked-info .meta { color:var(--text-faint);margin-left:0.5rem }
+</style>
+<script>
+document.getElementById('create-toggle').addEventListener('click', function() {
+    const form = document.getElementById('create-form');
+    form.style.display = form.style.display === 'none' ? 'block' : 'none';
+});
+</script>
+{% endblock %}

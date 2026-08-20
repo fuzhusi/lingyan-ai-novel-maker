@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}伏笔管理 — {{ novel.title }}{% endblock %}
+
+{% block nav %}
+<a href="/novel/{{ novel.id }}/">&larr; 章节列表</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/characters">人物</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/world-settings">世界观</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/outline">大纲</a>
+<span class="sep">|</span>
+<span>伏笔</span>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="card">
+        <h2>添加伏笔</h2>
+        <form method="POST" action="/novel/{{ novel.id }}/foreshadowing/create" class="form-stack">
+            <div class="form-row">
+                <label>描述 <span class="required">*</span></label>
+                <textarea name="description" rows="3" required
+                    placeholder="伏笔内容，如：主角手中的旧怀表其实封印着上古神力..."></textarea>
+            </div>
+            <div class="form-inline-row">
+                <div class="form-row" style="flex:1">
+                    <label>埋入章节</label>
+                    <input type="number" name="planted_chapter" placeholder="章节号" min="1">
+                </div>
+                <div class="form-row" style="flex:1">
+                    <label>计划回收章节</label>
+                    <input type="number" name="resolve_chapter" placeholder="章节号" min="1">
+                </div>
+            </div>
+            <button type="submit">添加伏笔</button>
+        </form>
+    </div>
+
+    <h3>伏笔列表 <span class="count-badge">{{ items|length }}</span></h3>
+
+    {% set open_items = items|selectattr('status', 'equalto', 'open')|list %}
+    {% set resolved_items = items|selectattr('status', 'equalto', 'resolved')|list %}
+
+    {% if open_items %}
+    <h4 style="color:var(--accent);margin-top:0.5rem">&#x25C9; 待回收 ({{ open_items|length }})</h4>
+    <div class="card-list">
+        {% for f in open_items %}
+        <div class="card fs-open">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                <div style="flex:1">
+                    <div style="white-space:pre-wrap;margin-bottom:0.6rem;font-size:0.95rem">{{ f.description }}</div>
+                    <div class="meta-info">
+                        {% if f.planted_chapter %}埋于第 {{ f.planted_chapter }} 章{% endif %}
+                        {% if f.resolve_chapter %} &middot; 计划第 {{ f.resolve_chapter }} 章回收{% endif %}
+                        &middot; 创建于 {{ f.created_at[:10] }}
+                    </div>
+                </div>
+                <div style="display:flex;gap:0.3rem;flex-shrink:0;margin-left:1rem;flex-wrap:wrap;justify-content:flex-end">
+                    <form method="POST" action="/novel/{{ novel.id }}/foreshadowing/{{ f.id }}/edit" style="display:inline">
+                        <input type="hidden" name="description" value="{{ f.description }}">
+                        <input type="hidden" name="status" value="resolved">
+                        <button type="submit" class="btn-sm" style="background:var(--success)">标记已回收</button>
+                    </form>
+                    <button class="btn-sm" onclick="document.getElementById('edit-fs-{{ f.id }}').style.display='block'">编辑</button>
+                    <form method="POST" action="/novel/{{ novel.id }}/foreshadowing/{{ f.id }}/delete"
+                          onsubmit="return confirm('确定删除此伏笔？')" style="display:inline">
+                        <button type="submit" class="btn-sm btn-danger">删除</button>
+                    </form>
+                </div>
+            </div>
+            <div id="edit-fs-{{ f.id }}" style="display:none;margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--border)">
+                <form method="POST" action="/novel/{{ novel.id }}/foreshadowing/{{ f.id }}/edit" class="form-stack">
+                    <textarea name="description" rows="3">{{ f.description }}</textarea>
+                    <div class="form-inline-row">
+                        <input type="number" name="planted_chapter" value="{{ f.planted_chapter or '' }}" placeholder="埋入章节" style="flex:1">
+                        <input type="number" name="resolve_chapter" value="{{ f.resolve_chapter or '' }}" placeholder="回收章节" style="flex:1">
+                    </div>
+                    <select name="status">
+                        <option value="open" selected>待回收</option>
+                        <option value="resolved">已回收</option>
+                    </select>
+                    <button type="submit" class="btn-sm">保存</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if resolved_items %}
+    <h4 style="color:var(--success);margin-top:0.5rem">&#x25C9; 已回收 ({{ resolved_items|length }})</h4>
+    <div class="card-list">
+        {% for f in resolved_items %}
+        <div class="card fs-resolved">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                <div style="flex:1">
+                    <div style="white-space:pre-wrap;margin-bottom:0.6rem">{{ f.description }}</div>
+                    <div class="meta-info">
+                        {% if f.planted_chapter %}埋于第 {{ f.planted_chapter }} 章{% endif %}
+                        {% if f.resolve_chapter %} &middot; 回收于第 {{ f.resolve_chapter }} 章{% endif %}
+                    </div>
+                </div>
+                <div style="display:flex;gap:0.3rem;flex-shrink:0;margin-left:1rem;flex-wrap:wrap;justify-content:flex-end">
+                    <form method="POST" action="/novel/{{ novel.id }}/foreshadowing/{{ f.id }}/edit" style="display:inline">
+                        <input type="hidden" name="description" value="{{ f.description }}">
+                        <input type="hidden" name="status" value="open">
+                        <button type="submit" class="btn-sm" style="background:var(--accent-dim)">重新打开</button>
+                    </form>
+                    <form method="POST" action="/novel/{{ novel.id }}/foreshadowing/{{ f.id }}/delete"
+                          onsubmit="return confirm('确定删除此伏笔？')" style="display:inline">
+                        <button type="submit" class="btn-sm btn-danger">删除</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if not items %}
+    <p class="empty">暂无伏笔</p>
+    {% endif %}
+</div>
+{% endblock %}

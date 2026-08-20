@@ -1,0 +1,370 @@
+{% extends "base.html" %}
+{% block title %}系统设置 — 灵砚{% endblock %}
+
+{% block nav %}
+<a href="/novel/">&larr; 长篇列表</a>
+<span class="sep">|</span>
+<a href="/short/">短篇列表</a>
+<span class="sep">|</span>
+<span>系统设置</span>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Model Config -->
+    <div class="card">
+        <h2>全局参数配置</h2>
+        <p style="color:var(--text-dim);font-size:0.88rem;margin-bottom:1.25rem">
+            全局默认参数。未单独配置的 Agent 会使用这里的 Temperature 和 Max Tokens。
+        </p>
+        <div style="margin-bottom:1rem;padding:0.8rem 1rem;background:var(--accent-subtle);border-radius:8px;display:flex;justify-content:space-between;align-items:center">
+            <div>
+                <strong>🏢 多厂商模型管理</strong>
+                <span style="font-size:0.82rem;color:var(--text-dim);margin-left:0.5rem">配置 API 厂商、拉取模型列表、按厂商分配模型给角色</span>
+            </div>
+            <a href="/settings/llm" class="btn btn-primary btn-sm">进入配置 →</a>
+        </div>
+        <form method="POST" action="/settings/save" class="form-stack">
+            <div class="form-inline-row">
+                <div class="form-row" style="flex:1">
+                    <label>Temperature <span class="hint">（创造性 0.0-2.0，推荐 0.7-1.0）</span></label>
+                    <input type="number" name="temperature" value="{{ config.temperature }}"
+                           min="0" max="2" step="0.1">
+                </div>
+                <div class="form-row" style="flex:1">
+                    <label>Max Tokens <span class="hint">（单次生成最大 token 数）</span></label>
+                    <input type="number" name="max_tokens" value="{{ config.max_tokens }}"
+                           min="256" max="65536" step="256">
+                </div>
+            </div>
+            <button type="submit" class="btn-primary">保存设置</button>
+        </form>
+    </div>
+
+    <!-- Skill System -->
+    <div class="card" style="display:flex; justify-content:space-between; align-items:center; padding:1.25rem 1.75rem;">
+        <div>
+            <h2 style="margin-bottom:0.2rem">写作技巧 (Skill 系统)</h2>
+            <p style="color:var(--text-dim);font-size:0.85rem;margin:0">
+                管理内置技巧和自定义技巧，激活后自动注入到生成提示词中
+            </p>
+        </div>
+        <a href="/api/skills/page" class="btn btn-primary" style="white-space:nowrap;">管理技巧 →</a>
+    </div>
+
+    <!-- Per-Agent Model Config -->
+    <div class="card">
+        <h2>按 Agent 类型配置模型</h2>
+        <p style="color:var(--text-dim);font-size:0.88rem;margin-bottom:1rem">
+            不同的 Agent 可以使用不同的模型。例如章节生成用快速模型，评审用深度模型。
+            选择<strong>自动</strong>时，系统自动使用已启用厂商的模型（生成类优先快速模型，分析类优先深度模型）。
+        </p>
+
+        <!-- 新手引导 (P2-4) -->
+        <details style="margin-bottom:1rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.75rem 1rem">
+            <summary style="cursor:pointer;color:var(--accent);font-weight:600;font-size:0.88rem">
+                💡 不知道如何配置？点此查看说明
+            </summary>
+            <div style="margin-top:0.8rem;font-size:0.85rem;line-height:1.7;color:var(--text)">
+                <p style="margin-bottom:0.6rem"><strong>推荐分组：</strong></p>
+                <ul style="padding-left:1.5rem;margin-bottom:0.8rem">
+                    <li><strong>⚡ 快速生成类（V4 Flash）</strong>：writer、outline、summary、short_story - 任务简单，速度优先</li>
+                    <li><strong>🎯 深度分析类（V4 Pro）</strong>：critic、rewrite、editor、audit、character_check 等 - 需要细致分析</li>
+                </ul>
+                <p style="margin-bottom:0.4rem"><strong>使用建议：</strong></p>
+                <ul style="padding-left:1.5rem">
+                    <li>零配置：在 <a href="/settings/llm" style="color:var(--accent)">厂商配置</a> 添加厂商并勾选模型后，所有 Agent 自动分配合适模型（蓝色状态点）</li>
+                    <li>自定义：直接修改下表中任意 Agent 的模型/温度/Token（绿色状态点）</li>
+                    <li>清除：点击「清除所有自定义」恢复全部自动</li>
+                </ul>
+                <p style="margin-top:0.8rem;color:var(--text-dim);font-size:0.78rem">
+                    优先级：Agent 指定模型 > 小说覆盖 (model_override) > 自动默认（厂商勾选模型） > 全局配置 (.env)
+                </p>
+            </div>
+        </details>
+
+        <div style="display:flex;gap:0.5rem;margin-bottom:1rem">
+            <button id="btn-apply-recommended" class="btn-primary btn-sm">一键应用推荐配置</button>
+            <button id="btn-clear-agent" class="btn-secondary btn-sm">清除所有自定义（恢复全局）</button>
+            <span id="agent-config-status" style="margin-left:0.5rem;font-size:0.82rem;color:var(--accent)"></span>
+        </div>
+
+        <form method="POST" action="/settings/save-agent" id="agent-form">
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;margin-bottom:0.8rem">
+                {% for group_id, group_name, group_desc in [
+                    ("fast", "⚡ 快速生成类", "推荐 V4 Flash - 速度快、成本低"),
+                    ("deep", "🎯 深度分析类", "推荐 V4 Pro - 质量高、深度强")
+                ] %}
+                <div style="padding:0.5rem 0.8rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:0.82rem;color:var(--text-dim)">
+                    <strong style="color:var(--text-bright)">{{ group_name }}</strong> — {{ group_desc }}
+                </div>
+                {% endfor %}
+            </div>
+
+            <div style="overflow-x:auto">
+                <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+                    <thead>
+                        <tr style="border-bottom:1px solid var(--border);background:var(--bg)">
+                            <th style="text-align:left;padding:0.5rem;color:var(--text-bright)">Agent 类型</th>
+                            <th style="text-align:left;padding:0.5rem;color:var(--text-bright)">推荐模型</th>
+                            <th style="text-align:left;padding:0.5rem;color:var(--text-bright)">模型名称</th>
+                            <th style="text-align:left;padding:0.5rem;color:var(--text-bright);width:90px">温度</th>
+                            <th style="text-align:left;padding:0.5rem;color:var(--text-bright);width:90px">Max Tokens</th>
+                            <th style="text-align:center;padding:0.5rem;color:var(--text-bright);width:60px">状态</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for agent_type, meta in agent_types.items() %}
+                        <tr style="border-bottom:1px solid var(--border)">
+                            <td style="padding:0.5rem">
+                                <strong>{{ meta.name }}</strong>
+                                <span style="color:var(--text-faint);font-size:0.72rem;margin-left:0.3rem">
+                                    ({{ meta.group == 'fast' and '快速' or '深度' }})
+                                </span>
+                            </td>
+                            <td style="padding:0.5rem;font-family:var(--font-mono);font-size:0.78rem;color:var(--text-dim)">
+                                {{ meta.recommended_model }}
+                            </td>
+                            <td style="padding:0.5rem">
+                                {% if available_models %}
+                                <select name="llm_model_{{ agent_type }}"
+                                        style="width:100%;font-family:var(--font-mono);font-size:0.8rem;padding:0.3rem;background:var(--bg-card);color:var(--text)">
+                                    <option value="">自动{% if auto_models[agent_type] %}: {{ auto_models[agent_type] }}{% endif %}</option>
+                                    {% for provider in available_models %}
+                                    <optgroup label="{{ provider.provider_name }}">
+                                        {% for m in provider.models %}
+                                        <option value="{{ m.key }}"
+                                            {% if agent_configs[agent_type].llm_model == m.key %}selected{% endif %}>
+                                            {{ m.display_name }}
+                                        </option>
+                                        {% endfor %}
+                                    </optgroup>
+                                    {% endfor %}
+                                </select>
+                                {% else %}
+                                <input type="text"
+                                       name="model_name_{{ agent_type }}"
+                                       value="{{ agent_configs[agent_type].model_name }}"
+                                       placeholder="使用全局: {{ config.model_name }}"
+                                       style="width:100%;font-family:var(--font-mono);font-size:0.8rem;padding:0.3rem">
+                                <div style="font-size:0.72rem;color:var(--text-faint);margin-top:0.2rem">
+                                    💡 前往 <a href="/settings/llm" style="color:var(--accent)">厂商配置</a> 添加厂商并勾选模型
+                                </div>
+                                {% endif %}
+                            </td>
+                            <td style="padding:0.5rem">
+                                <input type="number"
+                                       name="temperature_{{ agent_type }}"
+                                       value="{{ agent_configs[agent_type].temperature }}"
+                                       placeholder="{{ config.temperature }}"
+                                       min="0" max="2" step="0.1"
+                                       style="width:100%;font-size:0.8rem;padding:0.3rem">
+                            </td>
+                            <td style="padding:0.5rem">
+                                <input type="number"
+                                       name="max_tokens_{{ agent_type }}"
+                                       value="{{ agent_configs[agent_type].max_tokens }}"
+                                       placeholder="{{ config.max_tokens }}"
+                                       min="256" max="65536" step="256"
+                                       style="width:100%;font-size:0.8rem;padding:0.3rem">
+                            </td>
+                            <td style="padding:0.5rem;text-align:center">
+                                {% if agent_configs[agent_type].llm_model or agent_configs[agent_type].model_name %}
+                                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#4CAF50" title="已自定义"></span>
+                                {% elif auto_models[agent_type] %}
+                                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#2196F3" title="自动: {{ auto_models[agent_type] }}"></span>
+                                {% else %}
+                                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--text-faint)" title="使用全局配置"></span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="margin-top:1rem;display:flex;gap:0.5rem">
+                <button type="submit" class="btn-primary">保存 Agent 配置</button>
+                <span style="color:var(--text-faint);font-size:0.78rem;line-height:1.8">
+                    优先级: Agent 特定配置 > 小说覆盖 (model_override) > 全局配置
+                </span>
+            </div>
+        </form>
+    </div>
+
+    <!-- Style Fingerprint -->
+    <div class="card">
+        <h2>风格指纹</h2>
+        <p style="color:var(--text-dim);font-size:0.88rem;margin-bottom:1rem">
+            粘贴一段参考文本，AI 会提取其写作风格特征，后续生成时自动应用。
+        </p>
+        <div class="form-row">
+            <textarea id="style-ref-text" rows="5" placeholder="粘贴参考文本（500-2000字效果最佳）..."></textarea>
+        </div>
+        <div style="display:flex;gap:0.5rem;margin-bottom:1rem">
+            <button id="btn-analyze-style" class="btn-secondary">分析风格</button>
+            <button id="btn-load-style" class="btn-secondary" style="display:none">加载已保存风格</button>
+        </div>
+        <div id="style-result" style="display:none">
+            <pre id="style-preview" style="font-size:0.82rem;max-height:300px;overflow-y:auto;background:var(--bg);padding:1rem;border-radius:8px;border:1px solid var(--border)"></pre>
+            <button id="btn-save-style" class="btn-primary btn-sm" style="margin-top:0.5rem">保存为默认风格</button>
+        </div>
+        <div id="style-status" style="font-size:0.82rem;color:var(--text-dim)"></div>
+    </div>
+
+    <!-- Model Reference Table -->
+    <div class="card">
+        <h2>常用模型参考</h2>
+        <div style="font-size:0.88rem;color:var(--text-dim);line-height:1.8">
+            <table style="width:100%;border-collapse:collapse">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--border)">
+                        <th style="text-align:left;padding:0.5rem 0;color:var(--text-bright)">厂商</th>
+                        <th style="text-align:left;padding:0.5rem 0;color:var(--text-bright)">Base URL</th>
+                        <th style="text-align:left;padding:0.5rem 0;color:var(--text-bright)">模型名称</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr style="border-bottom:1px solid var(--border)">
+                        <td style="padding:0.5rem 0">DeepSeek V4 Pro</td>
+                        <td style="padding:0.5rem 0;font-family:var(--font-mono);font-size:0.82rem">https://api.deepseek.com</td>
+                        <td style="padding:0.5rem 0;font-family:var(--font-mono);font-size:0.82rem">deepseek-v4-pro</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid var(--border)">
+                        <td style="padding:0.5rem 0">DeepSeek V4 Flash</td>
+                        <td style="padding:0.5rem 0;font-family:var(--font-mono);font-size:0.82rem">https://api.deepseek.com</td>
+                        <td style="padding:0.5rem 0;font-family:var(--font-mono);font-size:0.82rem">deepseek-v4-flash</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid var(--border)">
+                        <td style="padding:0.5rem 0">OpenAI</td>
+                        <td style="padding:0.5rem 0;font-family:var(--font-mono);font-size:0.82rem">https://api.openai.com</td>
+                        <td style="padding:0.5rem 0;font-family:var(--font-mono);font-size:0.82rem">gpt-4o</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid var(--border)">
+                        <td style="padding:0.5rem 0">Anthropic (兼容层)</td>
+                        <td style="padding:0.5rem 0;font-family:var(--font-mono);font-size:0.82rem">自定义代理地址</td>
+                        <td style="padding:0.5rem 0;font-family:var(--font-mono);font-size:0.82rem">claude-sonnet-4-6</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:0.5rem 0">本地 Ollama</td>
+                        <td style="padding:0.5rem 0;font-family:var(--font-mono);font-size:0.82rem">http://localhost:11434</td>
+                        <td style="padding:0.5rem 0;font-family:var(--font-mono);font-size:0.82rem">qwen2.5:14b</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    // --- Style Fingerprint ---
+    document.getElementById('btn-analyze-style').addEventListener('click', function() {
+        const text = document.getElementById('style-ref-text').value;
+        if (!text.trim()) return;
+        this.disabled = true;
+        this.textContent = '分析中...';
+        document.getElementById('style-status').textContent = '正在分析风格特征...';
+
+        const fd = new FormData();
+        fd.append('text', text);
+        fetch('/api/style/analyze', {method: 'POST', body: fd})
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('style-result').style.display = 'block';
+                document.getElementById('style-preview').textContent = JSON.stringify(data, null, 2);
+                document.getElementById('style-status').textContent = '分析完成，可保存为默认风格';
+                document.getElementById('btn-save-style').style.display = 'inline-block';
+            })
+            .catch(e => {
+                document.getElementById('style-status').textContent = '分析失败: ' + e.message;
+            })
+            .finally(() => {
+                this.disabled = false;
+                this.textContent = '分析风格';
+            });
+    });
+
+    document.getElementById('btn-save-style').addEventListener('click', function() {
+        const preview = document.getElementById('style-preview').textContent;
+        try {
+            const style = JSON.parse(preview);
+            fetch('/api/style/save', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: 'default', style: style})
+            }).then(() => {
+                this.textContent = '已保存';
+                document.getElementById('style-status').textContent = '风格已保存，后续生成时自动应用';
+            });
+        } catch(e) {
+            document.getElementById('style-status').textContent = '保存失败';
+        }
+    });
+
+    // Load existing style
+    fetch('/api/style/load').then(r => r.json()).then(style => {
+        if (style && !style.error) {
+            document.getElementById('btn-load-style').style.display = 'inline-block';
+            document.getElementById('style-status').textContent = '已有保存的风格';
+        }
+    });
+
+    document.getElementById('btn-load-style').addEventListener('click', function() {
+        fetch('/api/style/load').then(r => r.json()).then(style => {
+            if (style) {
+                document.getElementById('style-result').style.display = 'block';
+                document.getElementById('style-preview').textContent = JSON.stringify(style, null, 2);
+                document.getElementById('style-status').textContent = '已加载保存的风格';
+            }
+        });
+    });
+
+    // --- Per-Agent Model Config ---
+    const statusEl = document.getElementById('agent-config-status');
+
+    document.getElementById('btn-apply-recommended').addEventListener('click', function() {
+        this.disabled = true;
+        this.textContent = '应用中...';
+        fetch('/settings/api/apply-recommended', {method: 'POST'})
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) {
+                    statusEl.textContent = data.message + ' — 正在刷新...';
+                    setTimeout(() => location.reload(), 800);
+                }
+            })
+            .catch(e => {
+                statusEl.textContent = '失败: ' + e.message;
+            })
+            .finally(() => {
+                this.disabled = false;
+                this.textContent = '一键应用推荐配置';
+            });
+    });
+
+    document.getElementById('btn-clear-agent').addEventListener('click', function() {
+        if (!confirm('确定清除所有 Agent 自定义配置？将恢复使用全局配置。')) return;
+        this.disabled = true;
+        this.textContent = '清除中...';
+        fetch('/settings/api/clear-agent', {method: 'POST'})
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) {
+                    statusEl.textContent = data.message + ' — 正在刷新...';
+                    setTimeout(() => location.reload(), 800);
+                }
+            })
+            .catch(e => {
+                statusEl.textContent = '失败: ' + e.message;
+            })
+            .finally(() => {
+                this.disabled = false;
+                this.textContent = '清除所有自定义（恢复全局）';
+            });
+    });
+})();
+</script>
+{% endblock %}

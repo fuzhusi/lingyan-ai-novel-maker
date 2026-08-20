@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}人物管理 — {{ novel.title }}{% endblock %}
+
+{% block nav %}
+<a href="/novel/{{ novel.id }}/">&larr; 章节列表</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/world-settings">世界观</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/outline">大纲</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/foreshadowing">伏笔</a>
+<span class="sep">|</span>
+<span>人物</span>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="card">
+        <h2>添加人物</h2>
+        <form method="POST" action="/novel/{{ novel.id }}/characters/create" class="form-stack">
+            <div class="form-row">
+                <label>姓名 <span class="required">*</span></label>
+                <input type="text" name="name" required placeholder="角色名字">
+            </div>
+            <div class="form-inline-row">
+                <div class="form-row">
+                    <label>性格特征</label>
+                    <textarea name="personality" rows="2" placeholder="如：冷静果断，但在亲近的人面前会展现温柔的一面..."></textarea>
+                </div>
+                <div class="form-row">
+                    <label>说话风格</label>
+                    <textarea name="speaking_style" rows="2" placeholder="如：言简意赅，不喜欢废话，偶尔用文言词汇..."></textarea>
+                </div>
+            </div>
+            <div class="form-row">
+                <label>外貌特征</label>
+                <textarea name="appearance" rows="2" placeholder="如：身高一米八，黑色短发，眼神锐利..."></textarea>
+            </div>
+            <div class="form-row">
+                <label>背景故事</label>
+                <textarea name="background" rows="3" placeholder="角色的过去..."></textarea>
+            </div>
+            <div class="form-inline-row">
+                <div class="form-row">
+                    <label>核心动机</label>
+                    <textarea name="motivation" rows="2" placeholder="角色想要什么？为什么？..."></textarea>
+                </div>
+                <div class="form-row">
+                    <label>角色弧光</label>
+                    <textarea name="arc_direction" rows="2" placeholder="角色在整个故事中如何成长/变化..."></textarea>
+                </div>
+            </div>
+            <button type="submit">添加人物</button>
+        </form>
+    </div>
+
+    <h3>已有人物 <span class="count-badge">{{ characters|length }}</span></h3>
+    {% if characters %}
+    <div class="card-list">
+        {% for c in characters %}
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                <div style="flex:1">
+                    <h2><a href="/novel/{{ novel.id }}/characters/{{ c.id }}/detail" style="color:var(--text-bright);text-decoration:none">{{ c.name }}</a></h2>
+                    {% if c.personality %}
+                    <div class="kb-field"><strong>性格：</strong>{{ c.personality }}</div>
+                    {% endif %}
+                    {% if c.speaking_style %}
+                    <div class="kb-field"><strong>说话风格：</strong>{{ c.speaking_style }}</div>
+                    {% endif %}
+                    {% if c.appearance %}
+                    <div class="kb-field"><strong>外貌：</strong>{{ c.appearance }}</div>
+                    {% endif %}
+                    {% if c.background %}
+                    <div class="kb-field"><strong>背景：</strong>{{ c.background }}</div>
+                    {% endif %}
+                    {% if c.motivation %}
+                    <div class="kb-field"><strong>动机：</strong>{{ c.motivation }}</div>
+                    {% endif %}
+                    {% if c.arc_direction %}
+                    <div class="kb-field"><strong>角色弧光：</strong>{{ c.arc_direction }}</div>
+                    {% endif %}
+                </div>
+                <div style="display:flex;gap:0.3rem;flex-shrink:0;margin-left:1rem">
+                    <button class="btn-sm" onclick="document.getElementById('edit-form-{{ c.id }}').style.display='block'">编辑</button>
+                    <form method="POST" action="/novel/{{ novel.id }}/characters/{{ c.id }}/delete"
+                          onsubmit="return confirm('确定删除人物 ' + {{ c.name|tojson }} + '？')">
+                        <button type="submit" class="btn-sm btn-danger">删除</button>
+                    </form>
+                </div>
+            </div>
+            <div id="edit-form-{{ c.id }}" style="display:none;margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--border)">
+                <form method="POST" action="/novel/{{ novel.id }}/characters/{{ c.id }}/edit" class="form-stack">
+                    <input type="text" name="name" value="{{ c.name }}" required>
+                    <div class="form-inline-row">
+                        <textarea name="personality" rows="2">{{ c.personality }}</textarea>
+                        <textarea name="speaking_style" rows="2">{{ c.speaking_style }}</textarea>
+                    </div>
+                    <textarea name="appearance" rows="2">{{ c.appearance }}</textarea>
+                    <textarea name="background" rows="3">{{ c.background }}</textarea>
+                    <div class="form-inline-row">
+                        <textarea name="motivation" rows="2">{{ c.motivation }}</textarea>
+                        <textarea name="arc_direction" rows="2">{{ c.arc_direction }}</textarea>
+                    </div>
+                    <textarea name="status_json" rows="2" placeholder='状态JSON，如 {"hp": "受伤"}' style="font-size:0.85rem">{{ c.status_json if c.status_json != '{}' else '' }}</textarea>
+                    <button type="submit">保存修改</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty">暂无人物设定，在上方创建第一个人物</p>
+    {% endif %}
+</div>
+{% endblock %}

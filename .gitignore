@@ -1,0 +1,60 @@
+# ===== 敏感信息（切勿上传）=====
+# 真实 API Key 仅存在于 .env，绝不提交
+.env
+.env.*
+!.env.example
+
+# Claude Code 本地配置（含机器特定路径与权限规则，不共享）
+.claude/settings.local.json
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+pip-wheel-metadata/
+
+# ===== 虚拟环境 =====
+.venv/
+venv/
+env/
+ENV/
+
+# ===== 数据库 / 运行时数据 =====
+data.db
+*.db
+*.sqlite
+*.sqlite3
+instance/
+
+# ===== 测试 / 覆盖率 =====
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+
+# ===== IDE / 编辑器 =====
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== 日志 / 临时 =====
+*.log
+logs/
+*.tmp
+*.bak

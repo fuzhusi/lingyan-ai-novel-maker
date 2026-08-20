@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}短篇创作 — 灵砚{% endblock %}
+
+{% block content %}
+<div class="container" style="padding-top:2rem">
+    <div style="margin-bottom:1.5rem">
+        <a href="/" class="btn btn-secondary">&#x2190; 返回首页</a>
+    </div>
+
+    <div class="section-header">
+        <h2>短篇创作</h2>
+        <a href="/short/new" class="btn-primary" style="text-decoration:none;padding:0.6rem 1.5rem;border-radius:8px">+ 新建短篇</a>
+    </div>
+
+    {% if stories %}
+    <div class="novel-grid">
+        {% for item in stories %}
+        {% set story = item.story %}
+        <div class="novel-card">
+            <div class="novel-card-body">
+                <div class="novel-card-top">
+                    <a href="/short/{{ story.id }}" class="novel-title">{{ story.title }}</a>
+                    {% if story.mode == "inspiration" %}
+                    <span class="genre-badge" style="background:var(--accent-subtle)">灵感</span>
+                    {% elif story.mode == "setting" %}
+                    <span class="genre-badge" style="background:rgba(100,180,100,0.15);color:#8cbb8c">设定</span>
+                    {% else %}
+                    <span class="genre-badge" style="background:rgba(180,100,180,0.15);color:#bb8cbb">细心</span>
+                    {% endif %}
+                    {% if story.status == "done" %}
+                    <span class="genre-badge" style="background:rgba(100,200,100,0.15);color:#7cbb7c">已完成</span>
+                    {% elif story.status == "generating" %}
+                    <span class="genre-badge" style="background:rgba(200,200,100,0.15);color:#bbbb7c">生成中</span>
+                    {% endif %}
+                </div>
+                {% if story.inspiration %}
+                <p class="novel-synopsis">{{ story.inspiration[:100] }}{% if story.inspiration|length > 100 %}&hellip;{% endif %}</p>
+                {% elif story.theme %}
+                <p class="novel-synopsis">{{ story.theme[:100] }}{% if story.theme|length > 100 %}&hellip;{% endif %}</p>
+                {% endif %}
+                {% if item.node_total > 0 %}
+                <div style="margin:0.5rem 0;font-size:0.78rem">
+                    <span style="color:var(--text-dim)">节点进度：</span>
+                    <span style="background:var(--bg-elevated);padding:2px 8px;border-radius:10px">
+                        {{ item.node_done }}/{{ item.node_total }}
+                    </span>
+                    <span style="display:inline-block;width:80px;height:6px;background:var(--bg-elevated);border-radius:3px;vertical-align:middle;margin-left:6px;overflow:hidden">
+                        <span style="display:block;height:100%;width:{{ (item.node_done * 100 / item.node_total)|round|int }}%;background:var(--accent);border-radius:3px"></span>
+                    </span>
+                </div>
+                {% endif %}
+                <div class="novel-stats">
+                    <span class="stat">{{ story.genre or "短篇" }}</span>
+                    <span class="stat">{{ story.content|length if story.content else 0 }} 字</span>
+                    {% if story.status == "done" %}
+                    <span class="stat" style="color:var(--accent)">续写</span>
+                    {% elif item.node_total > 0 and item.node_done < item.node_total %}
+                    <span class="stat" style="color:var(--accent)">继续创作</span>
+                    {% endif %}
+                    <span class="stat">{{ story.updated_at[:10] if story.updated_at else '' }}</span>
+                </div>
+            </div>
+            <div class="novel-card-actions">
+                <a href="/short/{{ story.id }}" class="btn btn-primary btn-sm">{% if story.status == "done" or (item.node_total > 0 and item.node_done == item.node_total) %}查看{% elif item.node_total > 0 and item.node_done > 0 %}继续{% else %}打开{% endif %}</a>
+                <form method="POST" action="/short/{{ story.id }}/delete" onsubmit="localStorage.removeItem('lingyan_draft_{{ story.id }}');return confirm('确认删除这篇短篇？')" style="display:inline">
+                    <button type="submit" class="btn-sm btn-danger">删除</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon">&#x270F;&#xFE0F;</div>
+        <p class="empty-title">还没有短篇</p>
+        <p class="empty-desc">点击「新建短篇」开始你的灵感之旅</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

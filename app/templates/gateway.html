@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}灵砚 — AI 小说创作系统{% endblock %}
+
+{% block content %}
+<div class="gateway-scene">
+    <!-- Atmospheric background -->
+    <div class="gateway-bg">
+        <div class="ink-drop ink-drop-1"></div>
+        <div class="ink-drop ink-drop-2"></div>
+        <div class="ink-drop ink-drop-3"></div>
+        <div class="ink-grain"></div>
+    </div>
+
+    <!-- Central content -->
+    <div class="gateway-center">
+        <div class="gateway-logo">
+            <span class="logo-char" style="animation-delay:0s">灵</span>
+            <span class="logo-char" style="animation-delay:0.15s">砚</span>
+        </div>
+        <p class="gateway-tagline">笔落惊风雨，墨染见天机</p>
+        <div class="gateway-divider">
+            <span class="divider-dot"></span>
+            <span class="divider-line"></span>
+            <span class="divider-dot"></span>
+        </div>
+
+        <!-- 新手引导卡片 -->
+        <div class="gateway-onboarding" id="onboarding-card">
+            <div class="onboarding-content">
+                <div class="onboarding-icon">✨</div>
+                <h3>第一次使用灵砚？</h3>
+                <p>加载示例小说（玄幻/科幻/悬疑），含完整角色、世界观、大纲、伏笔，立即体验所有功能</p>
+                <div class="onboarding-actions">
+                    <button id="btn-load-samples" class="onboarding-btn-primary">
+                        一键加载示例数据
+                    </button>
+                    <button id="btn-dismiss-onboarding" class="onboarding-btn-secondary">
+                        我已有经验
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="gateway-choices">
+            <a href="/novel/" class="portal-card">
+                <div class="portal-glow"></div>
+                <div class="portal-inner">
+                    <div class="portal-icon">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                            <line x1="8" y1="7" x2="16" y2="7"/>
+                            <line x1="8" y1="11" x2="14" y2="11"/>
+                        </svg>
+                    </div>
+                    <h2>长篇创作</h2>
+                    <p>多章节架构 · 人物关系网 · 伏笔追踪<br>多Agent协作 · 故事状态引擎</p>
+                    <span class="portal-hint">适合连载小说、长篇故事</span>
+                </div>
+            </a>
+
+            <a href="/short/" class="portal-card">
+                <div class="portal-glow"></div>
+                <div class="portal-inner">
+                    <div class="portal-icon">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+                        </svg>
+                    </div>
+                    <h2>短篇创作</h2>
+                    <p>灵感发散 · 双Agent协作 · 一次成文<br>风格约束 · 快速迭代</p>
+                    <span class="portal-hint">适合微小说、短篇故事</span>
+                </div>
+            </a>
+        </div>
+
+        <!-- 特性介绍 -->
+        <div class="gateway-features">
+            <div class="feature-item">
+                <div class="feature-icon">🎭</div>
+                <div class="feature-title">16种 Agent</div>
+                <div class="feature-desc">每种任务独立配置模型</div>
+            </div>
+            <div class="feature-item">
+                <div class="feature-icon">📊</div>
+                <div class="feature-title">17维度审计</div>
+                <div class="feature-desc">6个并行Agent全面审查</div>
+            </div>
+            <div class="feature-item">
+                <div class="feature-icon">✨</div>
+                <div class="feature-title">120+ 去AI模式</div>
+                <div class="feature-desc">去除AI写作痕迹</div>
+            </div>
+            <div class="feature-item">
+                <div class="feature-icon">🔗</div>
+                <div class="feature-title">因果链 + 记忆</div>
+                <div class="feature-desc">长篇一致性保障</div>
+            </div>
+        </div>
+
+        <div class="gateway-footer">
+            <span>AI · 写作 · 协作</span>
+        </div>
+    </div>
+</div>
+
+<script>
+// 检查是否已显示过引导卡片
+if (localStorage.getItem('onboarding_dismissed') === '1') {
+    document.getElementById('onboarding-card').style.display = 'none';
+}
+
+document.getElementById('btn-dismiss-onboarding').addEventListener('click', function() {
+    document.getElementById('onboarding-card').style.display = 'none';
+    localStorage.setItem('onboarding_dismissed', '1');
+});
+
+document.getElementById('btn-load-samples').addEventListener('click', function() {
+    this.disabled = true;
+    this.textContent = '加载中...';
+
+    fetch('/sample/load-all', {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                this.textContent = '✓ 已加载 ' + data.total_count + ' 部示例';
+                this.style.background = 'var(--success, #4CAF50)';
+                localStorage.setItem('onboarding_dismissed', '1');
+                setTimeout(() => window.location.href = '/novel/', 1200);
+            }
+        })
+        .catch(e => {
+            this.textContent = '加载失败，重试';
+            this.disabled = false;
+        });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Prompt 模板库{% endblock %}
+
+{% block nav %}
+<a href="/novel/">&larr; 长篇列表</a>
+<span class="sep">|</span>
+<a href="/short/">短篇列表</a>
+<span class="sep">|</span>
+<span>Prompt 模板库</span>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="card">
+        <h2>添加模板</h2>
+        <form method="POST" action="/prompt-templates/create" class="form-stack">
+            <div class="form-inline-row">
+                <div class="form-row" style="flex:2">
+                    <label>名称 <span class="required">*</span></label>
+                    <input type="text" name="name" required placeholder="模板名称">
+                </div>
+                <div class="form-row" style="flex:1">
+                    <label>类型</label>
+                    <select name="template_type">
+                        <option value="writer">Writer (写手)</option>
+                        <option value="critic">Critic (评审)</option>
+                        <option value="summary">Summary (摘要)</option>
+                        <option value="outline">Outline (大纲)</option>
+                        <option value="rewrite">Rewrite (改写)</option>
+                        <option value="character_check">Character Check (角色检查)</option>
+                        <option value="lore_check">Lore Check (世界观检查)</option>
+                        <option value="foreshadow_check">Foreshadow Check (伏笔检查)</option>
+                        <option value="editor">Editor (编辑)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <label>模板内容（角色设定 / System Prompt）</label>
+                <textarea name="template_content" rows="10"
+                    placeholder="定义 AI 的角色和基本要求。例如：你是一位专业的小说作家..."></textarea>
+            </div>
+            <div class="form-row">
+                <label>写作约束（禁用词、句式规则等）</label>
+                <textarea name="constraints" rows="8"
+                    placeholder="定义写作质量约束。例如：&#10;禁用词：仿佛、宛如、不禁...&#10;句式规则：单句不超过20字...&#10;叙事规则：用动作代替心理描写..."></textarea>
+            </div>
+            <div class="form-row">
+                <label>变量说明 (JSON)</label>
+                <textarea name="variable_help" rows="2"
+                    placeholder='{"novel_title":"小说标题","chapter_title":"章节标题",...}'></textarea>
+            </div>
+            <button type="submit">添加模板</button>
+        </form>
+    </div>
+
+    <!-- Default constraints reference -->
+    <div class="card" style="border-color:var(--accent-dim)">
+        <h2 style="color:var(--accent)">默认约束参考</h2>
+        <p style="color:var(--text-dim);font-size:0.85rem;margin-bottom:1rem">
+            以下约束会自动应用于所有 writer 模板（除非自定义覆盖）。可在「写作约束」字段中自定义。
+        </p>
+        <details>
+            <summary style="cursor:pointer;color:var(--text-dim);font-size:0.9rem">展开查看默认约束内容</summary>
+            <pre class="t-content" style="margin-top:0.8rem;max-height:400px;overflow-y:auto;font-size:0.82rem;line-height:1.6">{{ default_constraints }}</pre>
+        </details>
+    </div>
+
+    <h3>已有模板 <span class="count-badge">{{ templates|length }}</span></h3>
+
+    <!-- 模板类型使用状态 -->
+    <div class="card" style="border-color:var(--border-light)">
+        <h2 style="color:var(--text-dim);font-size:0.95rem;margin-bottom:0.8rem">模板类型状态</h2>
+        <div style="display:flex;flex-wrap:wrap;gap:0.5rem">
+            {% set type_labels = {
+                "writer": "写手", "critic": "评审", "summary": "摘要",
+                "outline": "大纲", "rewrite": "改写",
+                "character_check": "角色检查", "lore_check": "世界观检查",
+                "foreshadow_check": "伏笔检查", "editor": "编辑"
+            } %}
+            {% for t_type, label in type_labels.items() %}
+            <span style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.3rem 0.6rem;border-radius:4px;font-size:0.8rem;
+                {% if active_types.get(t_type) %}
+                    background:rgba(76,175,80,0.15);color:#4CAF50;border:1px solid rgba(76,175,80,0.3)
+                {% else %}
+                    background:var(--surface);color:var(--text-faint);border:1px solid var(--border)
+                {% endif %}">
+                <span style="font-size:0.7rem">{% if active_types.get(t_type) %}✓{% else %}○{% endif %}</span>
+                {{ label }}
+            </span>
+            {% endfor %}
+        </div>
+        <p style="color:var(--text-faint);font-size:0.78rem;margin-top:0.6rem">
+            ✓ = 已有自定义模板（将覆盖默认模板） · ○ = 使用系统默认模板
+        </p>
+    </div>
+
+    {% set type_labels = {
+        "writer": "写手", "critic": "评审", "summary": "摘要",
+        "outline": "大纲", "rewrite": "改写",
+        "character_check": "角色检查", "lore_check": "世界观检查",
+        "foreshadow_check": "伏笔检查", "editor": "编辑"
+    } %}
+    {% if templates %}
+    <div class="card-list">
+        {% for t in templates %}
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                <div style="flex:1">
+                    <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.6rem">
+                        <span class="t-type-badge">{{ type_labels.get(t.template_type, t.template_type) }}</span>
+                        <h2 style="margin:0">{{ t.name }}</h2>
+                    </div>
+                    <pre class="t-content">{{ t.template_content }}</pre>
+                    {% if t.constraints and t.constraints.strip() %}
+                    <div style="margin-top:0.5rem">
+                        <span style="color:var(--accent);font-size:0.8rem;font-weight:600">写作约束：</span>
+                        <pre class="t-content" style="font-size:0.82rem;max-height:200px;overflow-y:auto">{{ t.constraints }}</pre>
+                    </div>
+                    {% endif %}
+                    {% if t.variable_help and t.variable_help != '{}' %}
+                    <div class="meta-info" style="margin-top:0.5rem">变量：{{ t.variable_help }}</div>
+                    {% endif %}
+                </div>
+                <div style="display:flex;gap:0.3rem;flex-shrink:0;margin-left:1rem">
+                    <button class="btn-sm" onclick="document.getElementById('edit-pt-{{ t.id }}').style.display='block'">编辑</button>
+                    <form method="POST" action="/prompt-templates/{{ t.id }}/delete"
+                          onsubmit="return confirm('确定删除模板 {{ t.name }}？')" style="display:inline">
+                        <button type="submit" class="btn-sm btn-danger">删除</button>
+                    </form>
+                </div>
+            </div>
+            <div id="edit-pt-{{ t.id }}" style="display:none;margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--border)">
+                <form method="POST" action="/prompt-templates/{{ t.id }}/edit" class="form-stack">
+                    <div class="form-inline-row">
+                        <input type="text" name="name" value="{{ t.name }}" style="flex:2" required>
+                        <select name="template_type" style="flex:1">
+                            <option value="writer" {% if t.template_type=='writer' %}selected{% endif %}>写手</option>
+                            <option value="critic" {% if t.template_type=='critic' %}selected{% endif %}>评审</option>
+                            <option value="summary" {% if t.template_type=='summary' %}selected{% endif %}>摘要</option>
+                            <option value="outline" {% if t.template_type=='outline' %}selected{% endif %}>大纲</option>
+                            <option value="rewrite" {% if t.template_type=='rewrite' %}selected{% endif %}>改写</option>
+                            <option value="character_check" {% if t.template_type=='character_check' %}selected{% endif %}>角色检查</option>
+                            <option value="lore_check" {% if t.template_type=='lore_check' %}selected{% endif %}>世界观检查</option>
+                            <option value="foreshadow_check" {% if t.template_type=='foreshadow_check' %}selected{% endif %}>伏笔检查</option>
+                            <option value="editor" {% if t.template_type=='editor' %}selected{% endif %}>编辑</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label>模板内容</label>
+                        <textarea name="template_content" rows="10">{{ t.template_content }}</textarea>
+                    </div>
+                    <div class="form-row">
+                        <label>写作约束</label>
+                        <textarea name="constraints" rows="8">{{ t.constraints or '' }}</textarea>
+                    </div>
+                    <textarea name="variable_help" rows="2">{{ t.variable_help }}</textarea>
+                    <button type="submit" class="btn-sm">保存修改</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty">暂无自定义模板。系统将使用内置默认模板</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% block title %}任务详情 — 借鉴改写{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width:1400px; margin:2rem auto; padding:0 1.5rem;">
+    <div style="margin-bottom:1.5rem;">
+        <a href="/plagiarize/" style="color:var(--text-dim); text-decoration:none;">&larr; 返回列表</a>
+    </div>
+
+    <!-- 任务信息 -->
+    <div class="card" style="padding:1.25rem; margin-bottom:1.5rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem;">
+                    <span style="background:{% if task.mode == 'style' %}var(--accent){% elif task.mode == 'plot' %}var(--success){% else %}var(--text-dim){% endif %};color:var(--bg);padding:0.15rem 0.5rem;border-radius:4px;font-size:0.82rem;font-weight:600;">
+                        {% if task.mode == 'style' %}风格模仿{% elif task.mode == 'plot' %}情节借鉴{% else %}改写洗稿{% endif %}
+                    </span>
+                    <span style="color:{% if task.status == 'done' %}var(--success){% elif task.status == 'generating' %}var(--accent){% elif task.status == 'failed' %}var(--danger){% else %}var(--text-dim){% endif %};font-size:0.85rem;">
+                        {% if task.status == 'done' %}已完成{% elif task.status == 'generating' %}生成中...{% elif task.status == 'failed' %}失败: {{ task.error_message }}{% else %}待处理{% endif %}
+                    </span>
+                </div>
+                <div style="font-size:0.82rem; color:var(--text-dim);">
+                    创建于 {{ task.created_at[:16].replace('T', ' ') }}
+                    {% if task.source_filename %} · 来源：{{ task.source_filename }}{% endif %}
+                </div>
+            </div>
+            <div style="display:flex; gap:0.5rem;">
+                {% if task.result_content %}
+                <button onclick="saveToChapter()" class="btn btn-secondary btn-sm">保存为长篇章节</button>
+                <button onclick="saveToShort()" class="btn btn-secondary btn-sm">保存为短篇</button>
+                {% endif %}
+                <form method="POST" action="/plagiarize/{{ task.id }}/delete" style="display:inline;"
+                      onsubmit="return confirm('确定删除此任务？')">
+                    <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 操作按钮区 -->
+    <div style="display:flex; gap:0.5rem; margin-bottom:1.5rem; flex-wrap:wrap;">
+        {% if task.mode == 'style' %}
+            {% if not task.style_report %}
+            <button id="btn-analyze" class="btn btn-primary" onclick="analyzeStyle()">分析风格</button>
+            {% else %}
+            <button id="btn-analyze" class="btn btn-secondary" onclick="analyzeStyle()">重新分析</button>
+            <button id="btn-generate" class="btn btn-primary" onclick="generateStyle()">生成新内容</button>
+            {% endif %}
+            {% if task.style_report %}
+            <button class="btn btn-secondary" onclick="saveAsSkill()">保存为 Skill</button>
+            {% endif %}
+        {% elif task.mode == 'plot' %}
+            {% if not task.style_report %}
+            <button id="btn-analyze" class="btn btn-primary" onclick="extractPlot()">提取情节骨架</button>
+            {% else %}
+            <button id="btn-analyze" class="btn btn-secondary" onclick="extractPlot()">重新提取</button>
+            <button id="btn-generate" class="btn btn-primary" onclick="generatePlot()">生成新故事</button>
+            {% endif %}
+        {% else %}
+            <!-- 改写洗稿：程度选择按钮 -->
+            <div style="display:flex; gap:0.3rem; align-items:center;">
+                <span style="color:var(--text-dim); font-size:0.85rem; margin-right:0.5rem;">改写程度：</span>
+                <button class="btn btn-sm {% if task.rewrite_level == 'light' %}btn-primary{% else %}btn-secondary{% endif %}" 
+                        onclick="setLevel('light')">轻度</button>
+                <button class="btn btn-sm {% if task.rewrite_level == 'medium' %}btn-primary{% else %}btn-secondary{% endif %}" 
+                        onclick="setLevel('medium')">中度</button>
+                <button class="btn btn-sm {% if task.rewrite_level == 'heavy' %}btn-primary{% else %}btn-secondary{% endif %}" 
+                        onclick="setLevel('heavy')">重度</button>
+            </div>
+            <button id="btn-rewrite" class="btn btn-primary" onclick="rewriteText()">开始改写</button>
+        {% endif %}
+    </div>
+
+    <!-- 左右对比视图 -->
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem;">
+        <!-- 左侧：原文 -->
+        <div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                <h3 style="font-size:1rem; color:var(--text-bright); margin:0;">原文</h3>
+                <span style="font-size:0.78rem; color:var(--text-dim);">{{ task.source_text|length }} 字</span>
+            </div>
+            <div id="source-content" style="background:var(--bg-card); border:1px solid var(--border); border-radius:8px; padding:1.5rem; min-height:400px; max-height:600px; overflow-y:auto; font-size:0.92rem; line-height:1.8; white-space:pre-wrap;">{{ task.source_text or '无原文' }}</div>
+        </div>
+
+        <!-- 右侧：分析报告/改写结果 -->
+        <div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                <h3 style="font-size:1rem; color:var(--text-bright); margin:0;">
+                    {% if task.mode == 'style' %}风格分析{% elif task.mode == 'plot' %}情节骨架{% else %}改写结果{% endif %}
+                </h3>
+                {% if task.result_content %}
+                <span style="font-size:0.78rem; color:var(--text-dim);">{{ task.result_content|length }} 字</span>
+                {% endif %}
+            </div>
+            
+            {% if task.style_report and task.mode in ['style', 'plot'] %}
+            <!-- 分析报告 -->
+            <div id="report-content" style="background:var(--bg-card); border:1px solid var(--border); border-radius:8px; padding:1.5rem; min-height:200px; max-height:300px; overflow-y:auto; font-size:0.88rem; line-height:1.7; white-space:pre-wrap; margin-bottom:1rem;">{{ task.style_report }}</div>
+            {% endif %}
+            
+            {% if task.result_content %}
+            <!-- 生成结果 -->
+            <div id="result-content" style="background:var(--bg-card); border:1px solid var(--accent-dim); border-radius:8px; padding:1.5rem; min-height:400px; max-height:600px; overflow-y:auto; font-size:0.92rem; line-height:1.8; white-space:pre-wrap;">{{ task.result_content }}</div>
+            {% else %}
+            <div id="result-content" style="background:var(--bg-card); border:1px solid var(--border); border-radius:8px; padding:1.5rem; min-height:400px; display:flex; align-items:center; justify-content:center;">
+                <div id="stream-target" style="width:100%; font-size:0.92rem; line-height:1.8; white-space:pre-wrap;">
+                    <span style="color:var(--text-faint); font-style:italic;">点击上方按钮开始生成...</span>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+const taskId = {{ task.id }};
+const mode = "{{ task.mode }}";
+
+function streamToElement(url, body, targetEl, onDone) {
+    targetEl.innerHTML = '';
+    const textNode = document.createTextNode('');
+    const cursor = document.createElement('span');
+    cursor.className = 'typing-cursor';
+    cursor.textContent = '|';
+    targetEl.appendChild(textNode);
+    targetEl.appendChild(cursor);
+
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body || ''
+    }).then(resp => {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+
+        function read() {
+            reader.read().then(({ done, value }) => {
+                if (done) {
+                    cursor.remove();
+                    if (onDone) onDone(fullText);
+                    return;
+                }
+                const chunk = decoder.decode(value, { stream: true });
+                fullText += chunk;
+                textNode.textContent = fullText;
+                targetEl.scrollTop = targetEl.scrollHeight;
+                read();
+            });
+        }
+        read();
+    }).catch(err => {
+        targetEl.innerHTML = `<span style="color:var(--danger)">失败: ${err.message}</span>`;
+    });
+}
+
+function analyzeStyle() {
+    const btn = document.getElementById('btn-analyze');
+    btn.disabled = true;
+    btn.textContent = '分析中...';
+    
+    const target = document.getElementById('report-content') || document.getElementById('stream-target');
+    target.innerHTML = '';
+    target.style.display = 'block';
+    
+    streamToElement(`/plagiarize/${taskId}/analyze-style`, '', target, function() {
+        location.reload();
+    });
+}
+
+function extractPlot() {
+    const btn = document.getElementById('btn-analyze');
+    btn.disabled = true;
+    btn.textContent = '提取中...';
+    
+    const target = document.getElementById('report-content') || document.getElementById('stream-target');
+    target.innerHTML = '';
+    target.style.display = 'block';
+    
+    streamToElement(`/plagiarize/${taskId}/extract-plot`, '', target, function() {
+        location.reload();
+    });
+}
+
+function generateStyle() {
+    const btn = document.getElementById('btn-generate');
+    btn.disabled = true;
+    btn.textContent = '生成中...';
+    
+    const target = document.getElementById('result-content') || document.getElementById('stream-target');
+    target.innerHTML = '';
+    target.style.display = 'block';
+    
+    streamToElement(`/plagiarize/${taskId}/generate-style`, '', target, function() {
+        location.reload();
+    });
+}
+
+function generatePlot() {
+    const btn = document.getElementById('btn-generate');
+    btn.disabled = true;
+    btn.textContent = '生成中...';
+    
+    const target = document.getElementById('result-content') || document.getElementById('stream-target');
+    target.innerHTML = '';
+    target.style.display = 'block';
+    
+    streamToElement(`/plagiarize/${taskId}/generate-plot`, '', target, function() {
+        location.reload();
+    });
+}
+
+function setLevel(level) {
+    // 更新 URL 参数并刷新
+    const url = new URL(window.location);
+    url.searchParams.set('level', level);
+    window.location.href = url;
+}
+
+function rewriteText() {
+    const btn = document.getElementById('btn-rewrite');
+    btn.disabled = true;
+    btn.textContent = '改写中...';
+    
+    const target = document.getElementById('result-content') || document.getElementById('stream-target');
+    target.innerHTML = '';
+    target.style.display = 'block';
+    
+    const level = new URLSearchParams(window.location.search).get('level') || '{{ task.rewrite_level }}';
+    streamToElement(`/plagiarize/${taskId}/rewrite`, `level=${level}`, target, function() {
+        location.reload();
+    });
+}
+
+async function saveToChapter() {
+    const novelId = prompt('输入目标小说ID：');
+    if (!novelId) return;
+    
+    const fd = new FormData();
+    fd.append('novel_id', novelId);
+    
+    const resp = await fetch(`/plagiarize/${taskId}/save-to-chapter`, { method: 'POST', body: fd });
+    const data = await resp.json();
+    if (data.ok) {
+        alert('已保存为第 ' + data.chapter_id + ' 章');
+        window.location.href = `/novel/${novelId}/`;
+    } else {
+        alert(data.error || '保存失败');
+    }
+}
+
+async function saveToShort() {
+    const resp = await fetch(`/plagiarize/${taskId}/save-to-short`, { method: 'POST' });
+    const data = await resp.json();
+    if (data.ok) {
+        alert('已保存为短篇');
+        window.location.href = `/short/${data.story_id}`;
+    } else {
+        alert(data.error || '保存失败');
+    }
+}
+
+async function saveAsSkill() {
+    const skillName = prompt('输入技能名称（如：某作者风格）：');
+    if (!skillName) return;
+    
+    const fd = new FormData();
+    fd.append('skill_name', skillName);
+    
+    const resp = await fetch(`/plagiarize/${taskId}/save-as-skill`, { method: 'POST', body: fd });
+    const data = await resp.json();
+    if (data.ok) {
+        alert('已保存为自定义技能，可在技能管理页面查看');
+    } else {
+        alert(data.error || '保存失败');
+    }
+}
+</script>
+
+<style>
+.typing-cursor {
+    animation: blink 1s step-end infinite;
+    color: var(--accent);
+    font-weight: bold;
+}
+@keyframes blink { 50% { opacity: 0; } }
+</style>
+{% endblock %}

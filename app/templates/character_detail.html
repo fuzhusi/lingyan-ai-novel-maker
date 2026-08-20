@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}{{ character.name }} — {{ novel.title }}{% endblock %}
+
+{% block nav %}
+<a href="/novel/{{ novel.id }}/">&larr; 章节列表</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/characters">人物管理</a>
+<span class="sep">|</span>
+<span>{{ character.name }}</span>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Character Card -->
+    <div class="card" style="border-left:3px solid var(--accent)">
+        <h2>{{ character.name }}</h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-top:0.5rem">
+            {% if character.personality %}
+            <div class="kb-field"><strong>性格：</strong>{{ character.personality }}</div>
+            {% endif %}
+            {% if character.speaking_style %}
+            <div class="kb-field"><strong>说话风格：</strong>{{ character.speaking_style }}</div>
+            {% endif %}
+            {% if character.appearance %}
+            <div class="kb-field"><strong>外貌：</strong>{{ character.appearance }}</div>
+            {% endif %}
+            {% if character.motivation %}
+            <div class="kb-field"><strong>动机：</strong>{{ character.motivation }}</div>
+            {% endif %}
+        </div>
+        {% if character.background %}
+        <div class="kb-field" style="margin-top:0.75rem"><strong>背景：</strong>{{ character.background }}</div>
+        {% endif %}
+        {% if character.arc_direction %}
+        <div class="kb-field" style="margin-top:0.5rem"><strong>角色弧光：</strong>{{ character.arc_direction }}</div>
+        {% endif %}
+    </div>
+
+    <!-- Chapter Appearances -->
+    <div class="card">
+        <h2>出场章节 <span class="count-badge">{{ chapter_mentions|length }}</span></h2>
+        {% if chapter_mentions %}
+        <div class="card-list" style="gap:0.4rem">
+            {% for item in chapter_mentions %}
+            <a href="/novel/{{ novel.id }}/chapter/{{ item.chapter.chapter_number }}/write"
+               class="card-item" style="text-decoration:none;color:inherit">
+                <div>
+                    <span style="color:var(--accent);font-weight:600;font-size:0.85rem">第 {{ item.chapter.chapter_number }} 章</span>
+                    <span style="color:var(--text-bright);margin-left:0.5rem">{{ item.chapter.title or '无标题' }}</span>
+                </div>
+                <div style="display:flex;gap:0.4rem">
+                    {% for m in item.mentions %}
+                    <span style="font-size:0.72rem;padding:0.1rem 0.45rem;border-radius:3px;background:var(--accent-ghost);color:var(--accent-light)">{{ m }}</span>
+                    {% endfor %}
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty">该角色尚未在任何章节中出现</p>
+        {% endif %}
+    </div>
+
+    <!-- Focused Writing Mode -->
+    <div class="card">
+        <h2>聚焦写作</h2>
+        <p style="color:var(--text-dim);font-size:0.88rem;margin-bottom:1rem">
+            以「{{ character.name }}」为核心生成内容，系统会自动强化该角色的设定权重。
+        </p>
+        <div class="form-stack">
+            <div class="form-row">
+                <label>写作场景/情节</label>
+                <textarea id="focus-scene" rows="3" placeholder="描述 {{ character.name }} 在这个场景中做什么、遇到什么冲突..."></textarea>
+            </div>
+            <div class="form-row">
+                <label>情感基调</label>
+                <input type="text" id="focus-tone" placeholder="如：紧张、温情、压抑、激昂...">
+            </div>
+            <div class="form-inline-row">
+                <div class="form-row" style="flex:1">
+                    <label>关联章节编号（可选）</label>
+                    <input type="number" id="focus-chapter" placeholder="留空则独立生成">
+                </div>
+                <div class="form-row" style="flex:2;display:flex;align-items:flex-end">
+                    <button id="btn-focus-generate" class="btn-primary" style="width:100%">聚焦生成</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="focus-output-container" style="display:none;margin-top:1.25rem">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+                <h3 style="margin:0">生成结果</h3>
+                <button id="btn-focus-save" class="btn-sm btn-save" disabled>保存到章节</button>
+            </div>
+            <textarea id="focus-output" class="output-area" readonly style="min-height:300px"></textarea>
+            <div id="focus-stream-ind" class="streaming-indicator" style="display:none;position:static;margin-top:0.5rem">正在生成...</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const NOVEL_ID = {{ novel.id }};
+    const CHAR_NAME = {{ character.name|tojson|safe }};
+    const btnGen = document.getElementById('btn-focus-generate');
+    const btnSave = document.getElementById('btn-focus-save');
+    const output = document.getElementById('focus-output');
+    const container = document.getElementById('focus-output-container');
+    const streamInd = document.getElementById('focus-stream-ind');
+    let fullText = '';
+
+    btnGen.onclick = async function() {
+        const scene = document.getElementById('focus-scene').value.trim();
+        if (!scene) return alert('请描述写作场景');
+
+        container.style.display = 'block';
+        output.value = '';
+        fullText = '';
+        btnGen.disabled = true;
+        btnGen.textContent = '生成中...';
+        btnSave.disabled = true;
+        streamInd.style.display = 'block';
+
+        const formData = new URLSearchParams();
+        formData.append('novel_id', NOVEL_ID);
+        formData.append('char_name', CHAR_NAME);
+        formData.append('scene', scene);
+        formData.append('tone', document.getElementById('focus-tone').value);
+        const chNum = document.getElementById('focus-chapter').value;
+        if (chNum) formData.append('chapter_number', chNum);
+
+        try {
+            const resp = await fetch('/api/focus-generate-stream', { method: 'POST', body: formData });
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            if (data.token) { output.value += data.token; output.scrollTop = output.scrollHeight; }
+                            if (data.error) alert('生成错误: ' + data.error);
+                        } catch(e) {}
+                    }
+                }
+            }
+            fullText = output.value;
+            btnSave.disabled = !fullText.trim();
+        } catch(e) { alert('生成失败: ' + e.message); }
+
+        btnGen.disabled = false;
+        btnGen.textContent = '聚焦生成';
+        streamInd.style.display = 'none';
+    };
+
+    btnSave.onclick = async function() {
+        const chNum = document.getElementById('focus-chapter').value;
+        if (!chNum) return alert('请指定要保存到的章节编号');
+        const formData = new URLSearchParams();
+        formData.append('content', fullText);
+        formData.append('source', 'ai');
+        formData.append('model_params_json', '{}');
+        try {
+            const resp = await fetch(`/novel/${NOVEL_ID}/chapter/${chNum}/save-version`, { method: 'POST', body: formData });
+            const data = await resp.json();
+            alert(`已保存为 V${data.version_number}`);
+        } catch(e) { alert('保存失败: ' + e.message); }
+    };
+})();
+</script>
+{% endblock %}

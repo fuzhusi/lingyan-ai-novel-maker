@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}{{ novel.title }} — 章节列表{% endblock %}
+
+{% block nav %}
+<a href="/">&larr; 首页</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/characters">人物</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/world-settings">世界观</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/outline">大纲</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/foreshadowing">伏笔</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/dashboard/">数据面板</a>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="card">
+        <h2>《{{ novel.title }}》</h2>
+        {% if novel.genre or novel.synopsis %}
+        <div style="margin-bottom:1.25rem;padding:0.85rem 1rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
+            {% if novel.genre %}<span class="genre-badge">{{ novel.genre }}</span>{% endif %}
+            {% if novel.synopsis %}<span style="font-size:0.85rem;color:var(--text-dim)">{{ novel.synopsis[:150] }}{% if novel.synopsis|length > 150 %}&hellip;{% endif %}</span>{% endif %}
+        </div>
+        {% endif %}
+        
+        <!-- 导出区域 -->
+        <details style="margin-bottom:1.25rem;">
+            <summary style="cursor:pointer;color:var(--accent);font-weight:600;margin-bottom:0.5rem;">导出小说</summary>
+            <div style="background:var(--bg);padding:1rem;border-radius:var(--radius);border:1px solid var(--border);">
+                <div style="margin-bottom:0.75rem;">
+                    <label style="font-size:0.85rem;color:var(--text-dim);display:block;margin-bottom:0.3rem;">选择章节（留空导出全部，支持格式：1,3,5-8,10）</label>
+                    <input type="text" id="export-chapters" placeholder="例如：1-5,8,10" style="width:100%;font-size:0.9rem;">
+                </div>
+                <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                    <button onclick="exportNovel('txt')" class="btn btn-secondary btn-sm">TXT</button>
+                    <button onclick="exportNovel('docx')" class="btn btn-secondary btn-sm">DOCX</button>
+                    <button onclick="exportNovel('md')" class="btn btn-secondary btn-sm">Markdown</button>
+                    <button onclick="exportNovel('html')" class="btn btn-secondary btn-sm">HTML</button>
+                    <button onclick="exportNovel('epub')" class="btn btn-secondary btn-sm">EPUB</button>
+                </div>
+            </div>
+        </details>
+        
+        <form method="POST" action="/novel/{{ novel.id }}/chapter/create" class="form-stack">
+            <div class="form-inline-row">
+                <div class="form-row" style="flex:0 0 130px">
+                    <label>章节编号</label>
+                    <input type="number" name="chapter_number" placeholder="自动递增">
+                </div>
+                <div class="form-row" style="flex:1">
+                    <label>章节标题</label>
+                    <input type="text" name="title" placeholder="第X章 标题">
+                </div>
+            </div>
+            <div class="form-row">
+                <label>本章大纲</label>
+                <textarea name="outline" rows="3" placeholder="这一章要发生什么..."></textarea>
+            </div>
+            <div class="form-row">
+                <label>特别指示 <span class="hint">（最高优先级，覆盖预设设定）</span></label>
+                <textarea name="user_directive" rows="2" placeholder="例如：本章需要表现主角的脆弱面，在结尾埋下一个关于玉佩的伏笔..."></textarea>
+            </div>
+            <button type="submit">创建章节</button>
+        </form>
+    </div>
+
+    <h3>章节列表</h3>
+    {% if chapters %}
+    <div class="chapter-grid">
+        {% for ch in chapters %}
+        <div class="chapter-card">
+            <a href="/novel/{{ novel.id }}/chapter/{{ ch.chapter_number }}/write" style="text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:0.3rem;flex:1">
+                <span class="ch-num">第 {{ ch.chapter_number }} 章</span>
+                <span class="ch-title">{{ ch.title or '无标题' }}</span>
+                {% if ch.outline_node_id and outline_nodes.get(ch.outline_node_id) %}
+                <span class="ch-outline-ref">&#x1F4CB; {{ outline_nodes[ch.outline_node_id].title }}</span>
+                {% endif %}
+                <span class="ch-versions">{{ ch.versions|length }} 个版本</span>
+            </a>
+            <form method="POST" action="/novel/{{ novel.id }}/chapter/{{ ch.chapter_number }}/delete"
+                  onsubmit="return confirm('确定删除第 {{ ch.chapter_number }} 章「{{ ch.title or '无标题' }}」及其所有版本和评审数据？')"
+                  style="position:absolute;top:0.5rem;right:0.5rem">
+                <button type="submit" class="btn-sm btn-danger" title="删除此章节">&times;</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty">还没有章节 &mdash; 可以从 <a href="/novel/{{ novel.id }}/outline">大纲树</a> 一键创建</p>
+    {% endif %}
+    <div style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-faint);font-style:italic">
+        提示：先到 <a href="/novel/{{ novel.id }}/outline">大纲树</a> 规划结构，再创建章节并关联大纲节点，生成时会自动注入分幕指引。
+    </div>
+</div>
+
+<script>
+function exportNovel(format) {
+    const chapters = document.getElementById('export-chapters').value.trim();
+    let url = `/novel/{{ novel.id }}/export/${format}`;
+    if (chapters) {
+        url += `?chapters=${encodeURIComponent(chapters)}`;
+    }
+    window.location.href = url;
+}
+</script>
+{% endblock %}

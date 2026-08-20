@@ -1,0 +1,1738 @@
+{% extends "base.html" %}
+{% block title %}{{ story.title }} — 短篇创作{% endblock %}
+
+{% block content %}
+<div class="short-write-layout">
+    <!-- Draft recovery banner -->
+    <div id="draft-banner" style="display:none;background:rgba(201,160,58,0.15);border:1px solid var(--accent);border-radius:8px;padding:0.8rem 1.2rem;margin-bottom:1rem;justify-content:space-between;align-items:center">
+        <div>
+            <strong style="color:var(--accent)">检测到未保存的草稿</strong>
+            <span style="color:var(--text-dim);font-size:0.85rem;margin-left:0.6rem" id="draft-info"></span>
+        </div>
+        <div style="display:flex;gap:0.5rem">
+            <button id="btn-restore-draft" class="btn-primary btn-sm">恢复草稿</button>
+            <button id="btn-discard-draft" class="btn-secondary btn-sm">丢弃</button>
+        </div>
+    </div>
+
+    <!-- Left sidebar -->
+    <aside class="short-sidebar">
+        <div style="margin-bottom:1rem">
+            <a href="/short/" class="btn btn-secondary btn-sm">&#x2190; 返回列表</a>
+        </div>
+
+        <div class="sidebar-card">
+            <h3>创作设定</h3>
+            <div class="setting-item">
+                <span class="setting-label">模式</span>
+                <span class="setting-value">
+                    {% if story.mode == "inspiration" %}灵感模式（双Agent）
+                    {% elif story.mode == "setting" %}设定模式
+                    {% else %}细心模式{% endif %}
+                </span>
+            </div>
+            {% if story.genre %}
+            <div class="setting-item">
+                <span class="setting-label">体裁</span>
+                <span class="setting-value">{{ story.genre }}</span>
+            </div>
+            {% endif %}
+            {% if story.tone %}
+            <div class="setting-item">
+                <span class="setting-label">基调</span>
+                <span class="setting-value">{{ story.tone }}</span>
+            </div>
+            {% endif %}
+            {% if story.structure_template %}
+            <div class="setting-item">
+                <span class="setting-label">结构</span>
+                <span class="setting-value">
+                    {% if story.structure_template == "three_act" %}📐 三段式
+                    {% elif story.structure_template == "twist" %}🔄 反转式
+                    {% elif story.structure_template == "emotional_arc" %}💫 情感弧
+                    {% elif story.structure_template == "escalating" %}⚔️ 冲突递进
+                    {% else %}{{ story.structure_template }}{% endif %}
+                </span>
+            </div>
+            {% endif %}
+            <div class="setting-item">
+                <span class="setting-label">目标</span>
+                <span class="setting-value">{{ story.word_target }} 字</span>
+            </div>
+            {% if story.inspiration %}
+            <div class="setting-item" style="flex-direction:column;align-items:flex-start">
+                <span class="setting-label">灵感</span>
+                <span class="setting-value" style="margin-top:0.3rem;font-size:0.85rem;line-height:1.5">{{ story.inspiration }}</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Stats -->
+        <div class="sidebar-card">
+            <h3>统计</h3>
+            <div class="setting-item">
+                <span class="setting-label">字数</span>
+                <span class="setting-value" id="char-count">{{ story.content|length }}</span>
+            </div>
+            <div class="setting-item">
+                <span class="setting-label">状态</span>
+                <span class="setting-value" id="story-status">
+                    {% if story.status == "done" %}已完成
+                    {% elif story.status == "generating" %}生成中...
+                    {% elif story.status == "expanding" %}生成大纲中...
+                    {% elif story.status == "concept_ready" %}构思就绪
+                    {% else %}待开始{% endif %}
+                </span>
+            </div>
+        </div>
+
+        <!-- Unified Review & Rewrite section -->
+        <div class="sidebar-card" id="review-section">
+            <h3>评审与修改</h3>
+            {% if story.content %}
+            <button id="btn-review" class="btn-primary btn-sm" style="width:100%;margin-bottom:0.6rem">
+                质量评审（评分 + 17维度审计）
+            </button>
+            {% else %}
+            <button id="btn-review" class="btn-secondary btn-sm" style="width:100%;margin-bottom:0.6rem" disabled
+                    title="请先生成短篇内容">
+                质量评审（暂无内容）
+            </button>
+            {% endif %}
+
+            <!-- Review result (hidden until review completes) -->
+            <div id="review-result" style="display:none">
+                <!-- Overall score -->
+                <div id="review-score" style="font-size:1.3rem;font-weight:700;text-align:center;margin-bottom:0.3rem"></div>
+                <!-- Audit dimension bars -->
+                <div id="audit-bars" style="margin-bottom:0.6rem"></div>
+                <!-- Critic comment -->
+                <div id="review-comment" style="font-size:0.82rem;color:var(--text-dim);line-height:1.5;margin-bottom:0.6rem;max-height:120px;overflow-y:auto"></div>
+                <!-- Issues summary -->
+                <div id="review-issues" style="margin-bottom:0.6rem"></div>
+                <!-- User feedback -->
+                <details style="margin-bottom:0.5rem">
+                    <summary style="cursor:pointer;font-size:0.82rem;color:var(--text-dim)">我的意见</summary>
+                    <textarea id="user-feedback" rows="2" placeholder="补充意见（重写时会参考）..." style="width:100%;font-size:0.82rem;margin:0.3rem 0"></textarea>
+                    <button id="btn-save-feedback" class="btn-secondary btn-sm" style="width:100%">保存意见</button>
+                </details>
+                <!-- Rewrite button -->
+                <button id="btn-rewrite-feedback" class="btn-primary btn-sm" style="width:100%">
+                    根据评审重写
+                </button>
+            </div>
+        </div>
+
+        <!-- Free rewrite -->
+        <div class="sidebar-card" id="rewrite-section">
+            <h3>自由润色</h3>
+            <textarea id="rewrite-instruction" rows="2" placeholder="输入修改要求..." style="width:100%;margin-bottom:0.5rem" {% if not story.content %}disabled{% endif %}></textarea>
+            <button id="btn-rewrite" class="btn-secondary btn-sm" style="width:100%" {% if not story.content %}disabled{% endif %}>
+                AI 润色
+            </button>
+        </div>
+
+        <!-- Version history -->
+        <div class="sidebar-card" id="version-section">
+            <h3>版本历史</h3>
+            <div id="version-list" style="font-size:0.82rem;color:var(--text-dim)">暂无版本</div>
+        </div>
+
+        <!-- Export -->
+        {% if story.content %}
+        <div class="sidebar-card">
+            <h3>导出</h3>
+            <div style="display:flex;gap:0.4rem;flex-wrap:wrap">
+                <a href="/short/{{ story.id }}/export/txt" class="btn-secondary btn-sm" style="flex:1;text-align:center;text-decoration:none;min-width:45px">TXT</a>
+                <a href="/short/{{ story.id }}/export/docx" class="btn-secondary btn-sm" style="flex:1;text-align:center;text-decoration:none;min-width:45px">DOCX</a>
+                <a href="/short/{{ story.id }}/export/md" class="btn-secondary btn-sm" style="flex:1;text-align:center;text-decoration:none;min-width:45px">MD</a>
+                <a href="/short/{{ story.id }}/export/html" class="btn-secondary btn-sm" style="flex:1;text-align:center;text-decoration:none;min-width:45px">HTML</a>
+                <a href="/short/{{ story.id }}/export/epub" class="btn-secondary btn-sm" style="flex:1;text-align:center;text-decoration:none;min-width:45px">EPUB</a>
+            </div>
+        </div>
+        {% endif %}
+    </aside>
+
+    <!-- Main content area -->
+    <div class="short-main">
+        <!-- Toolbar -->
+        <div class="short-toolbar">
+            <input type="text" id="story-title" value="{{ story.title }}" placeholder="标题..."
+                   style="flex:1;font-size:1.1rem;padding:0.4rem 0.8rem;background:transparent;border:none;color:var(--text);font-family:var(--font-display)">
+            <div style="display:flex;gap:0.5rem" id="toolbar-actions">
+                <!-- Buttons are dynamically shown based on state -->
+            </div>
+        </div>
+
+        <!-- ============ INSPIRATION / SETTING MODE: 4-Stage Planning + Node Flow ============ -->
+        {% if story.mode != "careful" %}
+
+        <!-- Planning Stages (角色 → 场景 → 大纲 → 主题) -->
+        <div id="planning-section">
+
+            <!-- Stage 1: 角色设计 -->
+            <div class="plan-stage" id="stage-characters">
+                <div class="section-label">
+                    <span class="step-badge">1</span> 角色设计
+                    <span class="step-hint">—— AI 设计角色档案（可跳过）</span>
+                </div>
+                <div id="plan-characters-display" class="concept-area">
+                    {% if story.plan_characters %}
+                    {{ story.plan_characters }}
+                    {% else %}
+                    <div class="concept-placeholder">
+                        点击「生成角色」，AI 将根据你的灵感设计角色档案...
+                    </div>
+                    {% endif %}
+                </div>
+                <textarea id="plan-characters-editor" class="concept-editor" style="display:none">{{ story.plan_characters }}</textarea>
+                <div class="concept-actions" id="plan-characters-actions">
+                    {% if not story.plan_characters %}
+                    <button id="btn-plan-characters" class="btn-primary">生成角色</button>
+                    {% else %}
+                    <button id="btn-plan-characters" class="btn-secondary">重新生成</button>
+                    <button id="btn-edit-characters" class="btn-secondary">编辑</button>
+                    <button id="btn-confirm-characters" class="btn-primary">确认，进入场景</button>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Stage 2: 剧情大纲 -->
+            <div class="plan-stage" id="stage-outline"
+                 {% if not story.plan_characters and not story.concept %}style="opacity:0.5;pointer-events:none"{% endif %}>
+                <div class="section-label">
+                    <span class="step-badge">2</span> 剧情大纲
+                    <span class="step-hint">—— AI 生成结构化剧情大纲（核心步骤）</span>
+                </div>
+                <div id="concept-display" class="concept-area">
+                    {% if story.concept %}
+                    {{ story.concept }}
+                    {% else %}
+                    <div class="concept-placeholder">
+                        点击「生成大纲」，AI 将综合角色档案产出结构化剧情大纲...
+                    </div>
+                    {% endif %}
+                </div>
+                <textarea id="concept-editor" class="concept-editor" style="display:none">{{ story.concept }}</textarea>
+                <div id="concept-stream" class="concept-area" style="display:none"></div>
+                <div class="concept-actions" id="concept-actions">
+                    {% if not story.concept %}
+                    <button id="btn-expand" class="btn-primary">生成大纲</button>
+                    {% else %}
+                    <button id="btn-expand" class="btn-secondary">重新生成大纲</button>
+                    <button id="btn-edit-concept" class="btn-secondary">编辑大纲</button>
+                    <button id="btn-confirm-concept" class="btn-primary">确认大纲，进入主题</button>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Stage 3: 主题定调 -->
+            <div class="plan-stage" id="stage-theme"
+                 {% if not story.concept %}style="opacity:0.5;pointer-events:none"{% endif %}>
+                <div class="section-label">
+                    <span class="step-badge">3</span> 主题定调
+                    <span class="step-hint">—— AI 提炼主题与叙事风格（可跳过）</span>
+                </div>
+                <div id="plan-theme-display" class="concept-area">
+                    {% if story.plan_theme %}
+                    {{ story.plan_theme }}
+                    {% else %}
+                    <div class="concept-placeholder">
+                        点击「生成主题」，AI 将综合全部策划提炼主题与叙事风格...
+                    </div>
+                    {% endif %}
+                </div>
+                <textarea id="plan-theme-editor" class="concept-editor" style="display:none">{{ story.plan_theme }}</textarea>
+                <div class="concept-actions" id="plan-theme-actions">
+                    {% if not story.plan_theme %}
+                    <button id="btn-plan-theme" class="btn-primary">生成主题</button>
+                    {% else %}
+                    <button id="btn-plan-theme" class="btn-secondary">重新生成</button>
+                    <button id="btn-edit-theme" class="btn-secondary">编辑</button>
+                    <button id="btn-confirm-theme" class="btn-primary">确认，开始创作</button>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 4: Story area (write from concept) -->
+        <div id="story-section" {% if story.concept %}style="opacity:1;pointer-events:auto"{% elif not story.content %}style="opacity:0.5;pointer-events:none"{% endif %}>
+            <div class="section-label">
+                <span class="step-badge">4</span> 故事创作
+                <span class="step-hint">—— AI 按剧情大纲逐节点写出完整短篇</span>
+            </div>
+
+            <!-- 剧情节点进度条 -->
+            {% if outline_nodes %}
+            <div id="node-progress" class="node-progress">
+                <div class="node-progress-header">
+                    <span>剧情节点进度</span>
+                    <span id="node-progress-text" class="node-progress-text">
+                        {{ outline_nodes|selectattr('status','equalto','done')|list|length }}/{{ outline_nodes|length }}
+                    </span>
+                </div>
+                <div class="node-progress-track">
+                    <div id="node-progress-fill" class="node-progress-fill"
+                         style="width:{{ (outline_nodes|selectattr('status','equalto','done')|list|length / outline_nodes|length * 100)|round|int }}%"></div>
+                </div>
+                <div class="node-chips" id="node-chips">
+                    {% for n in outline_nodes %}
+                    <span class="node-chip {% if n.status == 'done' %}done{% endif %}"
+                          data-node-id="{{ n.id }}"
+                          title="{{ n.title }}">{{ n.id }}. {{ n.title.split('——')[0] }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <div id="content-display" class="short-content">
+                {% if story.content %}
+                {{ story.content }}
+                {% else %}
+                <div class="concept-placeholder">确认大纲后，AI 将按剧情大纲逐节点生成完整短篇...</div>
+                {% endif %}
+            </div>
+
+            <textarea id="content-editor" class="short-editor" style="display:none">{{ story.content }}</textarea>
+            <div id="content-stream" class="short-content" style="display:none"></div>
+            <div id="local-edit-panel" class="short-content" style="display:none;margin-top:0.5rem;min-height:60px;font-size:0.85rem;white-space:pre-wrap"></div>
+
+            <div class="concept-actions" id="story-actions">
+                {% if story.content %}
+                <button id="btn-write" class="btn-secondary">重新创作</button>
+                <button id="btn-edit" class="btn-secondary">编辑全文</button>
+                {% else %}
+                <button id="btn-write" class="btn-primary">开始创作</button>
+                {% endif %}
+                <button id="btn-save" class="btn-primary" style="display:none">保存</button>
+                <button id="btn-cancel" class="btn-secondary" style="display:none">取消</button>
+            </div>
+        </div>
+
+        <!-- ============ SETTING / CAREFUL MODE: Direct Generation ============ -->
+        {% else %}
+
+        <div id="content-display" class="short-content">
+            {% if story.content %}
+            {{ story.content }}
+            {% else %}
+            <div class="empty-state" style="padding:4rem 2rem">
+                <div class="empty-icon">&#x270F;&#xFE0F;</div>
+                <p class="empty-title">准备就绪</p>
+                <p class="empty-desc">点击「AI 生成」开始创作</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <textarea id="content-editor" class="short-editor" style="display:none">{{ story.content }}</textarea>
+        <div id="content-stream" class="short-content" style="display:none"></div>
+        <div id="local-edit-panel" class="short-content" style="display:none;margin-top:0.5rem;min-height:60px;font-size:0.85rem;white-space:pre-wrap"></div>
+
+        <div class="concept-actions" id="story-actions">
+            {% if not story.content %}
+            <button id="btn-generate" class="btn-primary">AI 生成</button>
+            {% else %}
+            <button id="btn-generate" class="btn-secondary">重新生成</button>
+            <button id="btn-edit" class="btn-secondary">编辑</button>
+            {% endif %}
+            <button id="btn-save" class="btn-primary" style="display:none">保存</button>
+            <button id="btn-cancel" class="btn-secondary" style="display:none">取消</button>
+        </div>
+
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    // XSS protection helper
+    function escapeHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    const storyId = {{ story.id }};
+    const mode = "{{ story.mode }}";
+
+    // ============ Draft Auto-save (P1-3) ============
+    const DRAFT_KEY = `lingyan_draft_${storyId}`;
+    const DRAFT_INTERVAL = 10000; // 10 秒
+
+    // 检测草稿（仅当服务器无内容时才提示恢复，避免删除重建后误匹配旧草稿）
+    const draft = localStorage.getItem(DRAFT_KEY);
+    const serverContent = document.getElementById('content-display');
+    const hasServerContent = serverContent && serverContent.innerText.trim().length > 0;
+    if (draft && !hasServerContent) {
+        try {
+            const data = JSON.parse(draft);
+            const ageMin = Math.round((Date.now() - data.timestamp) / 60000);
+            document.getElementById('draft-banner').style.display = 'flex';
+            document.getElementById('draft-info').textContent = `草稿 ${data.content.length} 字 · ${ageMin} 分钟前保存`;
+
+            document.getElementById('btn-restore-draft').addEventListener('click', function() {
+                if (contentDisplay && data.content) {
+                    contentDisplay.innerText = data.content;
+                    updateCount(data.content);
+                    localStorage.removeItem(DRAFT_KEY);
+                    document.getElementById('draft-banner').style.display = 'none';
+                }
+            });
+            document.getElementById('btn-discard-draft').addEventListener('click', function() {
+                localStorage.removeItem(DRAFT_KEY);
+                document.getElementById('draft-banner').style.display = 'none';
+            });
+        } catch(e) {}
+    }
+
+    // 自动保存草稿
+    function saveDraft() {
+        // 只在有内容时保存
+        const contentEl = document.getElementById('content-display');
+        const content = contentEl ? contentEl.innerText : '';
+        if (content && content.length > 50) {
+            localStorage.setItem(DRAFT_KEY, JSON.stringify({
+                content: content,
+                timestamp: Date.now(),
+                storyId: storyId,
+            }));
+        }
+    }
+    // 每 10 秒自动保存
+    setInterval(saveDraft, DRAFT_INTERVAL);
+    // 页面关闭前最后保存
+    window.addEventListener('beforeunload', saveDraft);
+
+    // Common elements
+    const charCount = document.getElementById('char-count');
+    const statusEl = document.getElementById('story-status');
+    const titleInput = document.getElementById('story-title');
+
+    function updateCount(text) { charCount.textContent = text.length; }
+    function setStatus(s) { statusEl.textContent = s; }
+
+    function saveVersion(content, source) {
+        const fd = new FormData();
+        fd.append('content', content);
+        fd.append('source', source || 'ai');
+        fetch(`/short/${storyId}/save-version`, { method: 'POST', body: fd })
+            .then(() => { if (typeof loadVersions === 'function') loadVersions(); });
+    }
+
+    function streamToElement(url, body, targetEl, onDone, opts) {
+        opts = opts || {};
+        const controller = new AbortController();
+        const initialText = opts.initial || '';
+        targetEl.style.display = 'block';
+        targetEl.innerHTML = '';
+        // Use a text node + separate cursor element to avoid full re-render
+        const textNode = document.createTextNode(initialText);
+        const cursor = document.createElement('span');
+        cursor.className = 'typing-cursor';
+        cursor.textContent = '|';
+        targetEl.appendChild(textNode);
+        targetEl.appendChild(cursor);
+        let rawText = initialText;          // 含节点标记的原文
+        let displayText = initialText;      // 剔除节点标记后展示
+        let lastBoundary = 0;               // 最近一个完整节点的结束位置（displayText 坐标）
+
+        function handleNodeMarkers() {
+            const nodeRe = /===NODE:(\d+):([^=]*)===/g;
+            let m;
+            while ((m = nodeRe.exec(rawText)) !== null) {
+                // 该标记出现前的内容（剔除之前的标记）即上一个节点的完整文本
+                const cleanBefore = rawText.slice(0, m.index)
+                    .replace(/===NODE:\d+:[^=]*===/g, '');
+                lastBoundary = cleanBefore.length;
+                if (opts.onNode) opts.onNode(parseInt(m[1]), m[2].trim(), lastBoundary);
+            }
+            displayText = rawText.replace(/===NODE:\d+:[^=]*===/g, '');
+        }
+
+        fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body || '',
+            signal: controller.signal,
+        }).then(resp => {
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+
+            function read() {
+                reader.read().then(({ done, value }) => {
+                    if (done) {
+                        cursor.remove();
+                        textNode.textContent = displayText;
+                        if (onDone) onDone(displayText);
+                        // 成功保存到服务器，清除本地草稿
+                        localStorage.removeItem(`lingyan_draft_${storyId}`);
+                        return;
+                    }
+                    const chunk = decoder.decode(value, { stream: true });
+                    rawText += chunk;
+                    handleNodeMarkers();
+                    textNode.textContent = displayText;
+                    updateCount(displayText);
+                    // Auto-scroll to bottom
+                    targetEl.scrollTop = targetEl.scrollHeight;
+                    read();
+                }).catch(err => {
+                    cursor.remove();
+                    if (err.name === 'AbortError') {
+                        // 用户暂停：保留已生成文本
+                        textNode.textContent = displayText;
+                        if (opts.onAbort) opts.onAbort(displayText);
+                    } else {
+                        const errorP = document.createElement('p');
+                        errorP.style.color = 'var(--danger)';
+                        errorP.textContent = '失败: ' + err.message;
+                        targetEl.appendChild(errorP);
+                    }
+                });
+            }
+            read();
+        }).catch(err => {
+            if (err.name === 'AbortError') {
+                if (opts.onAbort) opts.onAbort(displayText);
+                return;
+            }
+            targetEl.innerHTML = '';
+            const errorP = document.createElement('p');
+            errorP.style.color = 'var(--danger)';
+            errorP.textContent = '失败: ' + err.message;
+            targetEl.appendChild(errorP);
+        });
+
+        return controller;
+    }
+
+    // 流式追加到 textarea（续写用）；返回 AbortController
+    function streamToEditor(url, body, editor, onDone) {
+        const controller = new AbortController();
+        const startLen = editor.value.length;
+        editor.value += '';
+        fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body || '',
+            signal: controller.signal,
+        }).then(resp => {
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let acc = '';
+            (function read() {
+                reader.read().then(({ done, value }) => {
+                    if (done) {
+                        if (onDone) onDone(acc);
+                        return;
+                    }
+                    const chunk = decoder.decode(value, { stream: true });
+                    acc += chunk;
+                    editor.value = editor.value.slice(0, startLen) + acc;
+                    editor.scrollTop = editor.scrollHeight;
+                    updateCount(editor.value);
+                    read();
+                }).catch(err => {
+                    if (err.name !== 'AbortError') {
+                        editor.value += '\n[失败: ' + err.message + ']';
+                    }
+                });
+            })();
+        }).catch(err => {
+            if (err.name !== 'AbortError') editor.value += '\n[失败: ' + err.message + ']';
+        });
+        return controller;
+    }
+
+    // 流式收集到变量（扩写/局部重写用，完成后替换选区）
+    function streamCollect(url, body, onToken, onDone, onErr) {
+        const controller = new AbortController();
+        fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body || '',
+            signal: controller.signal,
+        }).then(resp => {
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let acc = '';
+            (function read() {
+                reader.read().then(({ done, value }) => {
+                    if (done) { if (onDone) onDone(acc); return; }
+                    const chunk = decoder.decode(value, { stream: true });
+                    acc += chunk;
+                    if (onToken) onToken(acc);
+                    read();
+                }).catch(err => {
+                    if (err.name === 'AbortError') return;
+                    if (onErr) onErr(err.message);
+                });
+            })();
+        }).catch(err => {
+            if (err.name !== 'AbortError' && onErr) onErr(err.message);
+        });
+        return controller;
+    }
+
+    // 绑定局部编辑工具（续写/扩写选中/重写选中），编辑模式注入按钮后调用
+    function bindLocalEditTools(editor, panel) {
+        const btnContinue = document.getElementById('btn-continue');
+        const btnExpandSel = document.getElementById('btn-expand-sel');
+        const btnRewriteSel = document.getElementById('btn-rewrite-sel');
+
+        if (btnContinue) btnContinue.addEventListener('click', function() {
+            this.disabled = true;
+            this.textContent = '续写中...';
+            setStatus('续写中...');
+            streamToEditor(`/short/${storyId}/continue`, `words=800`, editor, function() {
+                btnContinue.disabled = false;
+                btnContinue.textContent = '续写';
+                setStatus('已完成');
+                updateCount(editor.value);
+                // 同步显示区（退出编辑模式时用到）+ 启用评审按钮
+                if (contentDisplay) contentDisplay.innerText = editor.value;
+                enableReviewButton();
+            });
+        });
+
+        if (btnExpandSel) btnExpandSel.addEventListener('click', function() {
+            const start = editor.selectionStart, end = editor.selectionEnd;
+            const sel = editor.value.slice(start, end);
+            if (!sel.trim()) { alert('请先在编辑器中选中要扩写的段落'); return; }
+            const before = editor.value.slice(0, start);
+            const words = prompt('扩写增加字数', '500');
+            if (!words) return;
+            this.disabled = true;
+            this.textContent = '扩写中...';
+            panel.style.display = 'block';
+            panel.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem">正在扩写选中段落…</div>';
+            streamCollect(
+                `/short/${storyId}/expand-selection`,
+                `text=${encodeURIComponent(sel)}&before=${encodeURIComponent(before)}&words=${encodeURIComponent(words)}`,
+                function(acc) { panel.innerHTML = escapeHtml(acc); },
+                function(result) {
+                    if (result && result.trim()) {
+                        editor.value = before + result + editor.value.slice(end);
+                    }
+                    panel.style.display = 'none';
+                    btnExpandSel.disabled = false;
+                    btnExpandSel.textContent = '扩写选中';
+                    updateCount(editor.value);
+                    editor.focus();
+                },
+                function(msg) {
+                    panel.innerHTML = '<span style="color:var(--danger)">失败: ' + escapeHtml(msg) + '</span>';
+                    btnExpandSel.disabled = false;
+                    btnExpandSel.textContent = '扩写选中';
+                }
+            );
+        });
+
+        if (btnRewriteSel) btnRewriteSel.addEventListener('click', function() {
+            const start = editor.selectionStart, end = editor.selectionEnd;
+            const sel = editor.value.slice(start, end);
+            if (!sel.trim()) { alert('请先在编辑器中选中要重写的段落'); return; }
+            const instruction = prompt('重写指令（例如：改成第一人称、更口语化、增加动作描写）', '');
+            if (!instruction || !instruction.trim()) return;
+            const before = editor.value.slice(0, start);
+            this.disabled = true;
+            this.textContent = '重写中...';
+            panel.style.display = 'block';
+            panel.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem">正在按指令重写选中段落…</div>';
+            streamCollect(
+                `/short/${storyId}/rewrite-selection`,
+                `text=${encodeURIComponent(sel)}&instruction=${encodeURIComponent(instruction)}&before=${encodeURIComponent(before)}`,
+                function(acc) { panel.innerHTML = escapeHtml(acc); },
+                function(result) {
+                    if (result && result.trim()) {
+                        editor.value = before + result + editor.value.slice(end);
+                    }
+                    panel.style.display = 'none';
+                    btnRewriteSel.disabled = false;
+                    btnRewriteSel.textContent = '重写选中';
+                    updateCount(editor.value);
+                    editor.focus();
+                },
+                function(msg) {
+                    panel.innerHTML = '<span style="color:var(--danger)">失败: ' + escapeHtml(msg) + '</span>';
+                    btnRewriteSel.disabled = false;
+                    btnRewriteSel.textContent = '重写选中';
+                }
+            );
+        });
+    }
+
+    // Common DOM elements (shared across all modes)
+    const contentDisplay = document.getElementById('content-display');
+    const contentEditor = document.getElementById('content-editor');
+    const contentStream = document.getElementById('content-stream');
+
+    // ==================== INSPIRATION / SETTING MODE ====================
+    if (mode !== 'careful') {
+        const conceptDisplay = document.getElementById('concept-display');
+        const conceptEditor = document.getElementById('concept-editor');
+        const conceptStream = document.getElementById('concept-stream');
+        const conceptActions = document.getElementById('concept-actions');
+        const storySection = document.getElementById('story-section');
+        const storyActions = document.getElementById('story-actions');
+
+        // ===== 通用策划阶段处理（角色/场景/主题） =====
+        function setupPlanStage(stageName, generateUrl, field, nextStageId) {
+            const display = document.getElementById(`plan-${stageName}-display`);
+            const editor = document.getElementById(`plan-${stageName}-editor`);
+            const actions = document.getElementById(`plan-${stageName}-actions`);
+            const btnGenerate = document.getElementById(`btn-plan-${stageName}`);
+            const btnEdit = document.getElementById(`btn-edit-${stageName}`);
+            const btnConfirm = document.getElementById(`btn-confirm-${stageName}`);
+
+            function renderActions(hasContent) {
+                const labelMap = {
+                    characters: { gen: '生成角色', confirm: '确认，进入大纲' },
+                    theme: { gen: '生成主题', confirm: '确认，开始创作' },
+                };
+                const labels = labelMap[stageName] || { gen: '生成', confirm: '确认' };
+                actions.innerHTML = hasContent
+                    ? `<button id="btn-plan-${stageName}" class="btn-secondary">重新生成</button>
+                       <button id="btn-edit-${stageName}" class="btn-secondary">编辑</button>
+                       <button id="btn-confirm-${stageName}" class="btn-primary">${labels.confirm}</button>`
+                    : `<button id="btn-plan-${stageName}" class="btn-primary">${labels.gen}</button>`;
+                // 重新绑定
+                bindHandlers();
+            }
+
+            function bindHandlers() {
+                const gen = document.getElementById(`btn-plan-${stageName}`);
+                const edit = document.getElementById(`btn-edit-${stageName}`);
+                const confirm = document.getElementById(`btn-confirm-${stageName}`);
+
+                if (gen) gen.addEventListener('click', function() {
+                    if (this.disabled) return;
+                    this.disabled = true;
+                    this.textContent = '生成中...';
+                    setStatus('生成中...');
+                    display.style.display = 'none';
+                    const stream = document.getElementById(`concept-stream`);
+                    if (stream) { stream.style.display = 'block'; stream.innerHTML = '<div class="concept-placeholder">正在生成…</div>'; }
+
+                    fetch(generateUrl, { method: 'POST' })
+                        .then(r => r.json())
+                        .then(data => {
+                            if (stream) stream.style.display = 'none';
+                            display.style.display = 'block';
+                            if (data.error) {
+                                display.innerText = '生成失败：' + data.error;
+                                setStatus('生成失败');
+                            } else {
+                                display.innerText = data[field] || '';
+                                setStatus('就绪');
+                                renderActions(true);
+                                // 解锁下一阶段
+                                if (nextStageId) {
+                                    const next = document.getElementById(nextStageId);
+                                    if (next) { next.style.opacity = '1'; next.style.pointerEvents = 'auto'; }
+                                }
+                            }
+                        })
+                        .catch(err => {
+                            if (stream) stream.style.display = 'none';
+                            display.style.display = 'block';
+                            display.innerText = '生成失败：' + err.message;
+                            setStatus('生成失败');
+                            renderActions(false);
+                        });
+                });
+
+                if (edit) edit.addEventListener('click', function() {
+                    const displayH = display.offsetHeight;
+                    editor.value = display.innerText;
+                    display.style.display = 'none';
+                    editor.style.display = 'block';
+                    editor.style.height = Math.max(displayH, 300) + 'px';
+                    editor.focus();
+                    actions.innerHTML = `
+                        <button id="btn-save-${stageName}" class="btn-primary">保存</button>
+                        <button id="btn-cancel-${stageName}" class="btn-secondary">取消</button>
+                    `;
+                    document.getElementById(`btn-save-${stageName}`).addEventListener('click', function() {
+                        fetch(`/short/${storyId}/save-plan`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: `field=plan_${stageName}&content=${encodeURIComponent(editor.value)}`
+                        }).then(r => r.json()).then(data => {
+                            display.innerText = editor.value;
+                            display.style.display = 'block';
+                            editor.style.display = 'none';
+                            renderActions(true);
+                        });
+                    });
+                    document.getElementById(`btn-cancel-${stageName}`).addEventListener('click', function() {
+                        display.style.display = 'block';
+                        editor.style.display = 'none';
+                        renderActions(true);
+                    });
+                });
+
+                if (confirm) confirm.addEventListener('click', function() {
+                    // 解锁下一阶段
+                    if (nextStageId) {
+                        const next = document.getElementById(nextStageId);
+                        if (next) { next.style.opacity = '1'; next.style.pointerEvents = 'auto'; }
+                    }
+                    // 主题阶段确认后：解锁故事创作区并自动触发流式创作
+                    if (stageName === 'theme') {
+                        storySection.style.opacity = '1';
+                        storySection.style.pointerEvents = 'auto';
+                        setStatus('开始创作...');
+                        triggerWrite();
+                    }
+                    setStatus('已确认');
+                });
+            }
+
+            bindHandlers();
+        }
+
+        // 初始化两个策划阶段（角色→主题，大纲用原有 bindConceptActions）
+        setupPlanStage('characters', `/short/${storyId}/plan-characters`, 'plan_characters', 'stage-outline');
+        setupPlanStage('theme', `/short/${storyId}/plan-theme`, 'plan_theme', null);
+
+        // Expand button — handled by bindConceptActions() below
+
+        function bindConceptActions() {
+            const btnExpand = document.getElementById('btn-expand');
+            const btnEdit = document.getElementById('btn-edit-concept');
+            const btnConfirm = document.getElementById('btn-confirm-concept');
+
+            if (btnExpand) btnExpand.addEventListener('click', function() {
+                if (this.disabled) return; // 防双击
+                this.disabled = true;
+                this.textContent = '生成大纲中...';
+                setStatus('生成大纲中...');
+                conceptDisplay.style.display = 'none';
+                conceptStream.style.display = 'block';
+                conceptStream.innerHTML = '<div class="concept-placeholder">正在生成剧情大纲…</div>';
+
+                fetch(`/short/${storyId}/expand`, { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => {
+                        conceptStream.style.display = 'none';
+                        conceptDisplay.style.display = 'block';
+                        conceptDisplay.innerText = data.concept || '';
+                        setStatus('大纲就绪');
+                        // 启用故事创作区并渲染节点进度条
+                        storySection.style.opacity = '1';
+                        storySection.style.pointerEvents = 'auto';
+                        if (data.nodes && data.nodes.length) {
+                            renderOutlineNodes(data.nodes);
+                        }
+                        conceptActions.innerHTML = `
+                            <button id="btn-expand" class="btn-secondary">重新生成大纲</button>
+                            <button id="btn-edit-concept" class="btn-secondary">编辑大纲</button>
+                            <button id="btn-confirm-concept" class="btn-primary">确认大纲，进入主题</button>
+                        `;
+                        bindConceptActions();
+                    })
+                    .catch(err => {
+                        conceptStream.style.display = 'none';
+                        conceptDisplay.style.display = 'block';
+                        conceptDisplay.innerText = '大纲生成失败：' + err.message;
+                        setStatus('大纲生成失败');
+                        this.disabled = false;
+                        this.textContent = '重新生成大纲';
+                        conceptActions.innerHTML = `
+                            <button id="btn-expand" class="btn-secondary">重新生成大纲</button>
+                        `;
+                        bindConceptActions();
+                    });
+            });
+
+            if (btnEdit) btnEdit.addEventListener('click', function() {
+                // 先量高度，再隐藏（隐藏后 offsetHeight=0）
+                const displayH = conceptDisplay.offsetHeight;
+                conceptEditor.value = conceptDisplay.innerText;
+                conceptDisplay.style.display = 'none';
+                conceptEditor.style.display = 'block';
+                conceptEditor.style.height = Math.max(displayH, 300) + 'px';
+                conceptEditor.focus();
+                conceptActions.innerHTML = `
+                    <button id="btn-save-concept" class="btn-primary">保存构思</button>
+                    <button id="btn-cancel-concept" class="btn-secondary">取消</button>
+                `;
+                document.getElementById('btn-save-concept').addEventListener('click', function() {
+                    fetch(`/short/${storyId}/save-concept`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: `concept=${encodeURIComponent(conceptEditor.value)}`
+                    }).then(r => r.json()).then(data => {
+                        conceptDisplay.innerText = conceptEditor.value;
+                        conceptDisplay.style.display = 'block';
+                        conceptEditor.style.display = 'none';
+                        if (data.nodes && data.nodes.length) {
+                            renderOutlineNodes(data.nodes);
+                        }
+                        conceptActions.innerHTML = `
+                            <button id="btn-expand" class="btn-secondary">重新生成大纲</button>
+                            <button id="btn-edit-concept" class="btn-secondary">编辑大纲</button>
+                            <button id="btn-confirm-concept" class="btn-primary">确认大纲，进入主题</button>
+                        `;
+                        bindConceptActions();
+                    });
+                });
+                document.getElementById('btn-cancel-concept').addEventListener('click', function() {
+                    conceptDisplay.style.display = 'block';
+                    conceptEditor.style.display = 'none';
+                    conceptActions.innerHTML = `
+                        <button id="btn-expand" class="btn-secondary">重新生成大纲</button>
+                        <button id="btn-edit-concept" class="btn-secondary">编辑大纲</button>
+                        <button id="btn-confirm-concept" class="btn-primary">确认大纲，进入主题</button>
+                    `;
+                    bindConceptActions();
+                });
+            });
+
+            if (btnConfirm) btnConfirm.addEventListener('click', function() {
+                // 解锁阶段4（主题定调）
+                const stageTheme = document.getElementById('stage-theme');
+                if (stageTheme) { stageTheme.style.opacity = '1'; stageTheme.style.pointerEvents = 'auto'; }
+                // 同时确保故事创作区可用（允许跳过主题直接创作）
+                storySection.style.opacity = '1';
+                storySection.style.pointerEvents = 'auto';
+                setStatus('大纲已确认');
+            });
+        }
+
+        // ===== 逐节点生成：进度 / 暂停 / 继续 / 重新创作 =====
+        let genController = null;
+        let pausedText = '';
+        let lastBoundary = 0;
+        let nodeTotal = document.querySelectorAll('#node-chips .node-chip').length;
+
+        function renderOutlineNodes(nodes) {
+            // 动态渲染/刷新节点进度条（发散完成后调用）
+            nodeTotal = nodes.length;
+            let np = document.getElementById('node-progress');
+            if (!np) {
+                np = document.createElement('div');
+                np.id = 'node-progress';
+                np.className = 'node-progress';
+                np.innerHTML = `
+                    <div class="node-progress-header">
+                        <span>剧情节点进度</span>
+                        <span id="node-progress-text" class="node-progress-text">0/${nodes.length}</span>
+                    </div>
+                    <div class="node-progress-track">
+                        <div id="node-progress-fill" class="node-progress-fill" style="width:0%"></div>
+                    </div>
+                    <div class="node-chips" id="node-chips"></div>
+                `;
+                const contentDisplay = document.getElementById('content-display');
+                document.getElementById('story-section').insertBefore(np, contentDisplay);
+            }
+            const chips = document.getElementById('node-chips');
+            chips.innerHTML = nodes.map(n => {
+                const t = (n.title || '').split('——')[0].trim();
+                return `<span class="node-chip" data-node-id="${n.id}" title="${escapeHtml(n.title || '')}">${n.id}. ${escapeHtml(t)}</span>`;
+            }).join('');
+            const text = document.getElementById('node-progress-text');
+            const fill = document.getElementById('node-progress-fill');
+            if (text) text.textContent = `0/${nodes.length}`;
+            if (fill) fill.style.width = '0%';
+            np.style.display = 'block';
+        }
+
+        // ===== 单节点重写：点击已完成的节点 chip =====
+        let nodeContentReady = document.querySelectorAll('#node-chips .node-chip.done').length > 0;
+        (function() {
+            const chipsBox = document.getElementById('node-chips') || document.getElementById('node-progress');
+            if (!chipsBox) return;
+            chipsBox.addEventListener('click', function(e) {
+                const chip = e.target.closest('.node-chip.done');
+                if (!chip) return;
+                const nodeId = parseInt(chip.dataset.nodeId);
+                if (!confirm(`重写节点 ${nodeId}？该节点正文将被重新生成，其余节点保持不变`)) return;
+                streamRewriteNode(nodeId, chip);
+            });
+        })();
+
+        function streamRewriteNode(nodeId, chip) {
+            contentDisplay.style.display = 'none';
+            contentEditor.style.display = 'none';
+            contentStream.style.display = 'block';
+            contentStream.innerHTML = '<span class="typing-cursor">|</span>';
+            chip.classList.add('current');
+            setStatus(`正在重写节点 ${nodeId}...`);
+
+            streamToElement(
+                `/short/${storyId}/node/${nodeId}/rewrite`, '', contentStream,
+                function(fullText) {
+                    contentStream.style.display = 'none';
+                    contentDisplay.style.display = 'block';
+                    contentDisplay.innerText = fullText;
+                    setStatus('已完成');
+                    updateCount(fullText);
+                    // 刷新节点状态 + 同步全文
+                    fetch(`/short/${storyId}/nodes`).then(r => r.json()).then(data => {
+                        if (data.nodes && data.nodes.length) {
+                            nodeContentReady = !!data.node_content_ready;
+                            renderNodeProgressDone(data.nodes);
+                        }
+                    });
+                    saveVersion(fullText, 'rewrite');
+                },
+                { onNode: function(id, title, boundary) {
+                    renderNodeProgress(parseInt(id), parseInt(id));
+                }}
+            );
+        }
+
+        function renderNodeProgressDone(nodes) {
+            const done = nodes.filter(n => n.status === 'done').length;
+            nodeTotal = nodes.length;
+            const fill = document.getElementById('node-progress-fill');
+            const text = document.getElementById('node-progress-text');
+            if (fill) fill.style.width = Math.round(done / nodeTotal * 100) + '%';
+            if (text) text.textContent = `${done}/${nodeTotal}`;
+            const chips = document.getElementById('node-chips');
+            if (chips) {
+                chips.innerHTML = nodes.map(n => {
+                    const t = (n.title || '').split('——')[0].trim();
+                    const cls = n.status === 'done' ? 'node-chip done' : 'node-chip';
+                    return `<span class="${cls}" data-node-id="${n.id}" title="${escapeHtml(n.title || '')}">${n.id}. ${escapeHtml(t)}</span>`;
+                }).join('');
+            }
+        }
+
+        function renderNodeProgress(doneCount, nodeId) {
+            const fill = document.getElementById('node-progress-fill');
+            const text = document.getElementById('node-progress-text');
+            if (nodeTotal > 0) {
+                if (fill) fill.style.width = Math.round(doneCount / nodeTotal * 100) + '%';
+                if (text) text.textContent = `${doneCount}/${nodeTotal}`;
+            }
+            if (nodeId) {
+                document.querySelectorAll('#node-chips .node-chip').forEach(ch => {
+                    ch.classList.toggle('current', parseInt(ch.dataset.nodeId) === nodeId);
+                    ch.classList.toggle('done', parseInt(ch.dataset.nodeId) < nodeId);
+                });
+            }
+        }
+
+        function resetAndRewrite() {
+            if (nodeTotal > 0 && !confirm('重新创作将清空当前内容并从头生成全部节点，确定吗？')) return;
+            pausedText = '';
+            contentDisplay.style.display = 'none';
+            contentEditor.style.display = 'none';
+            contentStream.style.display = 'block';
+            triggerWrite(true);
+        }
+
+        function triggerWrite(reset) {
+            contentDisplay.style.display = 'none';
+            contentEditor.style.display = 'none';
+            contentStream.style.display = 'block';
+            contentStream.innerHTML = '<span class="typing-cursor">|</span>';
+            setStatus('创作中...');
+
+            storyActions.innerHTML = `
+                <button id="btn-pause" class="btn-secondary">暂停生成</button>
+            `;
+            document.getElementById('btn-pause').addEventListener('click', function() {
+                if (genController) genController.abort();
+            });
+
+            const body = reset ? 'reset=1' : '';
+
+            genController = streamToElement(
+                `/short/${storyId}/write-from-concept`, body, contentStream,
+                function(fullText) {
+                    genController = null;
+                    pausedText = '';
+                    contentDisplay.innerText = fullText;
+                    contentDisplay.style.display = 'block';
+                    contentStream.style.display = 'none';
+                    setStatus('已完成');
+                    updateCount(fullText);
+                    saveVersion(fullText, 'ai');
+                    // 全部节点标记完成
+                    renderNodeProgress(nodeTotal);
+                    storyActions.innerHTML = `
+                        <button id="btn-write" class="btn-secondary">重新创作</button>
+                        <button id="btn-edit" class="btn-secondary">编辑全文</button>
+                    `;
+                    bindStoryActions();
+                    // 启用评审/润色按钮、隐藏草稿横幅（首次创作完成时按钮还是 disabled 状态）
+                    enableReviewButton();
+                },
+                {
+                    initial: pausedText,
+                    onNode: function(id, title, boundary) {
+                        renderNodeProgress(id - 1, id);
+                        setStatus(`创作中 — 节点 ${id}/${nodeTotal || '?'}`);
+                        if (typeof boundary === 'number') lastBoundary = boundary;
+                    },
+                    onAbort: function(text) {
+                        genController = null;
+                        // 截断到最后一个完整节点：丢弃当前未完成节点的部分文本，
+                        // 恢复后该节点会从头完整重新生成
+                        pausedText = (typeof lastBoundary === 'number' && lastBoundary > 0)
+                            ? text.slice(0, lastBoundary) : text;
+                        lastBoundary = 0;
+                        setStatus('已暂停 — 可继续生成或重新创作');
+                        // 刷新节点状态（暂停时后端已持久化已完成节点）
+                        refreshNodeStatus();
+                        storyActions.innerHTML = `
+                            <button id="btn-resume" class="btn-primary">继续生成</button>
+                            <button id="btn-write" class="btn-secondary">重新创作</button>
+                        `;
+                        document.getElementById('btn-resume').addEventListener('click', function() {
+                            triggerWrite(false);
+                        });
+                        document.getElementById('btn-write').addEventListener('click', resetAndRewrite);
+                    }
+                }
+            );
+        }
+
+        function refreshNodeStatus() {
+            // 从服务端获取最新节点状态（暂停后已完成节点已持久化）
+            fetch(`/short/${storyId}/nodes`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data && data.nodes) {
+                        const doneCount = data.nodes.filter(n => n.status === 'done').length;
+                        renderNodeProgress(doneCount);
+                    }
+                }).catch(() => {});
+        }
+
+        function bindStoryActions() {
+            const btnWrite = document.getElementById('btn-write');
+            const btnEdit = document.getElementById('btn-edit');
+
+            if (btnWrite) btnWrite.addEventListener('click', resetAndRewrite);
+
+            if (btnEdit) btnEdit.addEventListener('click', function() {
+                const displayH = contentDisplay.offsetHeight;
+                contentEditor.value = contentDisplay.innerText;
+                contentDisplay.style.display = 'none';
+                contentEditor.style.display = 'block';
+                contentEditor.style.height = Math.max(displayH, 400) + 'px';
+                contentEditor.focus();
+                storyActions.innerHTML = `
+                    <button id="btn-save" class="btn-primary">保存</button>
+                    <button id="btn-cancel-edit" class="btn-secondary">取消</button>
+                    <button id="btn-continue" class="btn-secondary">续写</button>
+                    <button id="btn-expand-sel" class="btn-secondary">扩写选中</button>
+                    <button id="btn-rewrite-sel" class="btn-secondary">重写选中</button>
+                `;
+                bindLocalEditTools(contentEditor, document.getElementById('local-edit-panel'));
+                document.getElementById('btn-save').addEventListener('click', function() {
+                    fetch(`/short/${storyId}/save`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: `content=${encodeURIComponent(contentEditor.value)}`
+                    }).then(() => {
+                        contentDisplay.innerText = contentEditor.value;
+                        contentDisplay.style.display = 'block';
+                        contentEditor.style.display = 'none';
+                        document.getElementById('local-edit-panel').style.display = 'none';
+                        updateCount(contentEditor.value);
+                        setStatus('已完成');
+                        storyActions.innerHTML = `
+                            <button id="btn-write" class="btn-secondary">重新创作</button>
+                            <button id="btn-edit" class="btn-secondary">编辑全文</button>
+                        `;
+                        bindStoryActions();
+                    });
+                });
+                document.getElementById('btn-cancel-edit').addEventListener('click', function() {
+                    contentDisplay.style.display = 'block';
+                    contentEditor.style.display = 'none';
+                    document.getElementById('local-edit-panel').style.display = 'none';
+                    storyActions.innerHTML = `
+                        <button id="btn-write" class="btn-secondary">重新创作</button>
+                        <button id="btn-edit" class="btn-secondary">编辑全文</button>
+                    `;
+                    bindStoryActions();
+                });
+            });
+        }
+
+        // Initial binding
+        bindConceptActions();
+        bindStoryActions();
+
+    // ==================== SETTING / CAREFUL MODE ====================
+    } else {
+        const storyActions = document.getElementById('story-actions');
+
+        document.getElementById('btn-generate').addEventListener('click', function() {
+            if (this.disabled) return; // 防双击
+            contentDisplay.style.display = 'none';
+            contentEditor.style.display = 'none';
+            contentStream.style.display = 'block';
+            contentStream.innerHTML = '<span class="typing-cursor">|</span>';
+            this.disabled = true;
+            this.textContent = '生成中...';
+            setStatus('生成中...');
+
+            streamToElement(`/short/${storyId}/generate`, '', contentStream, function(fullText) {
+                contentDisplay.innerText = fullText;
+                contentDisplay.style.display = 'block';
+                contentStream.style.display = 'none';
+                setStatus('已完成');
+                updateCount(fullText);
+                saveVersion(fullText, 'ai');
+                enableReviewButton();
+                storyActions.innerHTML = `
+                    <button id="btn-generate" class="btn-secondary">重新生成</button>
+                    <button id="btn-edit" class="btn-secondary">编辑</button>
+                `;
+                bindDirectActions();
+            });
+        });
+
+        function bindDirectActions() {
+            const btnGen = document.getElementById('btn-generate');
+            const btnEdit = document.getElementById('btn-edit');
+
+            if (btnGen) btnGen.addEventListener('click', function() {
+                contentDisplay.style.display = 'none';
+                contentStream.style.display = 'block';
+                contentStream.innerHTML = '<span class="typing-cursor">|</span>';
+                this.disabled = true;
+                this.textContent = '生成中...';
+                setStatus('生成中...');
+
+                streamToElement(`/short/${storyId}/generate`, '', contentStream, function(fullText) {
+                    contentDisplay.innerText = fullText;
+                    contentDisplay.style.display = 'block';
+                    contentStream.style.display = 'none';
+                    btnGen.disabled = false;
+                    btnGen.textContent = '重新生成';
+                    setStatus('已完成');
+                    updateCount(fullText);
+                    saveVersion(fullText, 'ai');
+                    enableReviewButton();
+                });
+            });
+
+            if (btnEdit) btnEdit.addEventListener('click', function() {
+                const displayH = contentDisplay.offsetHeight;
+                contentEditor.value = contentDisplay.innerText;
+                contentDisplay.style.display = 'none';
+                contentEditor.style.display = 'block';
+                contentEditor.style.height = Math.max(displayH, 400) + 'px';
+                contentEditor.focus();
+                storyActions.innerHTML = `
+                    <button id="btn-save" class="btn-primary">保存</button>
+                    <button id="btn-cancel-edit" class="btn-secondary">取消</button>
+                    <button id="btn-continue" class="btn-secondary">续写</button>
+                    <button id="btn-expand-sel" class="btn-secondary">扩写选中</button>
+                    <button id="btn-rewrite-sel" class="btn-secondary">重写选中</button>
+                `;
+                bindLocalEditTools(contentEditor, document.getElementById('local-edit-panel'));
+                document.getElementById('btn-save').addEventListener('click', function() {
+                    fetch(`/short/${storyId}/save`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: `content=${encodeURIComponent(contentEditor.value)}`
+                    }).then(() => {
+                        contentDisplay.innerText = contentEditor.value;
+                        contentDisplay.style.display = 'block';
+                        contentEditor.style.display = 'none';
+                        document.getElementById('local-edit-panel').style.display = 'none';
+                        updateCount(contentEditor.value);
+                        setStatus('已完成');
+                        storyActions.innerHTML = `
+                            <button id="btn-generate" class="btn-secondary">重新生成</button>
+                            <button id="btn-edit" class="btn-secondary">编辑</button>
+                        `;
+                        bindDirectActions();
+                    });
+                });
+                document.getElementById('btn-cancel-edit').addEventListener('click', function() {
+                    contentDisplay.style.display = 'block';
+                    contentEditor.style.display = 'none';
+                    document.getElementById('local-edit-panel').style.display = 'none';
+                    storyActions.innerHTML = `
+                        <button id="btn-generate" class="btn-secondary">重新生成</button>
+                        <button id="btn-edit" class="btn-secondary">编辑</button>
+                    `;
+                    bindDirectActions();
+                });
+            });
+        }
+
+        bindDirectActions();
+
+        // Rewrite
+        const btnRewrite = document.getElementById('btn-rewrite');
+        if (btnRewrite) {
+            btnRewrite.addEventListener('click', function() {
+                const instruction = document.getElementById('rewrite-instruction').value || '请改进这篇小说';
+                contentDisplay.style.display = 'none';
+                contentEditor.style.display = 'none';
+                contentStream.style.display = 'block';
+                contentStream.innerHTML = '<span class="typing-cursor">|</span>';
+                this.disabled = true;
+                this.textContent = '润色中...';
+
+                streamToElement(`/short/${storyId}/rewrite`, `instruction=${encodeURIComponent(instruction)}`, contentStream, function(fullText) {
+                    contentDisplay.innerText = fullText;
+                    contentDisplay.style.display = 'block';
+                    contentStream.style.display = 'none';
+                    btnRewrite.disabled = false;
+                    btnRewrite.textContent = 'AI 润色';
+                    setStatus('已完成');
+                    updateCount(fullText);
+                    saveVersion(fullText, 'rewrite');
+                });
+            });
+        }
+    }
+
+    // Title save
+    titleInput.addEventListener('change', function() {
+        fetch(`/short/${storyId}/edit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `title=${encodeURIComponent(this.value)}`
+        });
+    });
+
+    // --- Unified Review (Critic + 17-dimension Audit) ---
+    const btnReview = document.getElementById('btn-review');
+    const reviewResult = document.getElementById('review-result');
+    const reviewScore = document.getElementById('review-score');
+    const reviewComment = document.getElementById('review-comment');
+    const reviewIssues = document.getElementById('review-issues');
+    const auditBars = document.getElementById('audit-bars');
+    const userFeedback = document.getElementById('user-feedback');
+
+    // 内容生成完成后的 UI 同步：启用评审/润色按钮、更新字数、隐藏草稿横幅
+    function enableReviewButton() {
+        if (btnReview) {
+            btnReview.disabled = false;
+            btnReview.classList.remove('btn-secondary');
+            btnReview.classList.add('btn-primary');
+            btnReview.textContent = '质量评审（评分 + 17维度审计）';
+            btnReview.removeAttribute('title');
+        }
+        // 启用自由润色按钮和输入框
+        const btnRw = document.getElementById('btn-rewrite');
+        const rwInput = document.getElementById('rewrite-instruction');
+        if (btnRw) btnRw.disabled = false;
+        if (rwInput) rwInput.disabled = false;
+        // 隐藏草稿横幅（内容已生成，草稿不再需要）
+        const banner = document.getElementById('draft-banner');
+        if (banner) banner.style.display = 'none';
+    }
+    const btnSaveFeedback = document.getElementById('btn-save-feedback');
+    const btnRewriteFeedback = document.getElementById('btn-rewrite-feedback');
+
+    function renderAuditBars(groups) {
+        const groupNames = {character:'角色', plot:'剧情', world:'世界观', writing:'文笔', foreshadow:'伏笔'};
+        let html = '';
+        for (const [g, info] of Object.entries(groups || {})) {
+            const pct = Math.round(info.score * 10);
+            const barColor = info.score >= 8 ? 'var(--success)' : info.score >= 6 ? 'var(--accent)' : 'var(--danger)';
+            html += `<div style="margin-bottom:0.35rem">
+                <div style="display:flex;justify-content:space-between;font-size:0.75rem;margin-bottom:0.1rem">
+                    <span style="color:var(--text-dim)">${groupNames[g]||g}</span>
+                    <span style="color:${barColor}">${info.score}</span>
+                </div>
+                <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">
+                    <div style="height:100%;width:${pct}%;background:${barColor};border-radius:2px;transition:width 0.8s ease"></div>
+                </div>
+            </div>`;
+        }
+        return html;
+    }
+
+    function renderIssues(issues, highCount) {
+        if (!issues || issues.length === 0) return '<div style="font-size:0.78rem;color:var(--success)">无明显问题</div>';
+        let html = `<div style="font-size:0.78rem;color:var(--text-faint);margin-bottom:0.3rem">${highCount} 个高优先级</div>`;
+        for (const issue of issues.slice(0, 5)) {
+            const sevColor = issue.severity === 'high' ? 'var(--danger)' : issue.severity === 'medium' ? 'var(--accent)' : 'var(--text-dim)';
+            html += `<div style="font-size:0.78rem;padding:0.25rem 0.4rem;margin-bottom:0.2rem;background:var(--bg);border-left:2px solid ${sevColor};border-radius:0 4px 4px 0">
+                <span style="color:${sevColor};font-weight:600">${escapeHtml(issue.dimension_name||'')}</span> ${escapeHtml(issue.issue||'')}
+            </div>`;
+        }
+        return html;
+    }
+
+    if (btnReview) {
+        btnReview.addEventListener('click', async function() {
+            btnReview.disabled = true;
+            btnReview.textContent = '评审中...';
+            reviewResult.style.display = 'block';
+            reviewScore.textContent = '...';
+            auditBars.innerHTML = '';
+            reviewComment.textContent = '';
+            reviewIssues.innerHTML = '';
+
+            try {
+                // Run review + audit in parallel
+                const [reviewResp, auditResp] = await Promise.all([
+                    fetch(`/short/${storyId}/review`, { method: 'POST' }),
+                    fetch('/api/audit/short-story', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: `story_id=${storyId}`
+                    })
+                ]);
+                const reviewData = await reviewResp.json();
+                const auditData = await auditResp.json();
+
+                // Show audit grade as main score
+                if (auditData.overall_score != null) {
+                    const color = auditData.overall_score >= 8 ? 'var(--success)' : auditData.overall_score >= 6 ? 'var(--accent)' : 'var(--danger)';
+                    reviewScore.innerHTML = `<span style="color:${color}">${auditData.grade}</span> <span style="font-size:0.8rem;color:var(--text-dim)">${auditData.overall_score}/10</span>`;
+                    auditBars.innerHTML = renderAuditBars(auditData.groups);
+                    reviewIssues.innerHTML = renderIssues(auditData.issues, auditData.high_issues);
+                } else if (reviewData.overall_score != null) {
+                    const color = reviewData.overall_score >= 8 ? 'var(--success)' : reviewData.overall_score >= 6 ? 'var(--accent)' : 'var(--danger)';
+                    reviewScore.innerHTML = `<span style="color:${color}">${reviewData.overall_score}/10</span>`;
+                }
+
+                // Show critic comment
+                reviewComment.textContent = reviewData.overall_comment || auditData.summary || '';
+
+            } catch(e) {
+                reviewScore.textContent = '评审失败';
+                reviewComment.textContent = e.message;
+            }
+            btnReview.disabled = false;
+            btnReview.textContent = '质量评审（评分 + 17维度审计）';
+        });
+
+        // Load existing review on page load
+        fetch(`/short/${storyId}/review/get`).then(r => r.json()).then(data => {
+            if (data && (data.overallScore || data.audit)) {
+                reviewResult.style.display = 'block';
+                if (data.audit) {
+                    if (data.audit.overall_score != null) {
+                        const color = data.audit.overall_score >= 8 ? 'var(--success)' : data.audit.overall_score >= 6 ? 'var(--accent)' : 'var(--danger)';
+                        reviewScore.innerHTML = `<span style="color:${color}">${data.audit.grade}</span> <span style="font-size:0.8rem;color:var(--text-dim)">${data.audit.overall_score}/10</span>`;
+                        auditBars.innerHTML = renderAuditBars(data.audit.groups);
+                        reviewIssues.innerHTML = renderIssues(data.audit.issues, data.audit.high_issues);
+                    }
+                    reviewComment.textContent = data.overallComment || data.audit.summary || '';
+                } else if (data.overallScore) {
+                    const color = data.overallScore >= 8 ? 'var(--success)' : data.overallScore >= 6 ? 'var(--accent)' : 'var(--danger)';
+                    reviewScore.innerHTML = `<span style="color:${color}">${data.overallScore}/10</span>`;
+                    reviewComment.textContent = data.overallComment || '';
+                }
+                if (data.userFeedback) userFeedback.value = data.userFeedback;
+            }
+        });
+    }
+
+    if (btnSaveFeedback) {
+        btnSaveFeedback.addEventListener('click', async function() {
+            const fd = new FormData();
+            fd.append('feedback', userFeedback.value);
+            await fetch(`/short/${storyId}/review/feedback`, { method: 'POST', body: fd });
+            btnSaveFeedback.textContent = '已保存';
+            setTimeout(() => btnSaveFeedback.textContent = '保存意见', 1500);
+        });
+    }
+
+    if (btnRewriteFeedback) {
+        btnRewriteFeedback.addEventListener('click', function() {
+            // Hide display, show stream
+            contentDisplay.style.display = 'none';
+            contentEditor.style.display = 'none';
+            contentStream.style.display = 'block';
+            contentStream.innerHTML = '<span class="typing-cursor">|</span>';
+            btnRewriteFeedback.disabled = true;
+            btnRewriteFeedback.textContent = '重写中...';
+            setStatus('重写中...');
+
+            streamToElement(`/short/${storyId}/rewrite-with-feedback`, '', contentStream, function(fullText) {
+                contentDisplay.innerText = fullText;
+                contentDisplay.style.display = 'block';
+                contentStream.style.display = 'none';
+                btnRewriteFeedback.disabled = false;
+                btnRewriteFeedback.textContent = '根据评审重写';
+                setStatus('已完成');
+                updateCount(fullText);
+                loadVersions();
+                enableReviewButton();
+            }, {
+                onNode: function(id, title) {
+                    // 逐节点重写：进度条随重写推进
+                    // 注意：nodeTotal 是策划模式分支内的块级变量，此处不可见，
+                    // 用 DOM 查询取节点数；字符串拼接避开模板字符串
+                    if (typeof renderNodeProgress === 'function') renderNodeProgress(id - 1, id);
+                    const total = document.querySelectorAll('#node-chips .node-chip').length;
+                    setStatus('重写中 - 节点 ' + id + '/' + (total || '?'));
+                }
+            });
+        });
+    }
+
+    // --- Version Management ---
+    function loadVersions() {
+        fetch(`/short/${storyId}/versions`).then(r => r.json()).then(versions => {
+            const list = document.getElementById('version-list');
+            if (!versions.length) {
+                list.innerHTML = '<span style="color:var(--text-faint)">暂无版本</span>';
+                return;
+            }
+            let html = '';
+            for (const v of versions) {
+                const srcLabel = v.versionNumber === 1 ? '初稿' : v.source === 'ai' ? 'AI' : v.source === 'rewrite' ? '重写' : '手动';
+                const srcColor = v.versionNumber === 1 ? 'var(--success)' : v.source === 'ai' ? 'var(--accent)' : v.source === 'rewrite' ? '#8b5cf6' : 'var(--text-dim)';
+                html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:0.3rem 0;border-bottom:1px solid var(--border)">
+                    <div>
+                        <span style="color:var(--text)">V${v.versionNumber}</span>
+                        <span style="color:${srcColor};font-size:0.72rem;margin-left:0.3rem">${srcLabel}</span>
+                        ${v.approved ? '<span style="color:var(--success);font-size:0.72rem;margin-left:0.3rem">✓</span>' : ''}
+                        <span style="color:var(--text-faint);font-size:0.72rem;margin-left:0.3rem">${v.contentLength}字</span>
+                    </div>
+                    <div style="display:flex;gap:0.2rem">
+                        <button class="btn-sm" onclick="loadVersion(${v.id})" style="font-size:0.72rem;padding:0.2rem 0.4rem">载入</button>
+                        <button class="btn-sm btn-danger" onclick="deleteVersion(${v.id})" style="font-size:0.72rem;padding:0.2rem 0.4rem">×</button>
+                    </div>
+                </div>`;
+            }
+            list.innerHTML = html;
+        });
+    }
+
+    window.loadVersion = function(versionId) {
+        fetch(`/short/${storyId}/version/${versionId}/load`, { method: 'POST' })
+            .then(r => r.json())
+            .then(data => {
+                contentDisplay.innerText = data.content;
+                if (contentEditor) contentEditor.value = data.content;
+                updateCount(data.content);
+                setStatus('已完成');
+                enableReviewButton();
+            });
+    };
+
+    window.deleteVersion = function(versionId) {
+        if (!confirm('删除此版本？')) return;
+        fetch(`/short/${storyId}/version/${versionId}/delete`, { method: 'POST' })
+            .then(() => loadVersions());
+    };
+
+    // Load versions on page load
+    loadVersions();
+})();
+</script>
+
+<style>
+.short-write-layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 1.5rem;
+    padding: 1.5rem;
+    max-width: 1400px;
+    margin: 0 auto;
+    min-height: calc(100vh - 120px);
+}
+.short-sidebar { display: flex; flex-direction: column; gap: 1rem; }
+.sidebar-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem;
+}
+.sidebar-card h3 {
+    font-size: 0.85rem;
+    color: var(--accent);
+    margin-bottom: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.setting-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.3rem 0;
+    font-size: 0.85rem;
+}
+.setting-label { color: var(--text-dim); }
+.setting-value { color: var(--text); }
+.short-main { display: flex; flex-direction: column; gap: 1rem; }
+.short-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.8rem 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+.short-content {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 2rem 2.5rem;
+    font-family: var(--font-body);
+    font-size: 1rem;
+    line-height: 2;
+    color: var(--text);
+    white-space: pre-wrap;
+    min-height: 300px;
+    overflow-y: auto;
+}
+.short-editor {
+    background: var(--bg-card);
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    padding: 2rem 2.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    line-height: 1.8;
+    color: var(--text);
+    resize: vertical;
+    min-height: 300px;
+    outline: none;
+    width: 100%;
+}
+.concept-area {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.5rem 2rem;
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+    line-height: 1.9;
+    color: var(--text);
+    white-space: pre-wrap;
+    min-height: 150px;
+    margin-bottom: 0.8rem;
+}
+.concept-editor {
+    background: var(--bg-card);
+    border: 1px solid var(--accent-dim);
+    border-radius: 10px;
+    padding: 1.5rem 2rem;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    line-height: 1.7;
+    color: var(--text);
+    resize: vertical;
+    min-height: 200px;
+    outline: none;
+    width: 100%;
+    margin-bottom: 0.8rem;
+    box-sizing: border-box;
+}
+.concept-placeholder {
+    color: var(--text-faint);
+    font-style: italic;
+    text-align: center;
+    padding: 2rem;
+}
+.concept-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.5rem;
+}
+.section-label {
+    font-size: 0.95rem;
+    color: var(--text);
+    margin-bottom: 0.8rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.step-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    background: var(--accent);
+    color: var(--bg);
+    border-radius: 50%;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+.step-hint {
+    color: var(--text-faint);
+    font-size: 0.85rem;
+}
+#story-section {
+    transition: opacity 0.3s ease;
+}
+.typing-cursor {
+    animation: blink 1s step-end infinite;
+    color: var(--accent);
+    font-weight: bold;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ===== 剧情节点进度条 ===== */
+.node-progress {
+    background: var(--bg-card);
+    border: 1px solid var(--accent-dim);
+    border-radius: 10px;
+    padding: 0.9rem 1.2rem;
+    margin-bottom: 1rem;
+}
+.node-progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+}
+.node-progress-text {
+    color: var(--accent);
+    font-weight: 600;
+}
+.node-progress-track {
+    height: 6px;
+    background: rgba(201, 160, 58, 0.15);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 0.6rem;
+}
+.node-progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.4s ease;
+}
+.node-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+.node-chip {
+    font-size: 0.72rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 12px;
+    background: rgba(201, 160, 58, 0.08);
+    border: 1px solid var(--accent-dim);
+    color: var(--text-dim);
+    white-space: nowrap;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.node-chip.done {
+    background: rgba(76, 175, 80, 0.12);
+    border-color: rgba(76, 175, 80, 0.4);
+    color: #4caf50;
+}
+.node-chip.current {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg);
+    font-weight: 600;
+}
+</style>
+{% endblock %}

@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+{% block title %}模型配置 — 灵砚{% endblock %}
+
+{% block content %}
+<div class="container" style="padding-top:2rem;max-width:900px">
+    <div style="margin-bottom:1.5rem">
+        <a href="/settings/" class="btn btn-secondary">&#x2190; 返回设置</a>
+    </div>
+
+    <div class="section-header">
+        <h2>🏢 模型厂商配置</h2>
+        <button class="btn-primary" onclick="showAddProvider()" style="padding:0.6rem 1.5rem;border-radius:8px">+ 添加厂商</button>
+    </div>
+
+    <p style="color:var(--text-dim);font-size:0.85rem;margin-bottom:1.5rem">
+        配置 API 厂商后，拉取可用模型并勾选需要的模型。配置角色时可从已勾选模型中选择。
+    </p>
+
+    <!-- 添加厂商弹窗 -->
+    <div id="add-provider-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000">
+        <div style="background:var(--bg-card);max-width:500px;margin:10vh auto;padding:2rem;border-radius:12px;border:1px solid var(--border)">
+            <h3 style="margin-bottom:1rem">添加 API 厂商</h3>
+            <form id="add-provider-form" onsubmit="submitAddProvider(event)">
+                <div class="form-group">
+                    <label>厂商名称</label>
+                    <input name="name" required placeholder="如：DeepSeek" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>厂商类型</label>
+                    <select name="provider_type" class="form-control" onchange="onProviderTypeChange(this)">
+                        <option value="deepseek">DeepSeek</option>
+                        <option value="openai">OpenAI</option>
+                        <option value="ollama">Ollama（本地）</option>
+                        <option value="custom">自定义（OpenAI 兼容）</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>API 地址</label>
+                    <input name="base_url" required placeholder="https://api.deepseek.com" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input name="api_key" type="password" placeholder="sk-..." class="form-control">
+                    <small style="color:var(--text-faint)">Ollama 本地部署可留空</small>
+                </div>
+                <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1.5rem">
+                    <button type="button" class="btn btn-secondary" onclick="hideAddProvider()">取消</button>
+                    <button type="submit" class="btn btn-primary">添加</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 厂商卡片列表 -->
+    <div id="providers-list">
+        {% for p in providers %}
+        <div class="provider-card" data-pid="{{ p.id }}" style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin-bottom:1rem">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem">
+                <div style="display:flex;align-items:center;gap:0.8rem">
+                    <span style="font-size:1.2rem">
+                        {% if p.provider_type == 'deepseek' %}🔵{% elif p.provider_type == 'openai' %}🟢{% elif p.provider_type == 'ollama' %}🟠{% else %}⚪{% endif %}
+                    </span>
+                    <strong style="font-size:1.1rem">{{ p.name }}</strong>
+                    <span style="font-size:0.75rem;color:var(--text-faint)">{{ p.provider_type }}</span>
+                </div>
+                <div style="display:flex;gap:0.5rem;align-items:center">
+                    <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.8rem;cursor:pointer">
+                        <input type="checkbox" {% if p.enabled %}checked{% endif %} onchange="toggleProvider({{ p.id }}, this.checked)">
+                        启用
+                    </label>
+                    <button class="btn btn-sm" onclick="deleteProvider({{ p.id }})" style="color:var(--danger);font-size:0.75rem">删除</button>
+                </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.8rem;font-size:0.82rem">
+                <div>
+                    <span style="color:var(--text-dim)">API 地址：</span>
+                    <span style="word-break:break-all">{{ p.base_url }}</span>
+                </div>
+                <div>
+                    <span style="color:var(--text-dim)">API Key：</span>
+                    <span>{% if p.api_key %}{{ p.api_key[:8] }}****{% else %}未设置{% endif %}</span>
+                </div>
+            </div>
+
+            <div style="display:flex;gap:0.5rem;margin-bottom:0.8rem">
+                <button class="btn btn-sm btn-secondary" onclick="testProvider({{ p.id }}, this)">🔌 测试连接</button>
+                <button class="btn btn-sm btn-primary" onclick="fetchModels({{ p.id }}, this)">📥 拉取模型</button>
+                <span class="test-result" style="font-size:0.78rem;align-self:center"></span>
+            </div>
+
+            <!-- 模型列表 -->
+            <div class="model-list" data-pid="{{ p.id }}">
+                {% set provider_models = p.models.all() %}
+                {% if provider_models %}
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+                    <span style="font-size:0.8rem;color:var(--text-dim)">
+                        已选 {{ provider_models|selectattr('enabled')|list|length }}/{{ provider_models|length }} 个模型
+                    </span>
+                    <div style="display:flex;gap:0.3rem">
+                        <button class="btn btn-sm" style="font-size:0.7rem;padding:0.15rem 0.4rem" onclick="toggleAllModels({{ p.id }}, true)">全选</button>
+                        <button class="btn btn-sm" style="font-size:0.7rem;padding:0.15rem 0.4rem" onclick="toggleAllModels({{ p.id }}, false)">全不选</button>
+                    </div>
+                </div>
+                <div class="model-checkboxes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.3rem">
+                    {% for m in provider_models %}
+                    <label style="display:flex;align-items:center;gap:0.4rem;padding:0.3rem 0.5rem;border-radius:6px;cursor:pointer;font-size:0.82rem;{% if m.enabled %}background:var(--accent-subtle){% else %}background:var(--bg){% endif %}" data-mid="{{ m.id }}">
+                        <input type="checkbox" {% if m.enabled %}checked{% endif %} onchange="toggleModel({{ m.id }}, this.checked, this.parentElement)">
+                        <span>{{ m.display_name or m.model_id }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div style="font-size:0.82rem;color:var(--text-faint);padding:0.5rem 0">
+                    点击「拉取模型」获取可用模型列表
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    {% if not providers %}
+    <div class="empty-state" style="padding:3rem">
+        <div class="empty-icon">🏢</div>
+        <p class="empty-title">还没有配置厂商</p>
+        <p class="empty-desc">点击「添加厂商」开始配置 API 厂商</p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+const PROVIDER_URLS = {
+    deepseek: 'https://api.deepseek.com',
+    openai: 'https://api.openai.com/v1',
+    ollama: 'http://localhost:11434/v1',
+    custom: '',
+};
+
+function showAddProvider() {
+    document.getElementById('add-provider-modal').style.display = 'block';
+}
+function hideAddProvider() {
+    document.getElementById('add-provider-modal').style.display = 'none';
+}
+
+function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+}
+
+function onProviderTypeChange(sel) {
+    const url = PROVIDER_URLS[sel.value];
+    const form = sel.closest('form');
+    if (url !== undefined) form.base_url.value = url;
+}
+
+function submitAddProvider(e) {
+    e.preventDefault();
+    const form = e.target;
+    const fd = new FormData(form);
+    fetch('/settings/llm/provider/add', {method:'POST', body:fd})
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) { location.reload(); }
+            else { alert(data.error || '添加失败'); }
+        });
+}
+
+function testProvider(pid, btn) {
+    btn.disabled = true; btn.textContent = '测试中...';
+    const card = btn.closest('.provider-card');
+    const result = card.querySelector('.test-result');
+    fetch(`/settings/llm/provider/${pid}/test`, {method:'POST'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                result.innerHTML = `<span style="color:var(--success)">✓ 连接成功，发现 ${data.models_count} 个模型</span>`;
+            } else {
+                result.innerHTML = `<span style="color:var(--danger)">✗ ${escapeHtml(data.error)}</span>`;
+            }
+        })
+        .catch(e => { result.innerHTML = `<span style="color:var(--danger)">✗ ${escapeHtml(e.message)}</span>`; })
+        .finally(() => { btn.disabled = false; btn.textContent = '🔌 测试连接'; });
+}
+
+function fetchModels(pid, btn) {
+    btn.disabled = true; btn.textContent = '拉取中...';
+    fetch(`/settings/llm/provider/${pid}/fetch-models`, {method:'POST'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                // 重新加载模型列表
+                const list = document.querySelector(`.model-list[data-pid="${pid}"]`);
+                let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+                    <span style="font-size:0.8rem;color:var(--text-dim)">
+                        已选 0/${data.total} 个模型（新增 ${data.added} 个）
+                    </span>
+                    <div style="display:flex;gap:0.3rem">
+                        <button class="btn btn-sm" style="font-size:0.7rem;padding:0.15rem 0.4rem" onclick="toggleAllModels(${pid}, true)">全选</button>
+                        <button class="btn btn-sm" style="font-size:0.7rem;padding:0.15rem 0.4rem" onclick="toggleAllModels(${pid}, false)">全不选</button>
+                    </div>
+                </div>`;
+                html += '<div class="model-checkboxes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.3rem">';
+                for (const m of data.models) {
+                    html += `<label style="display:flex;align-items:center;gap:0.4rem;padding:0.3rem 0.5rem;border-radius:6px;cursor:pointer;font-size:0.82rem;background:var(--bg)" data-mid="${m.id}">
+                        <input type="checkbox" onchange="toggleModel(${m.id}, this.checked, this.parentElement)">
+                        <span>${escapeHtml(m.display_name || m.model_id)}</span>
+                    </label>`;
+                }
+                html += '</div>';
+                list.innerHTML = html;
+            } else {
+                alert('拉取失败：' + (data.error || '未知错误'));
+            }
+        })
+        .catch(e => { alert('拉取失败：' + e.message); })
+        .finally(() => { btn.disabled = false; btn.textContent = '📥 拉取模型'; });
+}
+
+function toggleModel(mid, enabled, label) {
+    const fd = new FormData();
+    fd.append('enabled', enabled ? 'true' : 'false');
+    fetch(`/settings/llm/model/${mid}/toggle`, {method:'POST', body:fd});
+    if (label) {
+        label.style.background = enabled ? 'var(--accent-subtle)' : 'var(--bg)';
+    }
+    // 更新计数
+    updateModelCount(label?.closest('.provider-card'));
+}
+
+function toggleAllModels(pid, enabled) {
+    const fd = new FormData();
+    fd.append('enabled', enabled ? 'true' : 'false');
+    fetch(`/settings/llm/provider/${pid}/toggle-all`, {method:'POST', body:fd})
+        .then(() => location.reload());
+}
+
+function toggleProvider(pid, enabled) {
+    const fd = new FormData();
+    fd.append('enabled', enabled ? 'true' : 'false');
+    fetch(`/settings/llm/provider/${pid}/update`, {method:'POST', body:fd});
+}
+
+function deleteProvider(pid) {
+    if (!confirm('确认删除该厂商？所有模型配置也将被删除。')) return;
+    fetch(`/settings/llm/provider/${pid}/delete`, {method:'POST'})
+        .then(() => location.reload());
+}
+
+function updateModelCount(card) {
+    if (!card) return;
+    const checkboxes = card.querySelectorAll('.model-checkboxes input[type="checkbox"]');
+    const checked = card.querySelectorAll('.model-checkboxes input[type="checkbox"]:checked');
+    const countEl = card.querySelector('.model-list span[style*="color:var(--text-dim)"]');
+    if (countEl) {
+        countEl.textContent = `已选 ${checked.length}/${checkboxes.length} 个模型`;
+    }
+}
+</script>
+{% endblock %}

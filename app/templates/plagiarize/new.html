@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}新建任务 — 借鉴改写{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width:900px; margin:2rem auto; padding:0 1.5rem;">
+    <div style="margin-bottom:1.5rem;">
+        <a href="/plagiarize/" style="color:var(--text-dim); text-decoration:none;">&larr; 返回列表</a>
+    </div>
+
+    <h1 style="font-family:var(--font-display); font-size:1.5rem; color:var(--text-bright); margin-bottom:1.5rem;">
+        {% if mode == 'style' %}风格模仿{% elif mode == 'plot' %}情节借鉴{% else %}改写洗稿{% endif %}
+    </h1>
+
+    <!-- 模式选择 -->
+    <div style="display:flex; gap:0.5rem; margin-bottom:1.5rem;">
+        <a href="/plagiarize/new?mode=style" class="btn {% if mode == 'style' %}btn-primary{% else %}btn-secondary{% endif %}">风格模仿</a>
+        <a href="/plagiarize/new?mode=plot" class="btn {% if mode == 'plot' %}btn-primary{% else %}btn-secondary{% endif %}">情节借鉴</a>
+        <a href="/plagiarize/new?mode=rewrite" class="btn {% if mode == 'rewrite' %}btn-primary{% else %}btn-secondary{% endif %}">改写洗稿</a>
+    </div>
+
+    <form method="POST" action="/plagiarize/create" class="form-stack">
+        <input type="hidden" name="mode" value="{{ mode }}">
+
+        <!-- 来源文本 -->
+        <div class="form-row">
+            <label>参考文本 <span class="required">*</span></label>
+            <textarea name="source_text" rows="10" placeholder="粘贴参考文本...&#10;&#10;或者上传文件（见下方）" required></textarea>
+        </div>
+
+        <!-- 文件上传 -->
+        <div class="form-row">
+            <label>或上传文件</label>
+            <div style="display:flex; gap:0.5rem; align-items:center;">
+                <input type="file" id="file-upload" accept=".txt,.docx,.epub" style="display:none">
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('file-upload').click()">
+                    选择文件 (TXT/DOCX/EPUB)
+                </button>
+                <span id="file-name" style="color:var(--text-dim); font-size:0.85rem;"></span>
+            </div>
+            <div id="upload-status" style="display:none; margin-top:0.5rem;"></div>
+        </div>
+
+        {% if mode == 'rewrite' %}
+        <!-- 改写程度 -->
+        <div class="form-row">
+            <label>改写程度</label>
+            <div style="display:flex; gap:0.5rem;">
+                <label style="display:flex; align-items:center; gap:0.3rem; cursor:pointer;">
+                    <input type="radio" name="rewrite_level" value="light" {% if mode == 'rewrite' %}{% endif %}> 轻度
+                </label>
+                <label style="display:flex; align-items:center; gap:0.3rem; cursor:pointer;">
+                    <input type="radio" name="rewrite_level" value="medium" checked> 中度
+                </label>
+                <label style="display:flex; align-items:center; gap:0.3rem; cursor:pointer;">
+                    <input type="radio" name="rewrite_level" value="heavy"> 重度
+                </label>
+            </div>
+            <div style="font-size:0.78rem; color:var(--text-dim); margin-top:0.3rem;">
+                轻度：替换词汇变换句式 | 中度：重组段落改变视角 | 重度：只保留情节骨架
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- 目标 -->
+        {% if mode in ['style', 'plot'] %}
+        <div class="form-row">
+            <label>生成到</label>
+            <div style="display:flex; gap:1rem;">
+                <div style="flex:1;">
+                    <label style="font-size:0.82rem; color:var(--text-dim);">长篇小说</label>
+                    <select name="target_novel_id" style="width:100%;">
+                        <option value="">不保存为长篇章节</option>
+                        {% for novel in novels %}
+                        <option value="{{ novel.id }}">{{ novel.title }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div style="flex:1;">
+                    <label style="font-size:0.82rem; color:var(--text-dim);">短篇</label>
+                    <select name="target_short_story_id" style="width:100%;">
+                        <option value="">不保存为短篇</option>
+                        {% for story in short_stories %}
+                        <option value="{{ story.id }}">{{ story.title }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- 额外指令 -->
+        <div class="form-row">
+            <label>额外要求（可选）</label>
+            <textarea name="extra_instructions" rows="3" placeholder="对生成内容的特殊要求..."></textarea>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.5rem;">
+            <a href="/plagiarize/" class="btn btn-secondary">取消</a>
+            <button type="submit" class="btn btn-primary">创建任务</button>
+        </div>
+    </form>
+</div>
+
+<script>
+document.getElementById('file-upload').addEventListener('change', async function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    document.getElementById('file-name').textContent = file.name;
+    document.getElementById('upload-status').style.display = 'block';
+    document.getElementById('upload-status').innerHTML = '<span style="color:var(--accent)">上传中...</span>';
+    
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('mode', '{{ mode }}');
+    
+    try {
+        const resp = await fetch('/plagiarize/upload', { method: 'POST', body: fd });
+        const data = await resp.json();
+        if (data.ok) {
+            document.getElementById('upload-status').innerHTML = 
+                `<span style="color:var(--success)">上传成功，提取 ${data.length} 字</span>`;
+            // 如果创建了新任务，跳转到详情页
+            if (data.task_id) {
+                window.location.href = `/plagiarize/${data.task_id}`;
+            }
+        } else {
+            document.getElementById('upload-status').innerHTML = 
+                `<span style="color:var(--danger)">${data.error}</span>`;
+        }
+    } catch(err) {
+        document.getElementById('upload-status').innerHTML = 
+            `<span style="color:var(--danger)">上传失败: ${err.message}</span>`;
+    }
+});
+</script>
+{% endblock %}

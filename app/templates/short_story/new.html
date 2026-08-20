@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block title %}新建短篇 — 灵砚{% endblock %}
+
+{% block content %}
+<div class="container" style="padding-top:2rem;max-width:800px">
+    <div style="margin-bottom:1.5rem">
+        <a href="/short/" class="btn btn-secondary">&#x2190; 返回短篇列表</a>
+    </div>
+
+    <h1 style="margin-bottom:0.5rem">新建短篇</h1>
+    <p style="color:var(--text-dim);margin-bottom:2rem">选择创作模式，开始你的短篇之旅</p>
+
+    <!-- Mode Selection -->
+    <div class="gateway-grid" style="margin-bottom:2rem" id="mode-select">
+        <div class="gateway-card mode-card {% if mode == 'inspiration' %}active{% endif %}" data-mode="inspiration">
+            <div class="gateway-icon">&#x1F4A1;</div>
+            <h2>灵感模式</h2>
+            <p>输入一句话灵感，AI 扩展成完整短篇</p>
+            <span class="gateway-hint">「深夜的末班地铁上，只有我和一个穿古装的陌生人」</span>
+        </div>
+        <div class="gateway-card mode-card {% if mode == 'setting' %}active{% endif %}" data-mode="setting">
+            <div class="gateway-icon">&#x1F3AD;</div>
+            <h2>设定模式</h2>
+            <p>输入角色、场景、主题，AI 生成故事</p>
+            <span class="gateway-hint">适合有明确构思的创作</span>
+        </div>
+        <div class="gateway-card mode-card {% if mode == 'careful' %}active{% endif %}" data-mode="careful">
+            <div class="gateway-icon">&#x2728;</div>
+            <h2>细心模式</h2>
+            <p>详细设定，精心打磨，文学性更强</p>
+            <span class="gateway-hint">适合追求质量的短篇创作</span>
+        </div>
+    </div>
+
+    <!-- Creation Form -->
+    <form method="POST" action="/short/create" class="form-stack" id="story-form">
+        <input type="hidden" name="mode" id="mode-input" value="{{ mode or 'inspiration' }}">
+
+        <!-- 灵感模式字段 -->
+        <div id="inspiration-fields" class="mode-fields">
+            <div class="form-row">
+                <label>灵感 <span class="required">*</span></label>
+                <textarea name="inspiration" rows="3" placeholder="写下你的灵感火花...一句话、一个场景、一个概念都可以" required></textarea>
+            </div>
+        </div>
+
+        <!-- 设定模式字段 -->
+        <div id="setting-fields" class="mode-fields" style="display:none">
+            <div class="form-row">
+                <label>标题</label>
+                <input type="text" name="title" placeholder="给短篇取个名字（可选）">
+            </div>
+            <div class="form-row">
+                <label>主题 <span class="required">*</span></label>
+                <textarea name="theme" rows="2" placeholder="这篇故事要表达什么？如：孤独、救赎、时间的流逝..." required></textarea>
+            </div>
+            <div class="form-row">
+                <label>角色设定</label>
+                <textarea name="character_desc" rows="3" placeholder="描述主要角色，如：一个退休的宇航员，总是望着星空发呆..."></textarea>
+            </div>
+            <div class="form-row">
+                <label>场景描述</label>
+                <textarea name="scene_desc" rows="3" placeholder="故事发生在哪里？如：一个被遗忘的海边小镇，灯塔已经废弃多年..."></textarea>
+            </div>
+        </div>
+
+        <!-- 细心模式字段 -->
+        <div id="careful-fields" class="mode-fields" style="display:none">
+            <div class="form-row">
+                <label>标题</label>
+                <input type="text" name="title" placeholder="给短篇取个名字">
+            </div>
+            <div class="form-row">
+                <label>核心灵感/创意</label>
+                <textarea name="inspiration" rows="2" placeholder="这篇故事的核心创意是什么？"></textarea>
+            </div>
+            <div class="form-row">
+                <label>主题</label>
+                <textarea name="theme" rows="2" placeholder="深层主题：如记忆与遗忘、身份认同、人与机器的边界..."></textarea>
+            </div>
+            <div class="form-row">
+                <label>角色设定</label>
+                <textarea name="character_desc" rows="4" placeholder="详细描述角色：年龄、职业、性格、外貌、内心矛盾、过往经历..."></textarea>
+            </div>
+            <div class="form-row">
+                <label>场景描述</label>
+                <textarea name="scene_desc" rows="3" placeholder="详细描述场景：地点、时间、氛围、细节..."></textarea>
+            </div>
+        </div>
+
+        <!-- 结构模板 -->
+        <div class="form-row">
+            <label>故事结构</label>
+            <select name="structure_template" id="structure-template">
+                <option value="">自动（AI 自由发挥）</option>
+                <option value="three_act">📐 三段式 — 铺垫→冲突→解决（通用）</option>
+                <option value="twist">🔄 反转式 — 表象→伏笔→反转→真相（悬疑/推理）</option>
+                <option value="emotional_arc">💫 情感弧 — 日常→触动→改变→余韵（治愈/文艺）</option>
+                <option value="escalating">⚔️ 冲突递进 — 小冲突→升级→高潮→抉择（动作/冒险）</option>
+            </select>
+        </div>
+
+        <!-- 通用字段 -->
+        <div class="form-inline-row">
+            <div class="form-row">
+                <label>体裁</label>
+                <select name="genre">
+                    <option value="">自动</option>
+                    <option value="极短篇（100-500字）">极短篇（100-500字）</option>
+                    <option value="闪小说（500-1000字）">闪小说（500-1000字）</option>
+                    <option value="短篇小说（1000-5000字）">短篇小说（1000-5000字）</option>
+                    <option value="小小说（500-2000字）">小小说（500-2000字）</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label>情感基调</label>
+                <select name="tone">
+                    <option value="">自动</option>
+                    <option value="温暖治愈">温暖治愈</option>
+                    <option value="悬疑紧张">悬疑紧张</option>
+                    <option value="悲伤忧郁">悲伤忧郁</option>
+                    <option value="轻松幽默">轻松幽默</option>
+                    <option value="热血燃情">热血燃情</option>
+                    <option value="冷峻克制">冷峻克制</option>
+                    <option value="荒诞讽刺">荒诞讽刺</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <label>目标字数</label>
+            <select name="word_target">
+                <option value="2000">2000 字（微型）</option>
+                <option value="5000">5000 字（短篇）</option>
+                <option value="8000">8000 字（标准短篇）</option>
+                <option value="10000" selected>1万字（番茄短篇门槛）</option>
+                <option value="15000">1.5万字（中短篇）</option>
+                <option value="20000">2万字（中篇）</option>
+                <option value="30000">3万字（番茄签约标准）</option>
+                <option value="50000">5万字（长中篇）</option>
+            </select>
+        </div>
+
+        <div class="form-row">
+            <label>额外要求</label>
+            <textarea name="extra_instructions" rows="2" placeholder="其他写作要求，如：第一人称视角、开放式结尾、包含反转..."></textarea>
+        </div>
+
+        <button type="submit" class="btn-primary" style="font-size:1.1rem;padding:0.8rem 2rem">开始创作</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const cards = document.querySelectorAll('.mode-card');
+    const modeInput = document.getElementById('mode-input');
+    const modeFields = {
+        inspiration: document.getElementById('inspiration-fields'),
+        setting: document.getElementById('setting-fields'),
+        careful: document.getElementById('careful-fields'),
+    };
+
+    function switchMode(mode) {
+        cards.forEach(c => c.classList.remove('active'));
+        document.querySelector(`[data-mode="${mode}"]`).classList.add('active');
+        modeInput.value = mode;
+        Object.entries(modeFields).forEach(([k, el]) => {
+            el.style.display = k === mode ? 'block' : 'none';
+            // Toggle required attribute
+            el.querySelectorAll('[required]').forEach(input => {
+                input.required = (k === mode);
+            });
+        });
+    }
+
+    cards.forEach(card => {
+        card.addEventListener('click', () => switchMode(card.dataset.mode));
+    });
+
+    // Initialize
+    switchMode(modeInput.value || 'inspiration');
+})();
+</script>
+
+<style>
+.mode-card {
+    cursor: pointer;
+    transition: all 0.3s ease;
+    opacity: 0.6;
+    border: 2px solid transparent;
+}
+.mode-card:hover {
+    opacity: 0.85;
+}
+.mode-card.active {
+    opacity: 1;
+    border-color: var(--accent);
+    box-shadow: 0 0 20px rgba(201, 160, 58, 0.15);
+}
+</style>
+{% endblock %}

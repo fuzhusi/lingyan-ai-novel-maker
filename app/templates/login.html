@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}登录 — 灵砚{% endblock %}
+
+{% block content %}
+<div class="login-container">
+    <div class="login-card">
+        <div class="login-header">
+            <div class="login-logo">灵砚</div>
+            <p class="login-subtitle">AI 小说创作系统</p>
+        </div>
+
+        {% if error %}
+        <div class="login-error">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST" action="/login" class="login-form">
+            <input type="hidden" name="next" value="{{ next or '/' }}">
+
+            <div class="form-group">
+                <label for="username">用户名</label>
+                <input type="text" id="username" name="username" required autofocus
+                       placeholder="请输入用户名" autocomplete="username">
+            </div>
+
+            <div class="form-group">
+                <label for="password">密码</label>
+                <input type="password" id="password" name="password" required
+                       placeholder="请输入密码" autocomplete="current-password">
+            </div>
+
+            <button type="submit" class="login-btn">登录</button>
+        </form>
+
+        <div class="login-tips">
+            <p><strong>默认账号：</strong></p>
+            <ul>
+                <li>管理员：<code>admin</code> / <code>admin</code></li>
+                <li>普通用户：<code>user</code> / <code>user</code></li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<style>
+.login-container {
+    min-height: calc(100vh - 120px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+}
+.login-card {
+    background: var(--bg-elevated, #121110);
+    border: 1px solid var(--border, #2a2722);
+    border-radius: 12px;
+    padding: 3rem 2.5rem;
+    width: 100%;
+    max-width: 420px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+.login-header {
+    text-align: center;
+    margin-bottom: 2rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border, #2a2722);
+}
+.login-logo {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--accent, #c9a03a);
+    letter-spacing: 0.15em;
+    margin-bottom: 0.5rem;
+}
+.login-subtitle {
+    color: var(--text-dim, #8a8578);
+    font-size: 0.85rem;
+    font-style: italic;
+}
+.login-error {
+    background: rgba(220, 38, 38, 0.15);
+    color: #f87171;
+    border: 1px solid rgba(220, 38, 38, 0.3);
+    padding: 0.6rem 0.8rem;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    font-size: 0.88rem;
+    text-align: center;
+}
+.login-form { display: flex; flex-direction: column; gap: 1rem; }
+.form-group { display: flex; flex-direction: column; gap: 0.3rem; }
+.form-group label {
+    font-size: 0.82rem;
+    color: var(--text-dim, #8a8578);
+    font-weight: 500;
+}
+.form-group input {
+    padding: 0.7rem 0.9rem;
+    background: var(--bg, #0b0a09);
+    border: 1px solid var(--border, #2a2722);
+    border-radius: 6px;
+    color: var(--text, #d4cfc4);
+    font-size: 0.95rem;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.form-group input:focus {
+    outline: none;
+    border-color: var(--accent, #c9a03a);
+    box-shadow: 0 0 0 2px rgba(201, 160, 58, 0.15);
+}
+.login-btn {
+    margin-top: 0.5rem;
+    padding: 0.8rem 1rem;
+    background: var(--accent, #c9a03a);
+    color: var(--bg, #0b0a09);
+    border: none;
+    border-radius: 6px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+}
+.login-btn:hover { background: var(--accent-light, #dab860); }
+.login-btn:active { transform: scale(0.98); }
+.login-tips {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border, #2a2722);
+    font-size: 0.78rem;
+    color: var(--text-faint, #5a5548);
+    line-height: 1.7;
+}
+.login-tips strong { color: var(--text-dim, #8a8578); }
+.login-tips code {
+    background: var(--bg, #0b0a09);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    color: var(--accent, #c9a03a);
+    font-family: var(--font-mono);
+}
+.login-tips ul {
+    list-style: none;
+    padding-left: 0;
+    margin-top: 0.4rem;
+}
+.login-tips li { padding-left: 1rem; position: relative; }
+.login-tips li::before { content: "·"; position: absolute; left: 0; }
+</style>
+{% endblock %}

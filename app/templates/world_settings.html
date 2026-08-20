@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}世界观设定 — {{ novel.title }}{% endblock %}
+
+{% block nav %}
+<a href="/novel/{{ novel.id }}/">&larr; 章节列表</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/characters">人物</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/outline">大纲</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/foreshadowing">伏笔</a>
+<span class="sep">|</span>
+<span>世界观</span>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="card">
+        <h2>添加世界观条目</h2>
+        <form method="POST" action="/novel/{{ novel.id }}/world-settings/create" class="form-stack">
+            <div class="form-inline-row">
+                <div class="form-row" style="flex:1">
+                    <label>分类</label>
+                    <input type="text" name="category" placeholder="如：地理、历史、政治、魔法体系...">
+                </div>
+                <div class="form-row" style="flex:2">
+                    <label>标题 <span class="required">*</span></label>
+                    <input type="text" name="title" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <label>内容</label>
+                <textarea name="content" rows="5" placeholder="详细的世界观描述..."></textarea>
+            </div>
+            <button type="submit">添加条目</button>
+        </form>
+    </div>
+
+    {% if categories %}
+    <div class="kb-nav">
+        按分类筛选：
+        <a href="#all" class="kb-filter active" onclick="filterCat('all')">全部</a>
+        {% for cat in categories %}
+        <a href="#{{ cat }}" class="kb-filter" onclick="filterCat('{{ cat }}')">{{ cat }}</a>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <h3>已有设定 <span class="count-badge">{{ settings|length }}</span></h3>
+    {% if settings %}
+    <div class="card-list" id="settings-list">
+        {% for ws in settings %}
+        <div class="card kb-card" data-category="{{ ws.category }}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                <div style="flex:1">
+                    <div class="kb-cat">{{ ws.category }}</div>
+                    <h2>{{ ws.title }}</h2>
+                    <div class="kb-field" style="white-space:pre-wrap">{{ ws.content }}</div>
+                </div>
+                <div style="display:flex;gap:0.3rem;flex-shrink:0;margin-left:1rem">
+                    <button class="btn-sm" onclick="document.getElementById('edit-ws-{{ ws.id }}').style.display='block'">编辑</button>
+                    <form method="POST" action="/novel/{{ novel.id }}/world-settings/{{ ws.id }}/delete"
+                          onsubmit="return confirm('确定删除 {{ ws.title }}？')">
+                        <button type="submit" class="btn-sm btn-danger">删除</button>
+                    </form>
+                </div>
+            </div>
+            <div id="edit-ws-{{ ws.id }}" style="display:none;margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--border)">
+                <form method="POST" action="/novel/{{ novel.id }}/world-settings/{{ ws.id }}/edit" class="form-stack">
+                    <div class="form-inline-row">
+                        <input type="text" name="category" value="{{ ws.category }}" placeholder="分类" style="flex:1">
+                        <input type="text" name="title" value="{{ ws.title }}" required style="flex:2">
+                    </div>
+                    <textarea name="content" rows="5">{{ ws.content }}</textarea>
+                    <button type="submit">保存修改</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty">暂无世界观设定</p>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterCat(cat) {
+    document.querySelectorAll('.kb-filter').forEach(a => a.classList.remove('active'));
+    document.querySelector(`.kb-filter[href="#${cat}"]`)?.classList.add('active');
+    document.querySelectorAll('.kb-card').forEach(card => {
+        card.style.display = (cat === 'all' || card.dataset.category === cat) ? '' : 'none';
+    });
+}
+</script>
+{% endblock %}

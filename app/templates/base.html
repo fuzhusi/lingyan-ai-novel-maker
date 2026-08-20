@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}AI 小说创作系统{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Crimson+Pro:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <header class="topbar">
+        <a href="/" class="logo">&#x2735; 灵砚</a>
+        <nav>
+            {% block nav %}{% endblock %}
+        </nav>
+        <nav class="topbar-nav" style="margin-left:auto">
+            <a href="/novel/">长篇</a>
+            <a href="/short/">短篇</a>
+            <a href="/plagiarize/">借鉴</a>
+            <a href="/settings/">设置</a>
+            <a href="/api/skills/page">技巧</a>
+            <a href="/prompt-templates/">模板</a>
+            <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="菜单">&#9776;</button>
+        </nav>
+    </header>
+
+    <!-- 移动端菜单 -->
+    <div class="mobile-menu" id="mobile-menu">
+        <a href="/novel/">📚 长篇</a>
+        <a href="/short/">✏ 短篇</a>
+        <a href="/plagiarize/">🔗 借鉴</a>
+        <a href="/settings/">⚙ 设置</a>
+        <a href="/api/skills/page">✦ 技巧</a>
+        <a href="/prompt-templates/">📝 模板</a>
+    </div>
+
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+    <footer style="text-align:center;padding:2rem;color:var(--text-faint);font-size:0.78rem;font-style:italic">
+        &mdash; 笔落惊风雨，墨染见天机 &mdash;
+    </footer>
+    {% block scripts %}{% endblock %}
+<script>
+// 移动端菜单切换
+(function() {
+    const btn = document.getElementById('mobile-menu-btn');
+    const menu = document.getElementById('mobile-menu');
+    if (btn && menu) {
+        btn.addEventListener('click', function() {
+            menu.classList.toggle('open');
+        });
+    }
+})();
+</script>
+<style>
+/* 移动端响应式 (P2-3) */
+@media (max-width: 768px) {
+    .topbar { flex-wrap: wrap; padding: 0.6rem 0.8rem !important; }
+    .topbar .logo { font-size: 1rem; }
+    .topbar-nav { display: none; }
+    .topbar-nav .mobile-menu-btn { display: block; }
+    .topbar-nav { gap: 0.5rem; }
+    .topbar-nav a, .user-link, .login-link, .user-name { display: none; }
+    .mobile-menu-btn {
+        display: block;
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 0.3rem 0.6rem;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 1.2rem;
+    }
+    .mobile-menu {
+        display: none;
+        position: fixed;
+        top: 50px;
+        right: 0;
+        background: var(--bg-elevated, #121110);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.5rem 0;
+        min-width: 180px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        z-index: 100;
+    }
+    .mobile-menu.open { display: block; }
+    .mobile-menu a {
+        display: block;
+        padding: 0.6rem 1rem;
+        color: var(--text);
+        text-decoration: none;
+        font-size: 0.92rem;
+    }
+    .mobile-menu a:hover { background: var(--surface-hover); }
+    .main-content { padding: 1rem !important; }
+    .container { padding: 0 !important; }
+    /* 仪表盘统计卡片在小屏幕上 2 列布局 */
+    [style*="grid-template-columns:repeat(auto-fit, minmax(160px, 1fr))"] {
+        grid-template-columns: repeat(2, 1fr) !important;
+    }
+}
+@media (min-width: 769px) {
+    .mobile-menu-btn { display: none; }
+    .mobile-menu { display: none !important; }
+}
+</style>
+</body>
+</html>

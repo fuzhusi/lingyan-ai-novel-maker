@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+{% block title %}写作技巧 — 灵砚{% endblock %}
+{% block head %}
+<style>
+.skill-card { cursor: pointer; }
+.skill-card:hover { border-color: var(--border-light); transform: translateY(-1px); }
+.skill-card[data-active="true"]:hover { border-color: var(--accent); }
+@media (max-width: 768px) {
+    .skill-grid { grid-template-columns: 1fr !important; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width:960px; margin:2rem auto; padding:0 1.5rem;">
+
+    <!-- Header -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2rem;">
+        <div>
+            <h1 style="font-family:var(--font-display); font-size:1.8rem; color:var(--text-bright); margin:0;">
+                ✦ 写作技巧
+            </h1>
+            <p style="color:var(--text-dim); font-size:0.88rem; margin-top:0.3rem;">
+                已激活 <strong style="color:var(--accent)">{{ active_count }}</strong> 个技巧 ·
+                共 {{ builtin_skills|length + custom_skills|length }} 个可用
+            </p>
+        </div>
+        <button class="btn btn-primary" onclick="openCreateModal()">
+            + 自定义技巧
+        </button>
+    </div>
+
+    <!-- 说明卡片 -->
+    <div class="card" style="margin-bottom:2rem; border-left:3px solid var(--accent-dim); background:var(--accent-ghost);">
+        <p style="color:var(--text-dim); font-size:0.85rem; line-height:1.8; margin:0;">
+            技巧是可复用的写作指令片段，激活后会自动注入到 Writer Agent 的提示词中。
+            你可以在内置技巧的基础上创建自定义技巧，打造属于自己的写作风格。
+        </p>
+    </div>
+
+    <!-- 内置技巧 -->
+    <h2 style="font-family:var(--font-display); font-size:1.2rem; color:var(--text-bright); margin-bottom:1rem;">
+        内置技巧 <span style="font-size:0.8rem; color:var(--text-dim); font-weight:400;">{{ builtin_skills|length }}</span>
+    </h2>
+    <div class="skill-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:1rem; margin-bottom:2.5rem;">
+        {% for skill in builtin_skills %}
+        <div class="skill-card card" data-key="{{ skill.key }}" data-active="{{ 'true' if skill.active else 'false' }}"
+             style="padding:1.25rem; cursor:pointer; transition:all 0.2s; position:relative;
+                    {% if skill.active %}border-color:var(--accent-dim); box-shadow:0 0 12px var(--accent-glow);{% endif %}"
+             onclick="toggleSkill('{{ skill.key }}', this)">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:0.6rem;">
+                <div style="display:flex; align-items:center; gap:0.5rem;">
+                    <span class="skill-icon" style="font-size:1.1rem;">{{ ['🎯','🎵','🎭','💬','👁','🔮','💫'][loop.index0 % 7] }}</span>
+                    <strong style="color:var(--text-bright); font-size:0.95rem;">{{ skill.name }}</strong>
+                </div>
+                <div class="skill-toggle" style="width:36px; height:20px; border-radius:10px; position:relative; flex-shrink:0;
+                     background:{% if skill.active %}var(--accent){% else %}var(--border){% endif %}; transition:background 0.2s;">
+                    <div style="width:16px; height:16px; border-radius:50%; background:#f0ebe0; position:absolute; top:2px;
+                         left:{% if skill.active %}18px{% else %}2px{% endif %}; transition:left 0.2s; box-shadow:var(--shadow-sm);"></div>
+                </div>
+            </div>
+            <p style="color:var(--text-dim); font-size:0.82rem; line-height:1.6; margin:0;">{{ skill.description }}</p>
+            <!-- 展开详情 -->
+            <div class="skill-detail" style="display:none; margin-top:0.8rem; padding-top:0.8rem; border-top:1px solid var(--border);">
+                <div style="background:var(--bg); border-radius:var(--radius); padding:0.8rem; margin-bottom:0.5rem;">
+                    <label style="font-size:0.75rem; color:var(--accent-dim); display:block; margin-bottom:0.3rem;">提示词片段</label>
+                    <pre style="color:var(--text); font-size:0.78rem; font-family:var(--font-mono); white-space:pre-wrap; margin:0; line-height:1.6;">{{ skill.prompt }}</pre>
+                </div>
+                {% if skill.constraints %}
+                <div style="background:var(--danger-bg); border-radius:var(--radius); padding:0.8rem;">
+                    <label style="font-size:0.75rem; color:var(--danger); display:block; margin-bottom:0.3rem;">约束规则</label>
+                    <pre style="color:var(--text); font-size:0.78rem; font-family:var(--font-mono); white-space:pre-wrap; margin:0;">{{ skill.constraints }}</pre>
+                </div>
+                {% endif %}
+            </div>
+            <div style="text-align:right; margin-top:0.5rem;">
+                <span class="toggle-detail-btn" style="font-size:0.75rem; color:var(--text-faint); cursor:pointer;"
+                      onclick="event.stopPropagation(); toggleDetail(this)">展开详情 ▾</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- 自定义技巧 -->
+    <h2 style="font-family:var(--font-display); font-size:1.2rem; color:var(--text-bright); margin-bottom:1rem;">
+        自定义技巧 <span style="font-size:0.8rem; color:var(--text-dim); font-weight:400;">{{ custom_skills|length }}</span>
+    </h2>
+    {% if custom_skills %}
+    <div class="skill-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:1rem; margin-bottom:2rem;">
+        {% for skill in custom_skills %}
+        <div class="skill-card card" data-key="{{ skill.key }}" data-active="{{ 'true' if skill.active else 'false' }}"
+             style="padding:1.25rem; transition:all 0.2s; position:relative;
+                    {% if skill.active %}border-color:var(--accent-dim); box-shadow:0 0 12px var(--accent-glow);{% endif %}">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:0.6rem;">
+                <div style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; flex:1;"
+                     onclick="toggleSkill('{{ skill.key }}', this.closest('.skill-card'))">
+                    <span style="font-size:1.1rem;">✦</span>
+                    <strong style="color:var(--text-bright); font-size:0.95rem;">{{ skill.name }}</strong>
+                </div>
+                <div style="display:flex; gap:0.4rem; align-items:center;">
+                    <div class="skill-toggle" style="width:36px; height:20px; border-radius:10px; position:relative; flex-shrink:0; cursor:pointer;
+                         background:{% if skill.active %}var(--accent){% else %}var(--border){% endif %}; transition:background 0.2s;"
+                         onclick="toggleSkill('{{ skill.key }}', this.closest('.skill-card'))">
+                        <div style="width:16px; height:16px; border-radius:50%; background:#f0ebe0; position:absolute; top:2px;
+                             left:{% if skill.active %}18px{% else %}2px{% endif %}; transition:left 0.2s; box-shadow:var(--shadow-sm);"></div>
+                    </div>
+                    <button class="btn btn-danger btn-sm" style="padding:0.25rem 0.5rem; font-size:0.75rem;"
+                            onclick="event.stopPropagation(); deleteCustom('{{ skill.key }}', '{{ skill.name }}')">删</button>
+                </div>
+            </div>
+            <p style="color:var(--text-dim); font-size:0.82rem; line-height:1.6; margin:0;">{{ skill.description }}</p>
+            <div style="background:var(--bg); border-radius:var(--radius); padding:0.8rem; margin-top:0.8rem;">
+                <label style="font-size:0.75rem; color:var(--accent-dim); display:block; margin-bottom:0.3rem;">提示词片段</label>
+                <pre style="color:var(--text); font-size:0.78rem; font-family:var(--font-mono); white-space:pre-wrap; margin:0; line-height:1.6;">{{ skill.prompt }}</pre>
+            </div>
+            {% if skill.constraints %}
+            <div style="background:var(--danger-bg); border-radius:var(--radius); padding:0.8rem; margin-top:0.5rem;">
+                <label style="font-size:0.75rem; color:var(--danger); display:block; margin-bottom:0.3rem;">约束规则</label>
+                <pre style="color:var(--text); font-size:0.78rem; font-family:var(--font-mono); white-space:pre-wrap; margin:0;">{{ skill.constraints }}</pre>
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card" style="text-align:center; padding:2rem; color:var(--text-faint); border-style:dashed;">
+        <p style="margin:0; font-size:0.9rem;">还没有自定义技巧，点击右上角「+ 自定义技巧」创建</p>
+    </div>
+    {% endif %}
+
+</div>
+
+<!-- 创建自定义技巧弹窗 -->
+<div id="create-modal" style="display:none; position:fixed; inset:0; z-index:200; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);
+     align-items:center; justify-content:center;">
+    <div class="card" style="width:90%; max-width:560px; max-height:85vh; overflow-y:auto; margin:auto;
+         position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+            <h2 style="font-family:var(--font-display); font-size:1.2rem; color:var(--text-bright); margin:0;">
+                创建自定义技巧
+            </h2>
+            <button onclick="closeCreateModal()" style="background:transparent; color:var(--text-dim); font-size:1.2rem; padding:0.2rem 0.5rem;">✕</button>
+        </div>
+        <form id="create-form" onsubmit="submitCustom(event)">
+            <div class="form-stack">
+                <div class="form-row">
+                    <label>技巧名称 <span class="required">*</span></label>
+                    <input type="text" name="name" placeholder="如：古风文笔、悬疑氛围" required>
+                </div>
+                <div class="form-row">
+                    <label>描述</label>
+                    <input type="text" name="description" placeholder="一句话说明这个技巧的作用">
+                </div>
+                <div class="form-row">
+                    <label>提示词片段 <span class="required">*</span></label>
+                    <textarea name="prompt" rows="6" placeholder="注入到 Writer Agent 的写作指令，如：&#10;- 使用短句为主&#10;- 多用感官描写&#10;- 对话简洁有力" required></textarea>
+                    <span class="hint">这段文字会在生成时附加到系统提示词中</span>
+                </div>
+                <div class="form-row">
+                    <label>约束规则（可选）</label>
+                    <textarea name="constraints" rows="3" placeholder="禁止使用的词或句式，如：禁止使用'仿佛'、'宛如'等虚词"></textarea>
+                    <span class="hint">附加到写作约束中，作为硬性规则</span>
+                </div>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.5rem;">
+                <button type="button" class="btn btn-edit" onclick="closeCreateModal()">取消</button>
+                <button type="submit" class="btn btn-primary">创建技巧</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 切换技能激活状态
+async function toggleSkill(key, cardEl) {
+    const isActive = cardEl.dataset.active === 'true';
+    const allCards = document.querySelectorAll(`.skill-card[data-key="${key}"]`);
+
+    // 收集当前所有激活的技能
+    const active = [];
+    document.querySelectorAll('.skill-card[data-active="true"]').forEach(el => {
+        if (el.dataset.key !== key) active.push(el.dataset.key);
+    });
+    if (!isActive) active.push(key);
+
+    try {
+        const resp = await fetch('/api/skills/active', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({skills: active}),
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            // 更新所有同名卡片的 UI
+            allCards.forEach(card => {
+                card.dataset.active = (!isActive).toString();
+                const toggle = card.querySelector('.skill-toggle');
+                if (toggle) {
+                    toggle.style.background = !isActive ? 'var(--accent)' : 'var(--border)';
+                    toggle.firstElementChild.style.left = !isActive ? '18px' : '2px';
+                }
+                card.style.borderColor = !isActive ? 'var(--accent-dim)' : '';
+                card.style.boxShadow = !isActive ? '0 0 12px var(--accent-glow)' : '';
+            });
+            // 更新计数
+            updateActiveCount();
+        }
+    } catch (e) {
+        console.error('Toggle failed:', e);
+    }
+}
+
+// 展开/收起详情
+function toggleDetail(btn) {
+    const detail = btn.closest('.skill-card').querySelector('.skill-detail');
+    if (detail.style.display === 'none') {
+        detail.style.display = 'block';
+        btn.textContent = '收起 ▴';
+    } else {
+        detail.style.display = 'none';
+        btn.textContent = '展开详情 ▾';
+    }
+}
+
+// 更新激活计数
+function updateActiveCount() {
+    const count = document.querySelectorAll('.skill-card[data-active="true"]').length;
+    const strong = document.querySelector('.container p strong');
+    if (strong) strong.textContent = count;
+}
+
+// 打开创建弹窗
+function openCreateModal() {
+    document.getElementById('create-modal').style.display = 'flex';
+}
+
+// 关闭创建弹窗
+function closeCreateModal() {
+    document.getElementById('create-modal').style.display = 'none';
+    document.getElementById('create-form').reset();
+}
+
+// 提交自定义技巧
+async function submitCustom(e) {
+    e.preventDefault();
+    const form = e.target;
+    const data = {
+        name: form.name.value.trim(),
+        description: form.description.value.trim(),
+        prompt: form.prompt.value.trim(),
+        constraints: form.constraints.value.trim(),
+    };
+    if (!data.name || !data.prompt) return;
+
+    try {
+        const resp = await fetch('/api/skills/custom', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data),
+        });
+        const result = await resp.json();
+        if (result.ok) {
+            closeCreateModal();
+            location.reload();
+        } else {
+            alert(result.error || '创建失败');
+        }
+    } catch (e) {
+        alert('网络错误');
+    }
+}
+
+// 删除自定义技巧
+async function deleteCustom(key, name) {
+    if (!confirm(`确定删除自定义技巧「${name}」？`)) return;
+    try {
+        const resp = await fetch(`/api/skills/custom/${key}`, {method: 'DELETE'});
+        const data = await resp.json();
+        if (data.ok) location.reload();
+    } catch (e) {
+        alert('删除失败');
+    }
+}
+
+// ESC 关闭弹窗
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeCreateModal();
+});
+// 点击遮罩关闭弹窗
+document.getElementById('create-modal').addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeCreateModal();
+});
+</script>
+{% endblock %}

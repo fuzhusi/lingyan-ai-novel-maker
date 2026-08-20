@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}长篇创作 — 灵砚{% endblock %}
+
+{% block content %}
+<div class="container" style="padding-top:2rem">
+    <div style="margin-bottom:1.5rem">
+        <a href="/" class="btn btn-secondary">&#x2190; 返回首页</a>
+    </div>
+
+    <div class="card" id="create-card">
+        <div class="card-header" id="create-toggle">
+            <h2>起笔 · 创建新小说</h2>
+            <span class="toggle-icon">&#x25BC;</span>
+        </div>
+        <form method="POST" action="/novel/create" class="form-stack" id="create-form" style="display:none">
+            <div class="form-row">
+                <label>小说标题 <span class="required">*</span></label>
+                <input type="text" name="title" placeholder="给你的小说取个名字..." required>
+            </div>
+            <div class="form-row">
+                <label>类型 / 流派</label>
+                <input type="text" name="genre" placeholder="如：玄幻、科幻、都市、悬疑、古风...">
+            </div>
+            <div class="form-row">
+                <label>小说简介</label>
+                <textarea name="synopsis" rows="3" placeholder="用几句话概括小说的核心故事..."></textarea>
+            </div>
+            <div class="form-row">
+                <label>世界观设定</label>
+                <textarea name="world_intro" rows="4" placeholder="描述小说的世界观背景，如时代、地域、特殊规则、力量体系等..."></textarea>
+            </div>
+
+            <div class="form-section">
+                <h4>首个主角（可选，将自动加入角色库）</h4>
+            </div>
+            <div class="form-row">
+                <label>主角姓名</label>
+                <input type="text" name="char_name" placeholder="主角的名字">
+            </div>
+            <div class="form-inline-row">
+                <div class="form-row">
+                    <label>性格特点</label>
+                    <input type="text" name="char_personality" placeholder="如：冷静果敢、外冷内热...">
+                </div>
+                <div class="form-row">
+                    <label>背景故事</label>
+                    <input type="text" name="char_background" placeholder="如：出身寒门的剑道天才...">
+                </div>
+            </div>
+
+            <button type="submit" class="btn-primary">创建小说</button>
+        </form>
+    </div>
+
+    {% if novel_data %}
+    <div class="section-header">
+        <h2>我的小说 <span class="count-badge">{{ novel_data|length }}</span></h2>
+        <form method="POST" action="/novel/delete-all" onsubmit="return confirm('⚠️ 这将永久删除所有小说及其全部数据，不可恢复！\n\n请输入 DELETE 确认：');" style="display:flex;align-items:center;gap:0.5rem">
+            <input type="text" id="delete-confirm" placeholder="输入 DELETE 确认" style="width:180px" autocomplete="off">
+            <button type="submit" id="btn-delete-all" class="btn-danger" disabled>删除全部</button>
+        </form>
+    </div>
+
+    <div class="novel-grid">
+        {% for item in novel_data %}
+        {% set novel = item.novel %}
+        <div class="novel-card">
+            <div class="novel-card-body">
+                <div class="novel-card-top">
+                    <a href="/novel/{{ novel.id }}/" class="novel-title">{{ novel.title }}</a>
+                    {% if novel.genre %}
+                    <span class="genre-badge">{{ novel.genre }}</span>
+                    {% endif %}
+                </div>
+                {% if novel.synopsis %}
+                <p class="novel-synopsis">{{ novel.synopsis[:120] }}{% if novel.synopsis|length > 120 %}&hellip;{% endif %}</p>
+                {% endif %}
+                <div class="novel-stats">
+                    <span class="stat">&#x1F4C4; {{ item.chapter_count }} 章</span>
+                    <span class="stat">&#x1F464; {{ item.character_count }} 角色</span>
+                    <span class="stat">{{ novel.created_at[:10] }}</span>
+                </div>
+            </div>
+            <div class="novel-card-actions">
+                <a href="/novel/{{ novel.id }}/" class="btn btn-primary btn-sm">进入写作</a>
+                <form method="POST" action="/novel/{{ novel.id }}/delete" onsubmit="return confirm('确认删除《{{ novel.title }}》及所有章节？')" style="display:inline">
+                    <button type="submit" class="btn-sm btn-danger">删除</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon">&#x1F4D6;</div>
+        <p class="empty-title">还没有小说</p>
+        <p class="empty-desc">点击上方「起笔 · 创建新小说」开始你的创作之旅</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const toggle = document.getElementById('create-toggle');
+    const form = document.getElementById('create-form');
+    const icon = toggle.querySelector('.toggle-icon');
+    const deleteInput = document.getElementById('delete-confirm');
+    const deleteBtn = document.getElementById('btn-delete-all');
+
+    toggle.addEventListener('click', function() {
+        const open = form.style.display !== 'none';
+        form.style.display = open ? 'none' : 'block';
+        icon.innerHTML = open ? '&#x25BC;' : '&#x25B2;';
+    });
+
+    if (deleteInput) {
+        deleteInput.addEventListener('input', function() {
+            deleteBtn.disabled = this.value !== 'DELETE';
+        });
+    }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,875 @@
+{% extends "base.html" %}
+{% block title %}第 {{ chapter.chapter_number }} 章 — {{ novel.title }}{% endblock %}
+
+{% block nav %}
+<a href="/novel/{{ novel.id }}/">&larr; 章节列表</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/characters">人物</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/world-settings">世界观</a>
+<span class="sep">|</span>
+<a href="/novel/{{ novel.id }}/outline">大纲</a>
+<span class="sep">|</span>
+<span>第 {{ chapter.chapter_number }} 章{% if chapter.title %}：{{ chapter.title }}{% endif %}</span>
+{% endblock %}
+
+{% block content %}
+<div class="write-layout" id="app">
+    <div class="write-main">
+        <div class="toolbar">
+            <button id="btn-generate" class="btn-primary">&#x2699; AI 生成本章</button>
+            <button id="btn-save-ai" class="btn-save" disabled>保存 AI 版本</button>
+            <button id="btn-save-human" class="btn-save-human" disabled>保存人工版本</button>
+            <button id="btn-edit" class="btn-edit" disabled>手动编辑</button>
+            <span class="sep">|</span>
+            <button id="btn-review" class="btn-review" disabled title="评审+审计+改写 一键完成">🔍 全面评审</button>
+            <button id="btn-approve" class="btn-approve" disabled>批准</button>
+            <button id="btn-rewrite" class="btn-rewrite" disabled>重写</button>
+            <span class="sep">|</span>
+            <button id="btn-audit" class="btn-sm btn-edit" disabled title="17维度质量审计">多维审计</button>
+            <button id="btn-diff" class="btn-sm btn-edit" disabled>版本对比</button>
+        </div>
+
+        <div id="error-box" class="error-box" style="display:none"></div>
+
+        <div class="output-container">
+            <textarea id="output-area" class="output-area" readonly
+                placeholder="章节内容将在此呈现..."></textarea>
+            <div id="streaming-indicator" class="streaming-indicator" style="display:none">正在生成&hellip;</div>
+        </div>
+
+        <div class="chapter-meta">
+            {% if outline_context %}
+            <details open>
+                <summary>&#x1F4CB; 大纲树规划</summary>
+                {% if outline_context.volume %}
+                <div class="meta-block"><strong>所属卷：</strong>{{ outline_context.volume.title }}</div>
+                {% endif %}
+                <div class="meta-block"><strong>节点：</strong>{{ outline_context.node.title }}</div>
+                {% if outline_context.node.summary %}
+                <div class="meta-block">{{ outline_context.node.summary }}</div>
+                {% endif %}
+                {% if outline_context.scenes %}
+                <div class="meta-block" style="margin-top:0.5rem">
+                    <strong>分幕指引：</strong>
+                    {% for s in outline_context.scenes %}
+                    <div style="margin:0.3rem 0 0.3rem 1.2rem;padding-left:0.6rem;border-left:2px solid var(--accent-dim)">
+                        <span style="color:var(--accent-light);font-weight:600">场景 {{ loop.index }}：{{ s.title }}</span>
+                        <div style="color:var(--text-dim);font-size:0.85rem">{{ s.summary }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </details>
+            {% endif %}
+            <details id="outline-details"{% if chapter.outline and not outline_context %} open{% endif %}>
+                <summary>本章大纲 <span id="outline-status" style="font-size:0.78rem;color:var(--text-dim)"></span></summary>
+                <div id="outline-content" class="meta-block">{% if chapter.outline %}{{ chapter.outline }}{% else %}<span class="empty">暂无大纲，点击「AI 生成本章」将先生成大纲</span>{% endif %}</div>
+            </details>
+            <details>
+                <summary>用户指示</summary>
+                {% if chapter.user_directive %}
+                <div class="meta-block">{{ chapter.user_directive }}</div>
+                {% else %}
+                <div class="meta-block empty">暂无特别指示</div>
+                {% endif %}
+            </details>
+            <details id="kb-context-details">
+                <summary>知识库上下文 <span id="kb-status" style="font-size:0.78rem;color:var(--text-dim)">（加载中...）</span></summary>
+                <div id="kb-context-content">正在加载...</div>
+            </details>
+            {% if characters %}
+            <details id="char-select-details">
+                <summary>本章出场角色 <span id="char-select-status" style="font-size:0.78rem;color:var(--text-dim)"></span></summary>
+                <div class="meta-block" style="font-size:0.82rem;color:var(--text-dim);margin-bottom:0.5rem">
+                    勾选本章会登场的角色，生成时只注入这些角色的档案（减少无关设定干扰）。
+                </div>
+                <div id="char-select-list" style="display:flex;flex-wrap:wrap;gap:0.4rem">
+                    {% for c in characters %}
+                    <label style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.25rem 0.6rem;border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:0.85rem">
+                        <input type="checkbox" class="char-cb" value="{{ c.id }}" checked>
+                        <span>{{ c.name }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+            </details>
+            {% endif %}
+        </div>
+
+        <!-- Review Panel -->
+        <div id="review-panel" class="review-panel" style="display:none">
+            <h3>评审结果 <span id="review-score" class="review-score"></span></h3>
+            <div id="review-dimensions"></div>
+            <div id="review-comment" class="review-comment"></div>
+            <h4>段落标注</h4>
+            <div id="review-annotations"></div>
+            <h4>我的意见 <span id="feedback-saved" style="display:none;font-size:0.75rem;color:var(--success);font-weight:400">已保存</span></h4>
+            <textarea id="user-feedback" class="user-feedback" rows="3"
+                placeholder="对评审结果有什么补充意见？重写时这些意见会和 Critic 的评审一起送给 AI..."></textarea>
+            <button id="btn-save-feedback" class="btn-sm">保存意见</button>
+        </div>
+
+        <!-- Audit Panel -->
+        <div id="audit-panel" class="review-panel" style="display:none">
+            <h3>多维审计 <span id="audit-grade" class="review-score"></span></h3>
+            <div id="audit-summary" style="margin-bottom:1rem;font-size:0.9rem;color:var(--text-dim)"></div>
+            <div id="audit-groups"></div>
+            <details style="margin-top:1rem">
+                <summary style="cursor:pointer;color:var(--accent)">查看全部 17 个维度</summary>
+                <div id="audit-dimensions" style="margin-top:0.5rem"></div>
+            </details>
+            <div id="audit-issues" style="margin-top:1rem"></div>
+        </div>
+
+        <!-- Diff Panel -->
+        <div id="diff-panel" class="diff-panel" style="display:none">
+            <h3>版本对比 <span id="diff-vlabel"></span></h3>
+            <div style="margin-bottom:0.75rem;display:flex;gap:0.5rem;align-items:center">
+                <select id="diff-v1" class="diff-select"></select>
+                <span style="color:var(--text-dim)">vs</span>
+                <select id="diff-v2" class="diff-select"></select>
+                <button id="btn-diff-run" class="btn-sm">执行对比</button>
+            </div>
+            <pre id="diff-output" class="diff-output"></pre>
+        </div>
+
+        <div class="version-panel" id="vp">
+            <h3>版本历史</h3>
+            <div id="version-list" class="empty">暂无版本，生成后在此保存</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    // XSS protection helper
+    function escapeHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    const NOVEL_ID = {{ novel.id }};
+    const CHAPTER_NUM = {{ chapter.chapter_number }};
+    const GENRE = {{ novel_genre|tojson|safe }};
+    const SYNOPSIS = {{ novel_synopsis|tojson|safe }};
+    const WORLD_INTRO = {{ novel_world_intro|tojson|safe }};
+    let versions = {{ versions_json|safe }};
+    let generating = false;
+    let fullText = '';
+    let currentVersionId = null;
+    let hasOutline = {{ 'true' if chapter.outline else 'false' }};
+
+    const $ = id => document.getElementById(id);
+    const btnGen = $('btn-generate');
+    const btnSaveAI = $('btn-save-ai');
+    const btnSaveHuman = $('btn-save-human');
+    const btnEdit = $('btn-edit');
+    const btnReview = $('btn-review');
+    const btnApprove = $('btn-approve');
+    const btnRewrite = $('btn-rewrite');
+    const btnDiff = $('btn-diff');
+    const btnAudit = $('btn-audit');
+    const outputArea = $('output-area');
+    const streamInd = $('streaming-indicator');
+    const errorBox = $('error-box');
+    const versionList = $('version-list');
+    const outlineContent = $('outline-content');
+    const outlineStatus = $('outline-status');
+    const outlineDetails = $('outline-details');
+
+    function setButtons(active) {
+        const btns = [btnGen, btnSaveAI, btnSaveHuman, btnEdit, btnReview, btnAudit, btnApprove, btnRewrite, btnDiff];
+        btns.filter(Boolean).forEach(b => b.disabled = !active);
+    }
+
+    function updateButtons() {
+        const has = !!fullText.trim();
+        btnSaveAI.disabled = !has;
+        btnSaveHuman.disabled = !has;
+        btnEdit.disabled = !has;
+        btnReview.disabled = !has || !currentVersionId;
+        btnApprove.disabled = !currentVersionId;
+        btnRewrite.disabled = !currentVersionId;
+        btnDiff.disabled = versions.length < 2;
+    }
+
+    function renderVersions() {
+        if (versions.length === 0) {
+            versionList.innerHTML = '<div class="empty">暂无版本，生成后在此保存</div>';
+        } else {
+            versionList.innerHTML = versions.map(v =>
+                `<div class="version-item${currentVersionId === v.id ? ' active' : ''}" data-vid="${v.id}">
+                    <span class="v-num">V${v.version_number}</span>
+                    <span class="v-source">${v.source === 'human' ? '&#x270E; 人工' : '&#x2699; AI'}</span>
+                    ${v.approved !== undefined && v.approved ? '<span class="v-approved">&#x2713;</span>' : ''}
+                    <span class="v-time">${(v.created_at || '').slice(0, 16).replace('T', ' ')}</span>
+                    <button class="btn-sm" onclick="window._loadVer(${v.id})">查看</button>
+                    <button class="btn-sm" onclick="window._diffWith(${v.id})" style="font-size:0.75rem">对比</button>
+                    <button class="btn-sm btn-danger" onclick="window._deleteVer(${v.id})" title="删除此版本" style="font-size:0.7rem;padding:0.15rem 0.4rem">&times;</button>
+                </div>`
+            ).join('');
+        }
+        updateDiffSelects();
+    }
+
+    function updateDiffSelects() {
+        const s1 = $('diff-v1'), s2 = $('diff-v2');
+        if (!s1 || !s2) return;
+        const opts = versions.map(v =>
+            `<option value="${v.id}">V${v.version_number} (${v.source === 'human' ? '人工' : 'AI'})</option>`
+        ).join('');
+        s1.innerHTML = opts;
+        s2.innerHTML = opts;
+        if (versions.length >= 2) { s2.selectedIndex = 1; }
+    }
+
+    window._loadVer = async function(versionId) {
+        currentVersionId = versionId;
+        const v = versions.find(v => v.id === versionId);
+        if (v && v.fullContent) {
+            fullText = v.fullContent;
+            outputArea.value = fullText;
+            renderVersions();
+            updateButtons();
+            loadReview(versionId);
+            return;
+        }
+        try {
+            const resp = await fetch(`/novel/${NOVEL_ID}/chapter/${CHAPTER_NUM}/version/${versionId}`);
+            const data = await resp.json();
+            if (v) v.fullContent = data.content;
+            fullText = data.content;
+            outputArea.value = fullText;
+            renderVersions();
+            updateButtons();
+            loadReview(versionId);
+        } catch(e) {}
+    };
+
+    async function loadReview(versionId) {
+        try {
+            const resp = await fetch(`/api/review/get?version_id=${versionId}`);
+            const data = await resp.json();
+            if (!data) { $('review-panel').style.display = 'none'; return; }
+            renderReview(data);
+        } catch(e) {}
+    }
+
+    let currentReviewId = null;
+
+    function renderReview(data) {
+        $('review-panel').style.display = 'block';
+        currentReviewId = data.id;
+        const score = data.overall_score;
+        if (score != null) {
+            $('review-score').textContent = `综合评分：${score}/10`;
+            $('review-score').className = 'review-score ' + (score >= 7 ? 'score-good' : score >= 5 ? 'score-ok' : 'score-bad');
+        }
+        $('review-comment').textContent = data.overall_comment || '';
+
+        let dimHtml = '';
+        (data.dimensions || []).forEach(d => {
+            dimHtml += `<div class="dim-item">
+                <span class="dim-name">${escapeHtml(d.name || '')}</span>
+                <span class="dim-score">${d.score}/10</span>
+                <span class="dim-comment">${escapeHtml(d.comment || '')}</span>
+            </div>`;
+        });
+        $('review-dimensions').innerHTML = dimHtml;
+
+        let annHtml = '';
+        (data.annotations || []).forEach(a => {
+            annHtml += `<div class="anno-item">
+                <span class="anno-idx">段落${a.paragraph_index != null ? a.paragraph_index + 1 : '?'}</span>
+                ${a.quote ? `<span class="anno-quote">"${escapeHtml(a.quote)}"</span>` : ''}
+                <div class="anno-issue">问题：${escapeHtml(a.issue || '')}</div>
+                <div class="anno-suggest">建议：${escapeHtml(a.suggestion || '')}</div>
+            </div>`;
+        });
+        $('review-annotations').innerHTML = annHtml || '<div class="empty">无段落级标注</div>';
+
+        // User feedback
+        $('user-feedback').value = data.user_feedback || '';
+        $('feedback-saved').style.display = 'none';
+    }
+
+    function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    // === 统一评审报告渲染 ===
+    function renderUnifiedReport(report) {
+        $('review-panel').style.display = 'block';
+
+        // 综合评分 + 等级
+        const score = report.overall_score || 0;
+        const grade = report.grade || '?';
+        const scoreColor = score >= 8 ? 'var(--success)' : score >= 6 ? 'var(--accent)' : 'var(--danger)';
+        $('review-score').innerHTML = `
+            <span style="color:${scoreColor};font-size:1.4rem;font-weight:700">${score}</span>
+            <span style="color:var(--text-dim);font-size:0.85rem">/10 · ${grade}级</span>
+        `;
+
+        // 摘要
+        $('review-comment').innerHTML = `
+            <div style="background:var(--bg);padding:0.6rem;border-radius:6px;margin-bottom:0.5rem;color:var(--text-bright);line-height:1.6">
+                ${escapeHtml(report.summary || '')}
+            </div>
+            <div style="color:var(--text-bright);line-height:1.7">${escapeHtml(report.critic_comment || '')}</div>
+        `;
+
+        // 分组分数条
+        let groupsHtml = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:0.5rem;margin-bottom:0.8rem">';
+        const groupNames = {character:'角色', plot:'剧情', world:'世界观', writing:'文笔', foreshadow:'伏笔'};
+        for (const [g, info] of Object.entries(report.groups || {})) {
+            const pct = Math.round(info.score * 10);
+            const color = info.score >= 8 ? 'var(--success)' : info.score >= 6 ? 'var(--accent)' : 'var(--danger)';
+            groupsHtml += `<div style="background:var(--bg);padding:0.4rem 0.6rem;border-radius:4px">
+                <div style="display:flex;justify-content:space-between;font-size:0.78rem">
+                    <span>${groupNames[g]||g}</span>
+                    <span style="color:${color};font-weight:600">${info.score.toFixed(1)}</span>
+                </div>
+                <div style="height:4px;background:var(--border);border-radius:2px;margin-top:0.2rem;overflow:hidden">
+                    <div style="height:100%;width:${pct}%;background:${color}"></div>
+                </div>
+            </div>`;
+        }
+        groupsHtml += '</div>';
+        $('review-dimensions').innerHTML = groupsHtml;
+
+        // 问题清单（按严重度排序）
+        let issuesHtml = `<div style="margin-bottom:0.5rem;font-size:0.85rem;color:var(--text-bright)">
+            共发现 <strong style="color:var(--danger)">${report.high_issue_count || 0}</strong> 个高优先级问题，
+            <strong>${report.total_issue_count || 0}</strong> 个总问题
+        </div>`;
+        for (const issue of (report.issues || []).slice(0, 8)) {
+            const sevColor = issue.severity === 'high' ? 'var(--danger)' :
+                              issue.severity === 'medium' ? 'var(--accent)' : 'var(--text-dim)';
+            const sevLabel = issue.severity === 'high' ? '高' : issue.severity === 'medium' ? '中' : '低';
+            issuesHtml += `<div style="padding:0.5rem 0.7rem;margin-bottom:0.4rem;background:var(--bg);border-left:3px solid ${sevColor};border-radius:0 4px 4px 0">
+                <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.3rem">
+                    <span style="background:${sevColor};color:var(--bg);padding:0.1rem 0.4rem;border-radius:3px;font-size:0.72rem;font-weight:600">${sevLabel}</span>
+                    <span style="color:var(--accent);font-size:0.82rem;font-weight:600">${escapeHtml(issue.dimension_name || issue.dimension || '')}</span>
+                </div>
+                <div style="color:var(--text-bright);font-size:0.85rem;margin-bottom:0.2rem">${escapeHtml(issue.issue || '')}</div>
+                ${issue.suggestion ? `<div style="color:var(--text-dim);font-size:0.78rem">💡 ${escapeHtml(issue.suggestion)}</div>` : ''}
+            </div>`;
+        }
+        if ((report.issues || []).length > 8) {
+            issuesHtml += `<div style="color:var(--text-faint);font-size:0.78rem;text-align:center;padding:0.4rem">...还有 ${report.issues.length - 8} 个问题</div>`;
+        }
+        $('review-annotations').innerHTML = issuesHtml || '<div style="color:var(--success)">未发现明显问题</div>';
+
+        // 自动改写（如果有）
+        if (report.rewrite && report.rewrite.rewritten_content) {
+            const rewriteContent = report.rewrite.rewritten_content;
+            $('review-annotations').innerHTML += `
+                <details style="margin-top:0.8rem">
+                    <summary style="cursor:pointer;color:var(--accent);font-weight:600">✨ AI 自动改写（点击展开）</summary>
+                    <pre style="background:var(--bg);padding:0.8rem;border-radius:6px;margin-top:0.5rem;max-height:300px;overflow-y:auto;font-size:0.85rem;line-height:1.6;white-space:pre-wrap">${escapeHtml(rewriteContent)}</pre>
+                    <button id="btn-apply-rewrite" class="btn-primary btn-sm" style="margin-top:0.4rem">采纳此版本</button>
+                </details>
+            `;
+            // 使用事件委托避免 XSS
+            document.getElementById('btn-apply-rewrite')?.addEventListener('click', function() {
+                if (!confirm('确认采纳 AI 改写？将创建一个新版本。')) return;
+                alert('改写内容已显示，请手动复制保存');
+            });
+        }
+    }
+
+    window.applyRewrite = function(versionId, content) {
+        if (!confirm('确认采纳 AI 改写？将创建一个新版本。')) return;
+        // 这里可以调用保存版本 API
+        alert('改写内容已显示，请手动复制保存');
+    };
+
+    // === User Feedback ===
+    $('btn-save-feedback').onclick = async function() {
+        if (!currentReviewId) return;
+        const feedback = $('user-feedback').value;
+        try {
+            const formData = new URLSearchParams();
+            formData.append('review_id', currentReviewId);
+            formData.append('feedback', feedback);
+            await fetch('/api/review/feedback', { method: 'POST', body: formData });
+            $('feedback-saved').style.display = 'inline';
+            setTimeout(() => { $('feedback-saved').style.display = 'none'; }, 2000);
+        } catch(e) { alert('保存意见失败: ' + e.message); }
+    };
+
+    window._diffWith = function(vid) {
+        $('diff-panel').style.display = 'block';
+        $('diff-v2').value = vid;
+        // v1 优先取当前查看的版本；若与 v2 相同（点了自己）则自动换一个不同版本，
+        // 修复原先 v1===v2 时点击「执行对比」静默无反应的问题
+        let v1 = currentVersionId || (versions[0] && versions[0].id) || '';
+        if (v1 === vid || !v1) {
+            const other = versions.find(function(v) { return v.id !== vid; });
+            v1 = other ? other.id : '';
+        }
+        $('diff-v1').value = v1;
+        $('btn-diff-run').click();
+        $('diff-panel').scrollIntoView({behavior:'smooth'});
+    };
+
+    window._deleteVer = async function(vid) {
+        if (!confirm('确定删除此版本？此操作不可恢复。')) return;
+        try {
+            const resp = await fetch(`/novel/${NOVEL_ID}/chapter/${CHAPTER_NUM}/version/${vid}/delete`, { method: 'POST' });
+            const data = await resp.json();
+            if (data.ok) {
+                versions = versions.filter(v => v.id !== vid);
+                if (currentVersionId === vid) {
+                    currentVersionId = null;
+                    fullText = '';
+                    outputArea.value = '';
+                }
+                renderVersions();
+                updateButtons();
+            }
+        } catch(e) { alert('删除失败: ' + e.message); }
+    };
+
+    btnEdit.onclick = function() {
+        outputArea.readOnly = false;
+        outputArea.focus();
+        // Editing old content — the review no longer applies to modified text
+        $('review-panel').style.display = 'none';
+        currentReviewId = null;
+        currentVersionId = null;
+        updateButtons();
+    };
+    outputArea.addEventListener('input', function() { fullText = outputArea.value; updateButtons(); });
+
+    // === Save ===
+    btnSaveAI.onclick = async function() { await saveVersion('ai'); };
+    btnSaveHuman.onclick = async function() { await saveVersion('human'); };
+
+    async function saveVersion(source) {
+        const content = fullText.trim();
+        if (!content) return alert('没有可保存的内容');
+        const formData = new URLSearchParams();
+        formData.append('content', content);
+        formData.append('source', source);
+        formData.append('model_params_json', '{}');
+        try {
+            const resp = await fetch(`/novel/${NOVEL_ID}/chapter/${CHAPTER_NUM}/save-version`, {
+                method: 'POST', body: formData
+            });
+            const data = await resp.json();
+            currentVersionId = data.id;
+            versions.unshift({
+                id: data.id, version_number: data.version_number,
+                content: '', source: source, created_at: new Date().toISOString()
+            });
+            renderVersions(); updateButtons();
+        } catch(e) { alert('保存失败: ' + e.message); }
+    }
+
+    // === 本章出场角色勾选（生成时只注入选中角色的档案） ===
+    const CHAR_STORE_KEY = 'lingyan_chars_' + NOVEL_ID + '_' + CHAPTER_NUM;
+    function getSelectedCharacterIds() {
+        return Array.from(document.querySelectorAll('.char-cb:checked')).map(cb => cb.value);
+    }
+    function updateCharSelectStatus() {
+        const el = $('char-select-status');
+        if (!el) return;
+        const total = document.querySelectorAll('.char-cb').length;
+        const sel = getSelectedCharacterIds().length;
+        el.textContent = sel === 0 ? '（未勾选，将不注入角色档案）' : '（' + sel + '/' + total + '）';
+        el.style.color = sel === 0 ? 'var(--warning, orange)' : 'var(--text-dim)';
+    }
+    (function initCharSelect() {
+        const cbs = document.querySelectorAll('.char-cb');
+        if (!cbs.length) return;
+        // 恢复上次的选择（同一章的出场阵容通常连续）
+        try {
+            const saved = JSON.parse(localStorage.getItem(CHAR_STORE_KEY) || 'null');
+            if (Array.isArray(saved)) {
+                cbs.forEach(cb => { cb.checked = saved.includes(cb.value); });
+            }
+        } catch(e) {}
+        cbs.forEach(cb => cb.addEventListener('change', function() {
+            try { localStorage.setItem(CHAR_STORE_KEY, JSON.stringify(getSelectedCharacterIds())); } catch(e) {}
+            updateCharSelectStatus();
+        }));
+        updateCharSelectStatus();
+    })();
+
+    // === Generate outline first, then content ===
+    btnGen.onclick = async function() {
+        if (generating) return;
+        generating = true; btnGen.innerHTML = '&#x2699; 生成中...'; btnGen.disabled = true;
+        errorBox.style.display = 'none';
+        updateButtons();
+
+        // Quick API key validation
+        try {
+            const configResp = await fetch('/settings/api/config');
+            const config = await configResp.json();
+            if (!config.api_key || config.api_key.trim() === '') {
+                errorBox.textContent = 'API Key 未设置，请先在设置页面配置 API Key';
+                errorBox.style.display = 'block';
+                generating = false; btnGen.innerHTML = '&#x2699; AI 生成本章'; btnGen.disabled = false;
+                updateButtons();
+                return;
+            }
+        } catch(e) {}
+
+        // Step 1: Generate outline if chapter doesn't have one
+        if (!hasOutline) {
+            outlineDetails.open = true;
+            outlineStatus.textContent = '（生成大纲中...）';
+            outlineContent.innerHTML = '<span class="streaming-indicator" style="position:static">AI 正在规划本章大纲...</span>';
+            streamInd.style.display = 'block';
+
+            const outlineForm = new URLSearchParams();
+            outlineForm.append('novel_id', NOVEL_ID);
+            outlineForm.append('chapter_number', CHAPTER_NUM);
+            outlineForm.append('novel_title', {{ novel.title|tojson|safe }});
+            outlineForm.append('chapter_title', {{ chapter.title|tojson|safe }});
+            outlineForm.append('genre', GENRE);
+            outlineForm.append('synopsis', SYNOPSIS);
+            outlineForm.append('world_intro', WORLD_INTRO);
+
+            let outlineText = '';
+            try {
+                await streamFetch('/api/outline-stream', outlineForm, function(token) {
+                    outlineText += token;
+                    outlineContent.textContent = outlineText;
+                });
+                const saveForm = new URLSearchParams();
+                saveForm.append('outline', outlineText);
+                await fetch(`/novel/${NOVEL_ID}/chapter/${CHAPTER_NUM}/save-outline`, { method: 'POST', body: saveForm });
+                hasOutline = true;
+                outlineStatus.textContent = '（&#x2713;）';
+            } catch(e) {
+                outlineStatus.textContent = '（生成失败）';
+                outlineContent.innerHTML = '<span style="color:var(--danger)">大纲生成失败: ' + e.message + '</span>';
+                errorBox.textContent = '大纲生成失败: ' + e.message;
+                errorBox.style.display = 'block';
+                generating = false; btnGen.innerHTML = '&#x2699; AI 生成本章'; btnGen.disabled = false;
+                streamInd.style.display = 'none'; updateButtons();
+                return;
+            }
+        }
+
+        // Step 2: Generate chapter content
+        fullText = ''; outputArea.value = '';
+        streamInd.style.display = 'block';
+        btnGen.innerHTML = '&#x2699; 写作中...';
+
+        const formData = new URLSearchParams();
+        formData.append('outline', outlineContent.textContent || {{ chapter.outline|tojson|safe }});
+        formData.append('user_directive', {{ chapter.user_directive|tojson|safe }});
+        formData.append('chapter_title', {{ chapter.title|tojson|safe }});
+        formData.append('novel_title', {{ novel.title|tojson|safe }});
+        formData.append('novel_id', NOVEL_ID);
+        formData.append('chapter_number', CHAPTER_NUM);
+        // 出场角色勾选（空 = 不注入角色档案；参数缺省 = 全部，兼容旧流程）
+        formData.append('character_ids', getSelectedCharacterIds().join(','));
+
+        try {
+            await streamFetch('/api/generate-stream', formData, function(token) {
+                outputArea.value += token;
+                outputArea.scrollTop = outputArea.scrollHeight;
+            });
+            fullText = outputArea.value;
+        } catch(e) {
+            errorBox.textContent = '内容生成失败: ' + e.message;
+            errorBox.style.display = 'block';
+        }
+        generating = false; btnGen.innerHTML = '&#x2699; AI 生成本章'; btnGen.disabled = false;
+        streamInd.style.display = 'none'; updateButtons();
+    };
+
+    // === Review ===
+    btnReview.onclick = async function() {
+        if (generating) return;
+        if (!currentVersionId) return alert('请先选择一个版本');
+        generating = true; btnReview.innerHTML = '评审中...'; btnReview.disabled = true;
+        $('review-panel').style.display = 'block';
+        $('review-dimensions').innerHTML = '<div class="streaming-indicator" style="position:static">正在评审...</div>';
+        $('review-annotations').innerHTML = '';
+        $('review-comment').textContent = '';
+        $('review-score').textContent = '';
+        errorBox.style.display = 'none';
+
+        const formData = new URLSearchParams();
+        formData.append('version_id', currentVersionId);
+        formData.append('novel_id', NOVEL_ID);
+        formData.append('chapter_number', CHAPTER_NUM);
+        formData.append('include_rewrite', '0');
+
+        btnReview.innerHTML = '⏳ 评审+审计中...';
+
+        try {
+            // 一步调用：评审 + 17维审计 + 综合报告
+            const resp = await fetch('/api/unified-review', { method: 'POST', body: formData });
+            const report = await resp.json();
+
+            if (report.error) {
+                errorBox.textContent = '评审失败: ' + report.error;
+                errorBox.style.display = 'block';
+            } else {
+                // 渲染统一报告（评分 + 维度 + 问题清单 + 改写建议）
+                renderUnifiedReport(report);
+            }
+        } catch(e) {
+            errorBox.textContent = '评审请求失败: ' + e.message;
+            errorBox.style.display = 'block';
+        }
+
+        generating = false; btnReview.innerHTML = '🔍 全面评审'; btnReview.disabled = false;
+    };
+
+    // === Approve ===
+    btnApprove.onclick = async function() {
+        if (!currentVersionId) return;
+        if (!confirm('批准此版本后系统将自动生成章节摘要。确认？')) return;
+        const formData = new URLSearchParams();
+        formData.append('version_id', currentVersionId);
+        try {
+            const resp = await fetch('/api/approve', { method: 'POST', body: formData });
+            const data = await resp.json();
+            if (data.approved) {
+                alert('已批准！' + (data.summary ? '摘要已生成。' : ''));
+                const v = versions.find(v => v.id === currentVersionId);
+                if (v) v.approved = true;
+                renderVersions();
+            }
+        } catch(e) { alert('批准失败: ' + e.message); }
+    };
+
+    // === Rewrite ===
+    btnRewrite.onclick = async function() {
+        if (generating || !currentVersionId) return;
+        const rewriteFromId = currentVersionId;  // grab before clearing
+        generating = true; btnRewrite.innerHTML = '重写中...'; btnRewrite.disabled = true;
+        fullText = ''; outputArea.value = ''; streamInd.style.display = 'block';
+        errorBox.style.display = 'none';
+        // Clear old review — new version hasn't been reviewed yet
+        $('review-panel').style.display = 'none';
+        currentReviewId = null;
+        currentVersionId = null;
+
+        const formData = new URLSearchParams();
+        formData.append('version_id', rewriteFromId);
+        formData.append('novel_title', {{ novel.title|tojson|safe }});
+
+        try {
+            await streamFetch('/api/rewrite-stream', formData, function(token) {
+                outputArea.value += token;
+                outputArea.scrollTop = outputArea.scrollHeight;
+            });
+            fullText = outputArea.value;
+        } catch(e) {
+            errorBox.textContent = '重写失败: ' + e.message;
+            errorBox.style.display = 'block';
+        }
+        generating = false; btnRewrite.innerHTML = '重写'; btnRewrite.disabled = false;
+        streamInd.style.display = 'none'; updateButtons();
+    };
+
+    // === Diff ===
+    btnDiff.onclick = function() {
+        $('diff-panel').style.display = $('diff-panel').style.display === 'none' ? 'block' : 'none';
+        if ($('diff-panel').style.display !== 'none') {
+            updateDiffSelects();
+            // 默认：v2 = 当前版本，v1 = 最近的另一个版本（保证两者不同，避免静默失败）
+            let v2 = currentVersionId || (versions[0] && versions[0].id) || '';
+            let v1 = (versions[0] && versions[0].id) || '';
+            if (v1 === v2) {
+                const other = versions.find(function(v) { return v.id !== v2; });
+                v1 = other ? other.id : '';
+            }
+            $('diff-v1').value = v1;
+            $('diff-v2').value = v2;
+        }
+    };
+
+    // unified diff 着色渲染：+绿 -红 @@/文件头灰 上下文行暗
+    function renderDiffText(diffText) {
+        if (!diffText) { $('diff-output').innerHTML = '<span style="color:var(--text-dim)">(无差异)</span>'; return; }
+        const html = diffText.split('\n').map(function(line) {
+            const esc = escapeHtml(line);
+            if (line.startsWith('+++') || line.startsWith('---')) {
+                return '<span style="color:var(--accent);font-weight:600">' + esc + '</span>';
+            }
+            if (line.startsWith('@@')) {
+                return '<span style="color:var(--text-dim)">' + esc + '</span>';
+            }
+            if (line.startsWith('+')) {
+                return '<span style="color:var(--success)">' + esc + '</span>';
+            }
+            if (line.startsWith('-')) {
+                return '<span style="color:#e05260">' + esc + '</span>';
+            }
+            return '<span style="color:var(--text-faint)">' + esc + '</span>';
+        }).join('\n');
+        $('diff-output').innerHTML = html;
+    }
+
+    $('btn-diff-run').onclick = async function() {
+        const v1 = $('diff-v1').value, v2 = $('diff-v2').value;
+        // 原先此处静默 return（无任何提示），是「点击没反应」的主因
+        if (!v1 || !v2) { $('diff-output').textContent = '请先选择两个版本'; return; }
+        if (v1 === v2) { $('diff-output').textContent = '两个下拉框选择了同一个版本，请选不同的版本'; return; }
+        try {
+            const resp = await fetch('/api/diff?v1=' + v1 + '&v2=' + v2);
+            const data = await resp.json();
+            if (data.error) { $('diff-output').textContent = '对比失败: ' + data.error; return; }
+            $('diff-vlabel').textContent = 'V' + data.v1.version_number + ' (' + data.v1.source + ') vs V'
+                + data.v2.version_number + ' (' + data.v2.source + ')';
+            renderDiffText(data.diff);
+        } catch(e) { $('diff-output').textContent = '对比失败: ' + e.message; }
+    };
+
+    // === Streaming fetch helper ===
+    async function streamFetch(url, formData, onToken) {
+        const resp = await fetch(url, { method: 'POST', body: formData });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let errorMsg = '';
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(line.slice(6));
+                        if (data.token && onToken) onToken(data.token);
+                        if (data.error) {
+                            errorMsg = data.error;
+                            errorBox.textContent = data.error;
+                            errorBox.style.display = 'block';
+                        }
+                        if (data.done) return;
+                    } catch(e) {}
+                }
+            }
+        }
+        if (errorMsg) throw new Error(errorMsg);
+    }
+
+    // === KB context ===
+    async function loadKbContext() {
+        try {
+            const resp = await fetch(`/novel/${NOVEL_ID}/api/kb-context`);
+            const data = await resp.json();
+            let html = '';
+            if (data.characters.length > 0) {
+                html += '<div class="meta-block"><strong>人物：</strong>' +
+                    data.characters.map(c => escapeHtml(c.name)).join('、') + '</div>';
+            }
+            if (data.world_settings.length > 0) {
+                const cats = [...new Set(data.world_settings.map(w => w.category))];
+                html += '<div class="meta-block"><strong>世界观：</strong>' +
+                    cats.map(cat => {
+                        const items = data.world_settings.filter(w => w.category === cat);
+                        return escapeHtml(cat) + '(' + items.map(i => escapeHtml(i.title)).join(', ') + ')';
+                    }).join(' | ') + '</div>';
+            }
+            if (data.foreshadowing.length > 0) {
+                html += '<div class="meta-block"><strong>待回收伏笔：</strong>' +
+                    data.foreshadowing.map(f => escapeHtml(f.description)).join('；') + '</div>';
+            }
+            if (!html) html = '<div class="meta-block">暂无知识库内容</div>';
+            $('kb-context-content').innerHTML = html;
+            $('kb-status').textContent =
+                `（${data.characters.length}个角色 | ${data.world_settings.length}条设定 | ${data.foreshadowing.length}个伏笔）`;
+        } catch(e) { $('kb-context-content').innerHTML = '<div class="meta-block">加载失败</div>'; }
+    }
+
+    loadKbContext();
+    renderVersions();
+
+    // --- Multi-Dimensional Audit ---
+    const auditPanel = $('audit-panel');
+
+    btnAudit.addEventListener('click', async function() {
+        if (!currentVersionId) return;
+        btnAudit.disabled = true;
+        btnAudit.textContent = '审计中...';
+        auditPanel.style.display = 'block';
+        $('audit-grade').textContent = '';
+        $('audit-summary').textContent = '正在执行 17 维度审计，请稍候...';
+        $('audit-groups').innerHTML = '';
+        $('audit-dimensions').innerHTML = '';
+        $('audit-issues').innerHTML = '';
+
+        try {
+            const fd = new FormData();
+            fd.append('version_id', currentVersionId);
+            fd.append('novel_id', NOVEL_ID);
+            fd.append('chapter_number', CHAPTER_NUM);
+            const resp = await fetch('/api/audit/run', { method: 'POST', body: fd });
+            const data = await resp.json();
+
+            // Grade badge
+            $('audit-grade').textContent = `${data.grade} (${data.overall_score}/10)`;
+
+            // Summary
+            $('audit-summary').textContent = data.summary || '';
+
+            // Group scores
+            const groupNames = {character:'角色', plot:'剧情', world:'世界观', writing:'文笔', foreshadow:'伏笔'};
+            let groupHtml = '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:0.5rem;margin-bottom:1rem">';
+            for (const [g, info] of Object.entries(data.groups || {})) {
+                const color = info.score >= 8 ? 'var(--success)' : info.score >= 6 ? 'var(--accent)' : 'var(--danger)';
+                groupHtml += `<div style="text-align:center;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:0.6rem">
+                    <div style="font-size:1.4rem;font-weight:700;color:${color}">${info.score}</div>
+                    <div style="font-size:0.75rem;color:var(--text-dim)">${groupNames[g]||g}</div>
+                </div>`;
+            }
+            groupHtml += '</div>';
+            $('audit-groups').innerHTML = groupHtml;
+
+            // All dimensions
+            let dimHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.3rem">';
+            for (const [d, info] of Object.entries(data.dimensions || {})) {
+                const color = info.score >= 8 ? 'var(--success)' : info.score >= 6 ? 'var(--accent)' : 'var(--danger)';
+                dimHtml += `<div style="display:flex;justify-content:space-between;padding:0.3rem 0.5rem;font-size:0.82rem;border-bottom:1px solid var(--border)">
+                    <span style="color:var(--text-dim)">${info.name}</span>
+                    <span style="color:${color};font-weight:600">${info.score}</span>
+                </div>`;
+            }
+            dimHtml += '</div>';
+            $('audit-dimensions').innerHTML = dimHtml;
+
+            // Issues
+            if (data.issues && data.issues.length > 0) {
+                let issueHtml = `<div style="font-size:0.85rem;color:var(--text-dim);margin-bottom:0.5rem">发现 ${data.total_issues} 个问题（${data.high_issues} 个高优先级）</div>`;
+                for (const issue of data.issues.slice(0, 10)) {
+                    const sevColor = issue.severity === 'high' ? 'var(--danger)' : issue.severity === 'medium' ? 'var(--accent)' : 'var(--text-dim)';
+                    issueHtml += `<div style="padding:0.4rem 0.6rem;margin-bottom:0.3rem;background:var(--bg-card);border-left:3px solid ${sevColor};border-radius:0 6px 6px 0;font-size:0.85rem">
+                        <span style="color:${sevColor};font-weight:600">[${issue.dimension_name}]</span> ${issue.issue}
+                    </div>`;
+                }
+                $('audit-issues').innerHTML = issueHtml;
+            } else {
+                $('audit-issues').innerHTML = '<div style="color:var(--success);font-size:0.9rem">未发现明显问题</div>';
+            }
+        } catch(e) {
+            $('audit-summary').textContent = '审计失败: ' + e.message;
+        }
+        btnAudit.disabled = false;
+        btnAudit.textContent = '多维审计';
+    });
+
+    // Enable audit button when version is selected
+    const origUpdateButtons = updateButtons;
+    updateButtons = function() {
+        origUpdateButtons();
+        btnAudit.disabled = !currentVersionId;
+    };
+})();
+</script>
+{% endblock %}
