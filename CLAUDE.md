@@ -144,7 +144,9 @@ app/
 - **Per-Agent 配置：** 16 种 Agent 可在 `/settings/` 显式指定厂商模型（`llm_model_{agent}`，格式 `provider_id:model_id`）及温度/Token
 - **Per-Novel 配置：** 通过 `Novel.model_override` (JSON) 覆盖
 - **优先级：** `Agent 指定厂商模型 > Agent 参数 > 小说覆盖 (model_override) > 自动默认（厂商勾选模型） > Setting 全局键（遗留） > .env`
-- **回退保护：** Agent 指定的模型被取消勾选后自动回退默认；存在自动默认时忽略裸 `model_name_{agent}`（避免模型名与 key 错配 401）
+- **回退保护：** 厂商被禁用/删除时 Agent 指定的模型自动回退默认；模型勾选(enabled)仅决定参与自动默认池，不拦截显式指定；存在自动默认时忽略裸 `model_name_{agent}`（避免模型名与 key 错配 401）
+- **多厂商多模型自由填入：** langchain 的 model_name 只是传给 API 的字符串，`llm_model_{agent}` 的 model_id 不要求存在于模型列表（自定义部署/代理别名/Ollama 本地模型均可），厂商存在即生效
+- **推荐配置定位：** DeepSeek flash/pro 的推荐默认与关键词匹配是低成本开发参考，非硬约束 -- 换任意厂商/模型只需 agent-set 或 Web 设置即可
 - **代码示例：**
   ```python
   from app.config_utils import get_effective_config
@@ -261,7 +263,7 @@ python cli.py llm model-toggle-all --provider 1 --enabled true
 python cli.py llm test --provider 1                         # 测试厂商连接
 # Per-Agent 模型配置
 python cli.py llm agent-list                                # 16 个 Agent 生效模型+来源
-python cli.py llm agent-set --agent-type critic --llm-model 1:deepseek-v4-pro
+python cli.py llm agent-set --agent-type critic --llm-model 1:deepseek-v4-pro   # model_id 可为任意模型名（自定义部署/别名，透传 API）
 python cli.py llm agent-clear --agent-type critic           # 清除回退默认
 python cli.py llm agent-param --agent-type writer --temperature 0.9 --max-tokens 4096
 python cli.py llm effective --agent-type writer [--novel 1] # 实际生效配置（含 per-novel 覆盖）
@@ -405,5 +407,5 @@ print(get_deai_stats(raw_text, cleaned))
 | 数据库锁定 | 等待其他进程完成或重启 Flask |
 | API 401 错误 | 到 `/settings/llm` 确认厂商 api_key 有效并已勾选模型（点「测试」验证） |
 | SSL 错误 | 已自动禁用证书验证 (`app/services/llm.py`) |
-| 模型不生效 | `/settings/llm` 确认模型已勾选；`/settings/` 中该 Agent 是否显式指定了其他模型 |
+| 模型不生效 | `llm effective --agent-type X` 看实际生效来源；厂商是否禁用（禁用则回退默认）；该 Agent 是否显式指定了其他模型 |
 | 短篇发散后无节点进度条 | 发散输出未按节点格式（旧 prompt 缓存），重新发散即可 |

@@ -1020,20 +1020,28 @@ def cmd_llm(args):
                 return
             llm_val = (args.llm_model or "").strip()  # 格式 provider_id:model_id
             if llm_val:
-                # 校验格式与存在性
+                # 校验格式与厂商存在性；模型名不限制（langchain 直接透传给 API）
                 try:
                     pid_s, model_id = llm_val.split(":", 1)
                     pid = int(pid_s)
                 except ValueError:
                     print(f"✗ 格式错误，应为 provider_id:model_id（如 1:deepseek-v4-flash）")
                     return
+                p = db.session.get(LLMProvider, pid)
+                if not p:
+                    print(f"✗ 厂商不存在: #{pid}")
+                    print("  先 `llm provider-add` 添加厂商（模型需通过厂商拿到 api_key/base_url）")
+                    return
+                if not p.enabled:
+                    print(f"⚠ 厂商 {p.name} 当前已禁用，配置保存但不会生效（`llm provider-update --provider {pid} --enabled true` 启用）")
+                if not p.api_key:
+                    print(f"⚠ 厂商 {p.name} 未配置 api_key")
                 m = LLMModel.query.filter_by(provider_id=pid, model_id=model_id).first()
                 if not m:
-                    print(f"✗ 模型不存在: 厂商#{pid} 的 {model_id}")
-                    print(f"  用 `llm model-list --provider {pid}` 查看可用模型")
-                    return
-                if not m.enabled:
-                    print(f"⚠ 模型 {model_id} 未勾选，Agent 调用时会被回退保护忽略。建议先 `llm model-toggle --model {m.id}` 勾选。")
+                    print(f"ℹ {model_id} 不在厂商模型列表中（自定义/未拉取模型），按原样保存直接透传给 API")
+                    print(f"  若需拉取列表: `llm fetch-models --provider {pid}`")
+                elif not m.enabled:
+                    print(f"ℹ 模型 {model_id} 未勾选（勾选仅影响自动默认池，不影响此显式指定）")
                 _save_setting(f"llm_model_{agent_type}", llm_val)
                 _save_setting(f"model_name_{agent_type}", model_id)  # 兼容旧逻辑
                 db.session.commit()

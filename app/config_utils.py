@@ -76,7 +76,10 @@ def _safe_int(val, default):
 def _resolve_llm_model(key_value):
     """解析 "provider_id:model_id" 为厂商配置 dict；无效/未启用返回 None（带缓存）。
 
-    模型被取消勾选后返回 None（调用方自动回退默认，而非报错）。
+    langchain 的 model_name 只是传给 API 的字符串，支持多厂商多模型自由填入：
+    - model_id 不要求存在于 LLMModel 表（自定义部署/代理别名/未拉取的模型均可）
+    - 模型勾选(enabled)仅影响自动默认池，不拦截显式指定
+    - 厂商被禁用/删除/无 key 时返回 None（调用方自动回退默认，而非报错）
 
     Returns:
         {"api_key", "base_url", "model_name", "provider_type"} 或 None
@@ -92,19 +95,17 @@ def _resolve_llm_model(key_value):
         cached = _provider_cache[cache_key]
         return dict(cached) if cached else None
 
-    from app.models.llm_provider import LLMProvider, LLMModel
+    from app.models.llm_provider import LLMProvider
+    from app.models.base import db
     cfg = None
-    provider = LLMProvider.query.get(pid)
+    provider = db.session.get(LLMProvider, pid)
     if provider and provider.enabled and provider.api_key:
-        # 校验模型仍被勾选
-        model = LLMModel.query.filter_by(provider_id=pid, model_id=mid, enabled=True).first()
-        if model:
-            cfg = {
-                "api_key": provider.api_key,
-                "base_url": provider.base_url,
-                "model_name": mid,
-                "provider_type": provider.provider_type,
-            }
+        cfg = {
+            "api_key": provider.api_key,
+            "base_url": provider.base_url,
+            "model_name": mid,
+            "provider_type": provider.provider_type,
+        }
     _provider_cache[cache_key] = dict(cfg) if cfg else None
     return cfg
 

@@ -127,20 +127,21 @@
                             </td>
                             <td style="padding:0.5rem">
                                 {% if available_models %}
-                                <select name="llm_model_{{ agent_type }}"
-                                        style="width:100%;font-family:var(--font-mono);font-size:0.8rem;padding:0.3rem;background:var(--bg-card);color:var(--text)">
-                                    <option value="">自动{% if auto_models[agent_type] %}: {{ auto_models[agent_type] }}{% endif %}</option>
+                                <input type="text" list="agent-model-datalist"
+                                       name="llm_model_{{ agent_type }}"
+                                       value="{{ agent_configs[agent_type].llm_model }}"
+                                       placeholder="留空=自动{% if auto_models[agent_type] %}: {{ auto_models[agent_type] }}{% endif %}"
+                                       style="width:100%;font-family:var(--font-mono);font-size:0.8rem;padding:0.3rem;background:var(--bg-card);color:var(--text);border:1px solid var(--border);border-radius:4px">
+                                <datalist id="agent-model-datalist">
                                     {% for provider in available_models %}
-                                    <optgroup label="{{ provider.provider_name }}">
-                                        {% for m in provider.models %}
-                                        <option value="{{ m.key }}"
-                                            {% if agent_configs[agent_type].llm_model == m.key %}selected{% endif %}>
-                                            {{ m.display_name }}
-                                        </option>
-                                        {% endfor %}
-                                    </optgroup>
+                                    {% for m in provider.models %}
+                                    <option value="{{ m.key }}">{{ provider.provider_name }} / {{ m.display_name }}</option>
                                     {% endfor %}
-                                </select>
+                                    {% endfor %}
+                                </datalist>
+                                <div style="font-size:0.72rem;color:var(--text-faint);margin-top:0.2rem">
+                                    💡 可从下拉选择，也可手输 厂商ID:模型名（自定义部署/别名直传 API）
+                                </div>
                                 {% else %}
                                 <input type="text"
                                        name="model_name_{{ agent_type }}"
