@@ -104,7 +104,7 @@
 ### MCP Server & CLI ✅
 
 - [x] **26 个 MCP 工具** — 完整 CRUD + 审计
-- [x] **15 个 CLI 命令组** — 含 auth/whoami 认证
+- [x] **18 个 CLI 命令组** — 含 auth/whoami 与故事状态引擎 state
 - [x] **脚本化操作** — 支持批量任务
 
 ---
@@ -196,7 +196,7 @@
 | 路由模块 | 16 |
 | 业务服务 | 12 + 通用 HTTP 客户端 |
 | MCP 工具 | 26 |
-| CLI 命令组 | 15 (含 auth/whoami) |
+| CLI 命令组 | 18 (含 auth/whoami/state) |
 | 禁用模式 (De-AI) | 120+ (8 大类) |
 | 质量审计维度 | 17 (5 分组) |
 | Agent 类型 | 16 |

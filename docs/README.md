@@ -10,7 +10,7 @@
 | [架构文档](architecture.md) | `docs/architecture.md` | 系统架构、技术栈、项目结构、数据模型、认证、多 Agent、配置系统 | ✅ 维护中 |
 | [技术设计文档](technical-design.md) | `docs/technical-design.md` | 完整技术设计 — 功能模块、Agent 架构、质量控制系统、记忆系统、数据库 DDL、API 接口、开发路线 | ✅ 维护中 |
 | [实现状态与路线图](roadmap.md) | `docs/roadmap.md` | 各版本实现状态 (V1.0→V3.0 已完成)、项目指标、V4.0 未来规划 | ✅ 维护中 |
-| [MCP & CLI 使用指南](mcp-cli-guide.md) | `docs/mcp-cli-guide.md` | 26 个 MCP 工具、15 个 CLI 命令组、自动化脚本示例 | ✅ 维护中 |
+| [MCP & CLI 使用指南](mcp-cli-guide.md) | `docs/mcp-cli-guide.md` | 26 个 MCP 工具、18 个 CLI 命令组、自动化脚本示例 | ✅ 维护中 |
 | [开源调研报告](open-source-survey.md) | `docs/open-source-survey.md` | 45 个开源项目调研、竞品对比、技术趋势、借鉴实现情况 | 📋 归档 (2026-06) |
 | [产品整改计划](improvement-plan.md) | `docs/improvement-plan.md` | V3.0 整改计划 (P0-P3)、时间线、验收标准 — 大部分已完成 | 📋 归档 (2026-07) |
 

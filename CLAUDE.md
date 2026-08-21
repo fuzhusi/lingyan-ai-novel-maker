@@ -168,7 +168,10 @@ app/
 - **出场角色勾选**：写作页右侧「本章出场角色」面板勾选登场角色，生成时只注入选中角色档案（减少无关设定稀释注意力）；全不勾 = 不注入任何角色档案；参数缺省（旧流程/MCP）= 全部角色
 - **分层记忆**：上一章结尾原文 ~800 字（保障文风与钩子衔接）-> 近 3 章详细摘要 -> 更早章节合并压缩概要（>600 字截断），不再全量线性注入
 - **摘要兜底**：`ChapterSummary` 只在审批时生成；生成前情提要时对无摘要章节自动截取正文开头 300 字做粗摘要
-- **注入顺序**（`build_writer_prompt`）：约束(system) > 小说信息 > 大纲树 > 世界观 > 出场角色 > 上一章结尾 > 近章摘要 > 远章概要 > 伏笔 > 因果链 > 记忆 > 本章大纲 > 特别指示
+- **注入顺序**（`build_writer_prompt`）：约束(system) > 小说名称 > 小说类型 > 简介 > 世界观 > 大纲树规划 > 世界观补充 > 出场角色 > 上一章结尾 > 近章摘要 > 远章概要 > 待回收伏笔 > 因果链 > 相关记忆 > 章节标题 > 本章大纲 > 特别指示(末尾最高优先)
+- **伏笔全态注入**：「待回收伏笔」注入全部未回收状态（open/planned/buried/advancing/reclaimable），仅排除 resolved/abandoned，渲染附标题+埋设章+状态
+- **职责分离去重**：结构化上下文（摘要/伏笔）由 `assemble_chapter_context` 统一负责；`memory_context` 只做 FTS 语义检索，不再重复注入摘要和伏笔
+- **FTS 中文检索**：unicode61 分词器不识别 CJK 词边界，`_cjk_tokenize` 对索引/查询两侧中文逐字加空格实现按字检索；`_sanitize_fts_query` 按字短语 OR 连接支持纯中文大纲查询召回。**重建索引**后旧数据才可被检索（`POST /api/novel/{id}/memory/index`）
 - 角色选择持久化到 `localStorage`（按小说+章节键），同章刷新保留勾选
 
 ### 去 AI 化 (De-AI)
@@ -226,7 +229,7 @@ app/
 - **小说/章节/角色/世界观/伏笔/大纲/短篇** 全 CRUD
 - **质量审计：** `quick_audit`, `get_knowledge_context`
 
-### CLI (17 个命令组，免登录)
+### CLI (18 个命令组，免登录)
 ```bash
 python cli.py whoami                 # 查看当前用户（恒为默认管理员）
 
@@ -234,20 +237,50 @@ python cli.py whoami                 # 查看当前用户（恒为默认管理�
 python cli.py novel list              # 小说列表
 python cli.py novel create --title X  # 创建小说
 python cli.py novel update --id 1 --title X --genre X  # 更新小说
+python cli.py novel export --id 1 --format txt [--output 路径]  # 导出 txt/docx/md/html/epub（复用 Web 导出）
+python cli.py novel delete-all -y     # 删除全部小说（危险）
 python cli.py chapter list --novel 1  # 章节列表
+python cli.py chapter content --novel 1 --number 1 --full  # 查看正文
 python cli.py chapter update --novel 1 --number 1 --title X  # 更新章节
 python cli.py chapter delete --novel 1 --number 1 -y  # 删除章节
+python cli.py chapter version-list --novel 1 --number 1        # 章节版本列表
+python cli.py chapter version-content --novel 1 --number 1 --version 2  # 查看指定版本
+python cli.py chapter version-delete --novel 1 --number 1 --version 2   # 删除版本
+python cli.py chapter deai --novel 1 --number 1 [--save]       # 去AI化诊断（--save 存新版本）
 python cli.py character create --novel 1 --name X
 python cli.py character update --id 1 --personality X  # 更新角色
 python cli.py character delete --id 1 -y               # 删除角色
+python cli.py character template-list                  # 角色模板列表（6 种）
+python cli.py character create-from-template --novel 1 --template brave_hero [--name Y]  # 从模板建角色
 python cli.py world create --novel 1 --category X --title X
 python cli.py world update --id 1 --title X    # 更新世界观（用 --id，不需 --novel）
 python cli.py world delete --id 1 -y           # 删除世界观
 python cli.py foreshadow create --novel 1 --title X
+python cli.py foreshadow update --id 1 --description Y --importance 8 --status planned  # 编辑伏笔
+python cli.py foreshadow timeout-check --novel 1 [--chapter N]  # 超时伏笔检测
 python cli.py foreshadow delete --id 1 -y      # 删除伏笔
+python cli.py outline create --novel 1 --title X [--type scene --parent 卷ID]
+python cli.py outline update --novel 1 --id N --summary Y      # 编辑大纲节点
+python cli.py outline delete --novel 1 --id N -y               # 删除节点（递归级联子节点）
+python cli.py outline create-chapter --novel 1 --id N          # 大纲节点预填建章（含分幕指引）
 python cli.py relation create --novel 1 --char-a 1 --char-b 2
+python cli.py relation update --id 1 --type rival              # 编辑关系
+python cli.py relation event --id 1 --event betrayal [--intensity 1.5]  # 关系事件调整评分
 python cli.py relation delete --id 1 -y        # 删除关系
+# 故事状态引擎
+python cli.py state get --novel 1               # 查看/自动创建故事状态
+python cli.py state set --novel 1 --quest X --phase development --intensity 3 [--subplot Y] [--conflict Z]
+python cli.py state auto-detect --novel 1 [--apply]     # 弧线阶段自动检测
+python cli.py state snapshot --novel 1 [--chapter N] [--checkpoint]  # 创建快照
+python cli.py state snapshots --novel 1         # 快照列表
+python cli.py state rollback --novel 1 --snapshot ID -y # 回滚到快照
+# 短篇
 python cli.py short create --title X --mode inspiration
+python cli.py short update --id 1 --genre Y --word-target 5000  # 更新元数据
+python cli.py short version-list --id 1                 # 短篇版本列表
+python cli.py short version-load --id 1 --version 2     # 历史版本载入为当前正文
+python cli.py short approve --id 1 --version 2          # 审批版本
+python cli.py short export --id 1 --format epub [--output 路径]  # 导出 5 格式
 python cli.py short delete --id 1 -y           # 删除短篇
 python cli.py setting list            # 查看配置（全局+Agent）
 python cli.py setting apply-recommended  # 应用推荐配置
@@ -277,7 +310,9 @@ python cli.py skill toggle --skill jiangnan_fingerprint  # 切换激活
 python cli.py skill preview --task-type write           # 预览实际注入Writer的完整提示词
 python cli.py audit run --novel 1 --number 1  # AI 痕迹审计
 python cli.py optimize diagnose --novel 1     # 全书诊断
+python cli.py optimize deai --novel 1 --number 2 [--save]  # 章节去AI化（--save 存新版本）
 python cli.py sys info                # 系统统计
+python cli.py sys sample-data         # 加载示例小说（对齐 Web 一键加载）
 ```
 
 ## 核心功能

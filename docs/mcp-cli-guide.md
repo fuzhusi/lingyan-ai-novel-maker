@@ -196,6 +196,13 @@ python cli.py novel delete --id 1
 
 # 强制删除（跳过确认）
 python cli.py novel delete --id 1 -y
+
+# 导出小说（txt/docx/md/html/epub，复用 Web 导出同一路径）
+python cli.py novel export --id 1 --format txt              # 默认输出 <标题>.txt
+python cli.py novel export --id 1 --format epub --output /tmp/book.epub
+
+# 删除全部小说（危险操作，级联删除所有章节数据）
+python cli.py novel delete-all -y
 ```
 
 ### 4.3 章节管理 (chapter)
@@ -215,6 +222,15 @@ python cli.py chapter content --novel 1 --number 1 --full
 
 # 自定义预览长度
 python cli.py chapter content --novel 1 --number 1 --length 1000
+
+# 章节版本管理（历史版本查看与清理）
+python cli.py chapter version-list --novel 1 --number 1
+python cli.py chapter version-content --novel 1 --number 1 --version 2
+python cli.py chapter version-delete --novel 1 --number 1 --version 2   # 审批版需确认
+
+# 去AI化诊断（--save 将处理结果保存为新版本，原文保留）
+python cli.py chapter deai --novel 1 --number 1
+python cli.py chapter deai --novel 1 --number 1 --save
 
 # 审批章节
 python cli.py chapter approve --novel 1 --number 1
@@ -238,6 +254,13 @@ python cli.py character create --novel 1 \
 
 # 查看角色详情
 python cli.py character info --id 1
+
+# 角色模板（6 种：热血少年/冷峻剑客/温婉少女/腹黑反派/智慧长者/搞笑担当）
+python cli.py character template-list
+
+# 从模板创建角色（--name 覆盖模板默认名）
+python cli.py character create-from-template --novel 1 --template brave_hero
+python cli.py character create-from-template --novel 1 --template wise_elder --name "云清道长"
 ```
 
 ### 4.5 世界观管理 (world)
@@ -267,8 +290,16 @@ python cli.py foreshadow create --novel 1 \
     --planted 1
 
 # 修改伏笔状态
-# 合法状态: planned, buried, advancing, reclaimable, resolved, abandoned
+# 合法状态: open, planned, buried, advancing, reclaimable, resolved, abandoned
 python cli.py foreshadow status --id 1 --status advancing
+
+# 编辑伏笔字段（任选其一或组合）
+python cli.py foreshadow update --id 1 --title "新标题" --description "新描述" --notes "推进备注"
+python cli.py foreshadow update --id 1 --importance 9 --planted 2 --threshold 20
+
+# 超时伏笔检测（默认以最新章为当前进度，--chapter 指定）
+python cli.py foreshadow timeout-check --novel 1
+python cli.py foreshadow timeout-check --novel 1 --chapter 30
 ```
 
 ### 4.7 大纲管理 (outline)
@@ -287,6 +318,16 @@ python cli.py outline create --novel 1 --type chapter --title "第一章" \
 # 创建场景
 python cli.py outline create --novel 1 --type scene --title "破庙遇袭" \
     --summary "黑衣人闯入破庙" --parent 2
+
+# 编辑大纲节点（标题/摘要/排序号）
+python cli.py outline update --novel 1 --id 3 --title "新标题" --summary "新摘要"
+python cli.py outline update --novel 1 --id 3 --sort 5
+
+# 删除大纲节点（递归级联删除全部子节点，对齐 Web）
+python cli.py outline delete --novel 1 --id 3 -y
+
+# 从大纲节点创建章节（预填章节标题+大纲，子场景并入分幕指引，自动排下一章号）
+python cli.py outline create-chapter --novel 1 --id 3
 ```
 
 ### 4.8 角色关系管理 (relation)
@@ -300,6 +341,14 @@ python cli.py relation create --novel 1 \
     --char-a 1 --char-b 2 \
     --type "mentor" \
     --desc "师徒关系"
+
+# 编辑关系（类型/描述）
+python cli.py relation update --id 1 --type "rival" --desc "宿敌"
+
+# 关系事件：按事件类型自动调整多维度评分（对齐 Web apply_event）
+# 事件类型: battle_together / betrayal / life_saving / conflict / open_talk / public_humiliation
+python cli.py relation event --id 1 --event betrayal
+python cli.py relation event --id 1 --event battle_together --intensity 1.5   # 强度 0.5~2.0
 ```
 
 ### 4.9 短篇创作 (short)
@@ -330,9 +379,43 @@ python cli.py short content --id 1
 
 # 查看完整内容
 python cli.py short content --id 1 --full
+
+# 更新元数据（标题/体裁/主题/基调/灵感/目标字数）
+python cli.py short update --id 1 --title "新标题" --genre "悬疑" --word-target 8000
+
+# 版本管理
+python cli.py short version-list --id 1                    # 版本列表（含审批标记）
+python cli.py short version-content --id 1 --version 2     # 查看历史版本
+python cli.py short version-load --id 1 --version 2        # 载入为当前正文
+python cli.py short approve --id 1 --version 2             # 审批版本
+python cli.py short version-delete --id 1 --version 2 -y   # 删除版本
+
+# 导出短篇（txt/docx/md/html/epub，复用 Web 导出同一路径）
+python cli.py short export --id 1 --format txt
 ```
 
-### 4.10 提示词模板 (template)
+### 4.10 故事状态引擎 (state)
+
+```bash
+# 查看故事状态（不存在时按章节数据自动检测创建）
+python cli.py state get --novel 1
+
+# 更新状态字段
+python cli.py state set --novel 1 --quest "寻找圣剑" --progress "已获得地图碎片"
+python cli.py state set --novel 1 --phase development --intensity 3    # 阶段 setup/development/climax/resolution，强度 1~5
+python cli.py state set --novel 1 --subplot "师门恩怨线" --conflict "与师兄的误会"   # 追加支线/冲突
+
+# 弧线阶段自动检测（基于章节字数分布；--apply 写回）
+python cli.py state auto-detect --novel 1 [--apply]
+
+# 快照与回滚
+python cli.py state snapshot --novel 1 --chapter 5              # 创建快照
+python cli.py state snapshot --novel 1 --chapter 10 --checkpoint # 标记为检查点
+python cli.py state snapshots --novel 1                          # 快照列表
+python cli.py state rollback --novel 1 --snapshot 3 -y           # 回滚到指定快照
+```
+
+### 4.11 提示词模板 (template)
 
 ```bash
 # 列出模板
@@ -349,7 +432,7 @@ python cli.py template create \
 python cli.py template delete --id 1
 ```
 
-### 4.11 质量审计 (audit)
+### 4.12 质量审计 (audit)
 
 ```bash
 # 基本审计
@@ -370,7 +453,7 @@ python cli.py audit run --novel 1 --number 1 --detailed
   口语化规则: 40 个
 ```
 
-### 4.12 系统设置 (setting)
+### 4.13 系统设置 (setting)
 
 ```bash
 # 列出所有设置（含 Per-Agent 配置状态）
@@ -393,11 +476,15 @@ python cli.py setting apply-recommended
 python cli.py setting clear-agent
 ```
 
-### 4.13 全书优化 (optimize)
+### 4.14 全书优化 (optimize)
 
 ```bash
 # 诊断整本书
 python cli.py optimize diagnose --novel 1
+
+# 章节去AI化（诊断模式命中统计；--save 保存为新版本，原文保留）
+python cli.py optimize deai --novel 1 --number 2
+python cli.py optimize deai --novel 1 --number 2 --save
 ```
 
 输出示例：
@@ -410,11 +497,14 @@ python cli.py optimize diagnose --novel 1
   需要修复: 12
 ```
 
-### 4.14 系统管理 (sys)
+### 4.15 系统管理 (sys)
 
 ```bash
 # 系统信息
 python cli.py sys info
+
+# 加载示例小说（对齐 Web 首页「一键加载示例数据」；已存在的示例跳过）
+python cli.py sys sample-data
 
 # 备份数据库
 python cli.py sys backup
