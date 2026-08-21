@@ -222,6 +222,55 @@ def cmd_novel(args):
             else:
                 print("（未指定要更新的字段）")
 
+        elif args.action == "export":
+            # 导出长篇（复用 Web 导出逻辑，同一代码路径）
+            novel = db.session.get(Novel, args.id)
+            if not novel:
+                print(f"✗ 小说 {args.id} 不存在")
+                return
+            fmt = (args.format or "txt").lower()
+            if fmt not in ("txt", "docx", "md", "html", "epub"):
+                print(f"✗ 不支持的格式: {fmt}（可选 txt/docx/md/html/epub）")
+                return
+            client = app.test_client()
+            resp = client.get(f"/novel/{args.id}/export/{fmt}")
+            if resp.status_code != 200:
+                print(f"✗ 导出失败: HTTP {resp.status_code}")
+                return
+            output = args.output or f"{novel.title}.{fmt}"
+            with open(output, "wb") as f:
+                f.write(resp.data)
+            print(f"✓ 已导出 [{novel.id}] {novel.title} -> {output} ({len(resp.data)} bytes)")
+
+        elif args.action == "delete-all":
+            novels = Novel.query.all()
+            if not novels:
+                print("暂无小说，无需删除")
+                return
+            if not args.yes:
+                confirm = input(f"确定删除全部 {len(novels)} 部小说及其所有关联数据？(y/N) ").strip().lower()
+                if confirm != "y":
+                    print("已取消")
+                    return
+            for n in novels:
+                for ch in Chapter.query.filter_by(novel_id=n.id).all():
+                    for v in ChapterVersion.query.filter_by(chapter_id=ch.id).all():
+                        CriticReview.query.filter_by(version_id=v.id).delete()
+                    ChapterVersion.query.filter_by(chapter_id=ch.id).delete()
+                    ChapterSummary.query.filter_by(chapter_id=ch.id).delete()
+                    ChapterMemory.query.filter_by(chapter_id=ch.id).delete()
+                    db.session.delete(ch)
+                Character.query.filter_by(novel_id=n.id).delete()
+                CharacterRelation.query.filter_by(novel_id=n.id).delete()
+                WorldSetting.query.filter_by(novel_id=n.id).delete()
+                OutlineNode.query.filter_by(novel_id=n.id).delete()
+                Foreshadowing.query.filter_by(novel_id=n.id).delete()
+                StoryStateSnapshot.query.filter_by(novel_id=n.id).delete()
+                StoryState.query.filter_by(novel_id=n.id).delete()
+                db.session.delete(n)
+            db.session.commit()
+            print(f"✓ 已删除全部 {len(novels)} 部小说")
+
 
 # ---------------------------------------------------------------------------
 # 章节管理
@@ -317,6 +366,98 @@ def cmd_chapter(args):
             else:
                 print("（未指定要更新的字段）")
 
+        elif args.action == "version-list":
+            ch = Chapter.query.filter_by(novel_id=args.novel, chapter_number=args.number).first()
+            if not ch:
+                print(f"✗ 第{args.number}章不存在")
+                return
+            versions = ChapterVersion.query.filter_by(chapter_id=ch.id).order_by(
+                ChapterVersion.version_number).all()
+            if not versions:
+                print(f"第{args.number}章暂无版本")
+                return
+            rows = []
+            for v in versions:
+                rows.append([f"V{v.version_number}", f"[{v.id}]", v.source or "-",
+                            f"{len(v.content or '')}字",
+                            "✓" if v.approved else "✗", str(v.created_at)[:19]])
+            print_table(["版本", "ID", "来源", "字数", "审批", "创建时间"], rows)
+
+        elif args.action == "version-content":
+            ch = Chapter.query.filter_by(novel_id=args.novel, chapter_number=args.number).first()
+            if not ch:
+                print(f"✗ 第{args.number}章不存在")
+                return
+            v = ChapterVersion.query.filter_by(
+                chapter_id=ch.id, version_number=args.version).first()
+            if not v:
+                print(f"✗ 第{args.number}章无 V{args.version} 版本")
+                return
+            print(f"第{args.number}章 {ch.title} V{v.version_number} "
+                  f"({len(v.content or '')}字, 来源:{v.source}, {'已审批' if v.approved else '未审批'})")
+            print("-" * 60)
+            if args.full:
+                print(v.content)
+            else:
+                print(v.content[:args.length or 500])
+                if len(v.content) > (args.length or 500):
+                    print(f"\n... (共{len(v.content)}字, 使用 --full 查看完整内容)")
+
+        elif args.action == "version-delete":
+            ch = Chapter.query.filter_by(novel_id=args.novel, chapter_number=args.number).first()
+            if not ch:
+                print(f"✗ 第{args.number}章不存在")
+                return
+            v = ChapterVersion.query.filter_by(
+                chapter_id=ch.id, version_number=args.version).first()
+            if not v:
+                print(f"✗ 第{args.number}章无 V{args.version} 版本")
+                return
+            if v.approved and not args.yes:
+                confirm = input(f"V{args.version} 是已审批版本，确定删除？(y/N) ").strip().lower()
+                if confirm != "y":
+                    print("已取消")
+                    return
+            CriticReview.query.filter_by(version_id=v.id).delete()
+            db.session.delete(v)
+            db.session.commit()
+            print(f"✓ 已删除第{args.number}章 V{args.version}")
+
+        elif args.action == "deai":
+            # 去AI化处理：诊断当前版本（--save 保存为新版本）
+            ch = Chapter.query.filter_by(novel_id=args.novel, chapter_number=args.number).first()
+            if not ch:
+                print(f"✗ 第{args.number}章不存在")
+                return
+            ver = ChapterVersion.query.filter_by(chapter_id=ch.id).order_by(
+                ChapterVersion.version_number.desc()).first()
+            if not ver:
+                print(f"第{args.number}章暂无内容")
+                return
+            from app.services.deai_agent import deai_process, get_deai_stats
+            original = ver.content
+            processed = deai_process(original)
+            stats = get_deai_stats(original, processed)
+            print(f"第{args.number}章 去AI化诊断 (V{ver.version_number}, {len(original)}字)")
+            print("-" * 60)
+            for k, v in stats.items():
+                print(f"  {k}: {v}")
+            if original == processed:
+                print("\n✓ 无需处理（未命中任何模式）")
+                return
+            if args.save:
+                max_ver = db.session.query(
+                    db.func.max(ChapterVersion.version_number)).filter_by(
+                    chapter_id=ch.id).scalar()
+                nv = ChapterVersion(
+                    chapter_id=ch.id, version_number=(max_ver or 0) + 1,
+                    content=processed, source="deai", prompt_used=ver.prompt_used)
+                db.session.add(nv)
+                db.session.commit()
+                print(f"\n✓ 已保存为新版本 V{nv.version_number}（原 V{ver.version_number} 保留）")
+            else:
+                print(f"\n处理后 {len(processed)}字（用 --save 保存为新版本）")
+
         elif args.action == "delete":
             ch = Chapter.query.filter_by(novel_id=args.novel, chapter_number=args.number).first()
             if not ch:
@@ -353,6 +494,40 @@ def cmd_character(args):
                 rows.append([f"[{c.id}]", c.name, truncate(c.personality, 30) or "未设置",
                             truncate(c.background, 30) or "-"])
             print_table(["ID", "姓名", "性格", "背景"], rows)
+
+        elif args.action == "template-list":
+            from app.routes.knowledge.characters import CHARACTER_TEMPLATES
+            if not CHARACTER_TEMPLATES:
+                print("暂无角色模板")
+                return
+            rows = []
+            for key, t in CHARACTER_TEMPLATES.items():
+                rows.append([key, t.get("name", "-"), truncate(t.get("personality", ""), 30)])
+            print_table(["模板Key", "名称", "性格"], rows)
+            print("\n使用: python cli.py character create-from-template --novel N --template <Key> [--name 自定义名]")
+
+        elif args.action == "create-from-template":
+            from app.routes.knowledge.characters import apply_template, CHARACTER_TEMPLATES
+            if not getattr(args, "template", None):
+                print("✗ 请用 --template 指定模板（character template-list 查看）")
+                return
+            if args.template not in CHARACTER_TEMPLATES:
+                print(f"✗ 未知模板: {args.template}（合法: {', '.join(CHARACTER_TEMPLATES.keys())}）")
+                return
+            data = apply_template(args.template, getattr(args, "name", "") or "")
+            char = Character(
+                novel_id=args.novel,
+                name=data.get("name", ""),
+                personality=data.get("personality", ""),
+                speaking_style=data.get("speaking_style", ""),
+                appearance=data.get("appearance", ""),
+                background=data.get("background", ""),
+                motivation=data.get("motivation", ""),
+                arc_direction=data.get("arc_direction", ""),
+            )
+            db.session.add(char)
+            db.session.commit()
+            print(f"✓ 已从模板创建角色: [{char.id}] {char.name} (模板:{args.template})")
 
         elif args.action == "create":
             char = Character(
@@ -487,7 +662,7 @@ def cmd_world(args):
 # 伏笔管理
 # ---------------------------------------------------------------------------
 
-VALID_FS_STATUSES = ["planned", "buried", "advancing", "reclaimable", "resolved", "abandoned"]
+VALID_FS_STATUSES = ["open", "planned", "buried", "advancing", "reclaimable", "resolved", "abandoned"]
 
 
 def cmd_foreshadow(args):
@@ -530,6 +705,71 @@ def cmd_foreshadow(args):
             db.session.commit()
             print(f"✓ 伏笔 [{fs.id}] {fs.title}: {old} → {args.status}")
 
+        elif args.action == "update":
+            fs = db.session.get(Foreshadowing, args.id)
+            if not fs:
+                print(f"✗ 伏笔 {args.id} 不存在")
+                return
+            changed = []
+            for field in ["title", "description", "notes"]:
+                val = getattr(args, field, None)
+                if val is not None and str(val).strip():
+                    setattr(fs, field, val)
+                    changed.append(field)
+            if getattr(args, "importance", None):
+                fs.importance = args.importance
+                changed.append("importance")
+            if getattr(args, "planted", None):
+                fs.planted_chapter = args.planted
+                changed.append("planted_chapter")
+            if getattr(args, "threshold", None):
+                fs.timeout_threshold = args.threshold
+                changed.append("timeout_threshold")
+            if getattr(args, "status", None):
+                if args.status not in VALID_FS_STATUSES:
+                    print(f"✗ 无效状态: {args.status}（合法: {', '.join(VALID_FS_STATUSES)}）")
+                    return
+                fs.status = args.status
+                changed.append("status")
+            if changed:
+                db.session.commit()
+                print(f"✓ 已更新伏笔 [{fs.id}] {fs.title}：{', '.join(changed)}")
+            else:
+                print("（未指定要更新的字段）")
+
+        elif args.action == "timeout-check":
+            # 超时检测：找出超过阈值未回收的活跃伏笔
+            if getattr(args, "chapter", None):
+                current_chapter = args.chapter
+            else:
+                latest = Chapter.query.filter_by(novel_id=args.novel).order_by(
+                    Chapter.chapter_number.desc()).first()
+                current_chapter = latest.chapter_number if latest else 0
+            active = Foreshadowing.query.filter_by(novel_id=args.novel).filter(
+                Foreshadowing.status.in_(["open", "planned", "buried", "advancing"])
+            ).all()
+            warnings = []
+            for fs in active:
+                planted = fs.planted_chapter or 0
+                threshold = fs.timeout_threshold or 15
+                age = current_chapter - planted if planted else 0
+                if age > threshold and planted > 0:
+                    severity = ("critical" if fs.importance >= 9
+                                else "high" if fs.importance >= 7 else "medium")
+                    warnings.append((fs, age, threshold, severity))
+            if not warnings:
+                print(f"✓ 当前第{current_chapter}章，无超时伏笔（活跃 {len(active)} 个）")
+                return
+            warnings.sort(key=lambda x: -x[0].importance)
+            print(f"⚠ 当前第{current_chapter}章，{len(warnings)} 个伏笔超时：")
+            rows = []
+            for fs, age, threshold, sev in warnings:
+                rows.append([f"[{fs.id}]", truncate(fs.title or (fs.description or ""), 20),
+                             fs.status, f"重要度{fs.importance}",
+                             f"第{fs.planted_chapter}章埋(已{age}章)",
+                             f"阈值{threshold}", sev])
+            print_table(["ID", "标题", "状态", "重要度", "埋设", "阈值", "级别"], rows)
+
         elif args.action == "delete":
             fs = db.session.get(Foreshadowing, args.id)
             if not fs:
@@ -548,6 +788,14 @@ def cmd_foreshadow(args):
 # ---------------------------------------------------------------------------
 # 大纲管理
 # ---------------------------------------------------------------------------
+
+def _delete_outline_node(node):
+    """递归删除大纲节点及其子节点（对齐 Web delete_outline_node）。"""
+    for child in OutlineNode.query.filter_by(parent_id=node.id).all():
+        _delete_outline_node(child)
+        db.session.delete(child)
+    db.session.delete(node)
+
 
 def cmd_outline(args):
     with app.app_context():
@@ -573,6 +821,77 @@ def cmd_outline(args):
             db.session.add(node)
             db.session.commit()
             print(f"✓ 已创建大纲节点: [{node.id}] {node.title}")
+
+        elif args.action == "update":
+            node = db.session.get(OutlineNode, args.id)
+            if not node:
+                print(f"✗ 大纲节点 {args.id} 不存在")
+                return
+            changed = []
+            if getattr(args, "title", None) and str(args.title).strip():
+                node.title = args.title
+                changed.append("title")
+            if getattr(args, "summary", None) is not None and str(args.summary).strip():
+                node.summary = args.summary
+                changed.append("summary")
+            if getattr(args, "sort", None) is not None:
+                node.sort_order = args.sort
+                changed.append("sort_order")
+            if changed:
+                db.session.commit()
+                print(f"✓ 已更新大纲节点 [{node.id}] {node.title}：{', '.join(changed)}")
+            else:
+                print("（未指定要更新的字段）")
+
+        elif args.action == "delete":
+            node = db.session.get(OutlineNode, args.id)
+            if not node:
+                print(f"✗ 大纲节点 {args.id} 不存在")
+                return
+            children = OutlineNode.query.filter_by(parent_id=node.id).count()
+            if children and not args.yes:
+                confirm = input(f"节点 [{node.id}] 有 {children} 个子节点，级联删除？(y/N) ").strip().lower()
+                if confirm != "y":
+                    print("已取消")
+                    return
+            elif not args.yes:
+                confirm = input(f"确定删除大纲节点 [{node.id}] {node.title}？(y/N) ").strip().lower()
+                if confirm != "y":
+                    print("已取消")
+                    return
+            _delete_outline_node(node)
+            db.session.commit()
+            print(f"✓ 已删除大纲节点 [{node.id}] {node.title}")
+
+        elif args.action == "create-chapter":
+            # 从大纲节点创建章节（标题/大纲预填，子场景并入分幕指引）
+            node = db.session.get(OutlineNode, args.id)
+            if not node:
+                print(f"✗ 大纲节点 {args.id} 不存在")
+                return
+            novel_id = node.novel_id
+            scene_lines = []
+            children = OutlineNode.query.filter_by(parent_id=node.id).order_by(
+                OutlineNode.sort_order).all()
+            for child in children:
+                if child.node_type == "scene":
+                    scene_lines.append(f"【{child.title}】{child.summary}")
+            outline_text = node.summary or ""
+            if scene_lines:
+                outline_text += "\n\n分幕指引：\n" + "\n".join(scene_lines)
+            max_num = db.session.query(
+                db.func.max(Chapter.chapter_number)).filter_by(novel_id=novel_id).scalar()
+            chapter = Chapter(
+                novel_id=novel_id,
+                chapter_number=(max_num or 0) + 1,
+                title=node.title,
+                outline=outline_text,
+                outline_node_id=node.id,
+            )
+            db.session.add(chapter)
+            db.session.commit()
+            print(f"✓ 已从大纲节点 [{node.id}] 创建章节: "
+                  f"第{chapter.chapter_number}章 [{chapter.id}] {chapter.title}")
 
 
 # ---------------------------------------------------------------------------
@@ -607,11 +926,57 @@ def cmd_relation(args):
             db.session.commit()
             print(f"✓ 已创建关系: [{rel.id}]")
 
-        elif args.action == "delete":
+        elif args.action == "update":
             rel = db.session.get(CharacterRelation, args.id)
             if not rel:
                 print(f"✗ 关系 {args.id} 不存在")
                 return
+            changed = []
+            if getattr(args, "type", None) and str(args.type).strip():
+                rel.relation_type = args.type
+                changed.append("relation_type")
+            if getattr(args, "desc", None) and str(args.desc).strip():
+                rel.description = args.desc
+                changed.append("description")
+            if changed:
+                db.session.commit()
+                print(f"✓ 已更新关系 [{rel.id}]：{', '.join(changed)}")
+            else:
+                print("（未指定要更新的字段）")
+
+        elif args.action == "event":
+            # 应用关系事件，自动调整多维度评分（对齐 Web apply_event）
+            rel = db.session.get(CharacterRelation, args.id)
+            if not rel:
+                print(f"✗ 关系 {args.id} 不存在")
+                return
+            from app.routes.relations import RELATION_EVENTS
+            if args.event not in RELATION_EVENTS:
+                print(f"✗ 未知事件类型: {args.event}")
+                print(f"  合法类型: {', '.join(RELATION_EVENTS.keys())}")
+                return
+            intensity = args.intensity if args.intensity else 1.0
+            if not (0.5 <= intensity <= 2.0):
+                print("✗ intensity 需在 0.5 ~ 2.0 之间")
+                return
+            import random
+            changes = RELATION_EVENTS[args.event]
+            applied = []
+            for dim, (low, high) in changes.items():
+                base = random.randint(low, high)
+                final = int(base * intensity)
+                current = getattr(rel, dim)
+                new_val = max(0, min(100, current + final))
+                setattr(rel, dim, new_val)
+                applied.append(f"{dim}: {current} -> {new_val} ({new_val - current:+d})")
+            old_type = rel.relation_type
+            db.session.commit()
+            print(f"✓ 关系 [{rel.id}] 应用事件 {args.event} (强度 {intensity})：")
+            for line in applied:
+                print(f"  {line}")
+            print(f"  综合评分: {rel.overall_score:.1f} | 关系类型: {old_type} -> {rel.auto_relation_type}")
+
+        elif args.action == "delete":
             if not args.yes:
                 confirm = input(f"确定删除关系 [{rel.id}]？(y/N) ").strip().lower()
                 if confirm != "y":
@@ -620,6 +985,165 @@ def cmd_relation(args):
             db.session.delete(rel)
             db.session.commit()
             print(f"✓ 已删除关系 [{rel.id}]")
+
+
+# ---------------------------------------------------------------------------
+# 故事状态引擎
+# ---------------------------------------------------------------------------
+
+def _serialize_story_state(state):
+    """StoryState -> dict（与 Web _serialize_state 同构）。"""
+    return {
+        "mainQuest": state.main_quest,
+        "mainQuestProgress": state.main_quest_progress,
+        "activeSubplots": json.loads(state.active_subplots or "[]"),
+        "activeConflicts": json.loads(state.active_conflicts or "[]"),
+        "arcPhase": state.arc_phase,
+        "arcIntensity": state.arc_intensity,
+        "riskFlags": json.loads(state.risk_flags or "{}"),
+    }
+
+
+def cmd_story_state(args):
+    with app.app_context():
+        # 校验小说存在（对齐 Web get_or_404，避免对不存在小说创建孤儿状态）
+        if not db.session.get(Novel, args.novel):
+            print(f"✗ 小说 {args.novel} 不存在")
+            return
+        if args.action == "get":
+            state = StoryState.query.filter_by(novel_id=args.novel).first()
+            if not state:
+                # 自动检测创建（对齐 Web 语义）
+                from app.routes.story_state import _detect_arc_phase
+                phase, intensity = _detect_arc_phase(args.novel)
+                state = StoryState(novel_id=args.novel, arc_phase=phase, arc_intensity=intensity)
+                db.session.add(state)
+                db.session.commit()
+            d = _serialize_story_state(state)
+            print(f"【小说 {args.novel} 故事状态】(id:{state.id})")
+            print(f"  主线任务: {d['mainQuest'] or '未设置'}")
+            print(f"  主线进度: {d['mainQuestProgress'] or '未设置'}")
+            print(f"  弧线阶段: {d['arcPhase']} (强度 {d['arcIntensity']})")
+            print(f"  活跃支线: {len(d['activeSubplots'])} 个")
+            for s in d["activeSubplots"]:
+                print(f"    - {s if isinstance(s, str) else json.dumps(s, ensure_ascii=False)}")
+            print(f"  活跃冲突: {len(d['activeConflicts'])} 个")
+            for s in d["activeConflicts"]:
+                print(f"    - {s if isinstance(s, str) else json.dumps(s, ensure_ascii=False)}")
+            print(f"  风险标记: {json.dumps(d['riskFlags'], ensure_ascii=False)}")
+
+        elif args.action == "set":
+            state = StoryState.query.filter_by(novel_id=args.novel).first()
+            if not state:
+                state = StoryState(novel_id=args.novel)
+                db.session.add(state)
+            changed = []
+            if getattr(args, "quest", None):
+                state.main_quest = args.quest
+                changed.append("main_quest")
+            if getattr(args, "progress", None):
+                state.main_quest_progress = args.progress
+                changed.append("main_quest_progress")
+            if getattr(args, "phase", None):
+                valid_phases = ["setup", "development", "climax", "resolution"]
+                if args.phase not in valid_phases:
+                    print(f"✗ 无效阶段: {args.phase}（合法: {', '.join(valid_phases)}）")
+                    return
+                state.arc_phase = args.phase
+                changed.append("arc_phase")
+            if getattr(args, "intensity", None) is not None:
+                if not (1 <= args.intensity <= 5):
+                    print("✗ intensity 需在 1 ~ 5 之间")
+                    return
+                state.arc_intensity = args.intensity
+                changed.append("arc_intensity")
+            if getattr(args, "subplot", None):
+                subplots = json.loads(state.active_subplots or "[]")
+                subplots.append(args.subplot)
+                state.active_subplots = json.dumps(subplots, ensure_ascii=False)
+                changed.append("active_subplots(+1)")
+            if getattr(args, "conflict", None):
+                conflicts = json.loads(state.active_conflicts or "[]")
+                conflicts.append(args.conflict)
+                state.active_conflicts = json.dumps(conflicts, ensure_ascii=False)
+                changed.append("active_conflicts(+1)")
+            if changed:
+                db.session.commit()
+                print(f"✓ 已更新故事状态：{', '.join(changed)}")
+            else:
+                print("（未指定要更新的字段）")
+
+        elif args.action == "auto-detect":
+            from app.routes.story_state import _detect_arc_phase
+            phase, intensity = _detect_arc_phase(args.novel)
+            latest = Chapter.query.filter_by(novel_id=args.novel).order_by(
+                Chapter.chapter_number.desc()).first()
+            print(f"检测结果: 阶段={phase}, 强度={intensity}, 当前章数={latest.chapter_number if latest else 0}")
+            if args.apply:
+                state = StoryState.query.filter_by(novel_id=args.novel).first()
+                if not state:
+                    state = StoryState(novel_id=args.novel)
+                    db.session.add(state)
+                state.arc_phase = phase
+                state.arc_intensity = intensity
+                db.session.commit()
+                print("✓ 已应用到故事状态")
+            else:
+                print("（加 --apply 应用）")
+
+        elif args.action == "snapshot":
+            state = StoryState.query.filter_by(novel_id=args.novel).first()
+            if not state:
+                print(f"✗ 小说 {args.novel} 暂无故事状态（先 state get 自动创建）")
+                return
+            snap = StoryStateSnapshot(
+                novel_id=args.novel,
+                chapter_number=getattr(args, "chapter", None) or 0,
+                state_json=json.dumps(_serialize_story_state(state), ensure_ascii=False),
+                is_checkpoint=bool(getattr(args, "checkpoint", False)),
+            )
+            db.session.add(snap)
+            db.session.commit()
+            print(f"✓ 已创建快照 [{snap.id}] (章节 {snap.chapter_number}, "
+                  f"{'检查点' if snap.is_checkpoint else '普通'})")
+
+        elif args.action == "snapshots":
+            snaps = StoryStateSnapshot.query.filter_by(novel_id=args.novel).order_by(
+                StoryStateSnapshot.id.desc()).all()
+            if not snaps:
+                print(f"小说 {args.novel} 暂无快照")
+                return
+            rows = []
+            for s in snaps:
+                rows.append([f"[{s.id}]", f"第{s.chapter_number}章" if s.chapter_number else "-",
+                             "✓" if s.is_checkpoint else "-", str(s.created_at)[:19]])
+            print_table(["快照ID", "章节", "检查点", "创建时间"], rows)
+            print("\n回滚: python cli.py state rollback --novel N --snapshot <ID>")
+
+        elif args.action == "rollback":
+            snap = db.session.get(StoryStateSnapshot, args.snapshot)
+            if not snap or snap.novel_id != args.novel:
+                print(f"✗ 小说 {args.novel} 无快照 [{args.snapshot}]")
+                return
+            if not args.yes:
+                confirm = input(f"确定回滚到快照 [{snap.id}]（第{snap.chapter_number}章）？当前状态将丢失 (y/N) ").strip().lower()
+                if confirm != "y":
+                    print("已取消")
+                    return
+            data = json.loads(snap.state_json or "{}")
+            state = StoryState.query.filter_by(novel_id=args.novel).first()
+            if not state:
+                state = StoryState(novel_id=args.novel)
+                db.session.add(state)
+            state.main_quest = data.get("mainQuest", "")
+            state.main_quest_progress = data.get("mainQuestProgress", "")
+            state.active_subplots = json.dumps(data.get("activeSubplots", []), ensure_ascii=False)
+            state.active_conflicts = json.dumps(data.get("activeConflicts", []), ensure_ascii=False)
+            state.arc_phase = data.get("arcPhase", "setup")
+            state.arc_intensity = data.get("arcIntensity", 3)
+            state.risk_flags = json.dumps(data.get("riskFlags", {}), ensure_ascii=False)
+            db.session.commit()
+            print(f"✓ 已回滚到快照 [{snap.id}]（阶段 {state.arc_phase}, 强度 {state.arc_intensity}）")
 
 
 # ---------------------------------------------------------------------------
@@ -655,6 +1179,111 @@ def cmd_short(args):
             db.session.commit()
             print(f"✓ 已创建短篇: [{story.id}] {story.title} (模式:{story.mode})")
 
+        elif args.action == "update":
+            story = db.session.get(ShortStory, args.id)
+            if not story:
+                print(f"✗ 短篇 {args.id} 不存在")
+                return
+            changed = []
+            for field, arg_name in [("title", "title"), ("genre", "genre"),
+                                    ("theme", "theme"), ("tone", "tone"),
+                                    ("inspiration", "inspiration")]:
+                val = getattr(args, arg_name, None)
+                if val is not None and str(val).strip():
+                    setattr(story, field, val)
+                    changed.append(field)
+            if getattr(args, "word_target", None):
+                story.word_target = args.word_target
+                changed.append("word_target")
+            if changed:
+                db.session.commit()
+                print(f"✓ 已更新短篇 [{story.id}] {story.title}：{', '.join(changed)}")
+            else:
+                print("（未指定要更新的字段）")
+
+        elif args.action == "version-list":
+            story = db.session.get(ShortStory, args.id)
+            if not story:
+                print(f"✗ 短篇 {args.id} 不存在")
+                return
+            versions = ShortStoryVersion.query.filter_by(story_id=args.id).order_by(
+                ShortStoryVersion.version_number).all()
+            if not versions:
+                print(f"短篇 {args.id} 暂无版本")
+                return
+            rows = []
+            for v in versions:
+                rows.append([f"V{v.version_number}", f"[{v.id}]", v.source or "-",
+                            f"{len(v.content or '')}字", str(v.created_at)[:19]])
+            print_table(["版本", "ID", "来源", "字数", "创建时间"], rows)
+
+        elif args.action == "version-content":
+            v = db.session.get(ShortStoryVersion, args.version)
+            if not v or v.story_id != args.id:
+                print(f"✗ 短篇 {args.id} 无版本 V{args.version}")
+                return
+            print(f"短篇 [{args.id}] V{v.version_number} ({v.source}, {len(v.content or '')}字)")
+            print("-" * 60)
+            if args.full:
+                print(v.content or "(空)")
+            else:
+                print((v.content or "(空)")[:args.length or 800])
+
+        elif args.action == "version-load":
+            # 将历史版本内容载入为当前正文（原文保留在版本里）
+            v = db.session.get(ShortStoryVersion, args.version)
+            if not v or v.story_id != args.id:
+                print(f"✗ 短篇 {args.id} 无版本 V{args.version}")
+                return
+            story = db.session.get(ShortStory, args.id)
+            story.content = v.content
+            db.session.commit()
+            print(f"✓ 已将 V{v.version_number} 载入为当前正文 ({len(v.content or '')}字)")
+
+        elif args.action == "version-delete":
+            v = db.session.get(ShortStoryVersion, args.version)
+            if not v or v.story_id != args.id:
+                print(f"✗ 短篇 {args.id} 无版本 V{args.version}")
+                return
+            if not args.yes:
+                confirm = input(f"确定删除短篇 {args.id} 的 V{v.version_number}？(y/N) ").strip().lower()
+                if confirm != "y":
+                    print("已取消")
+                    return
+            ShortStoryReview.query.filter_by(version_id=v.id).delete()
+            db.session.delete(v)
+            db.session.commit()
+            print(f"✓ 已删除 V{v.version_number}")
+
+        elif args.action == "approve":
+            # 审批指定版本（对齐 Web approve 语义：仅标记 approved）
+            v = db.session.get(ShortStoryVersion, args.version)
+            if not v or v.story_id != args.id:
+                print(f"✗ 短篇 {args.id} 无版本 V{args.version}")
+                return
+            v.approved = True
+            db.session.commit()
+            print(f"✓ 已审批短篇 [{args.id}] V{v.version_number}")
+
+        elif args.action == "export":
+            story = db.session.get(ShortStory, args.id)
+            if not story:
+                print(f"✗ 短篇 {args.id} 不存在")
+                return
+            fmt = (args.format or "txt").lower()
+            if fmt not in ("txt", "docx", "md", "html", "epub"):
+                print(f"✗ 不支持的格式: {fmt}（可选 txt/docx/md/html/epub）")
+                return
+            client = app.test_client()
+            resp = client.get(f"/short/{args.id}/export/{fmt}")
+            if resp.status_code != 200:
+                print(f"✗ 导出失败: HTTP {resp.status_code}")
+                return
+            output = args.output or f"{story.title}.{fmt}"
+            with open(output, "wb") as f:
+                f.write(resp.data)
+            print(f"✓ 已导出 [{story.id}] {story.title} -> {output} ({len(resp.data)} bytes)")
+
         elif args.action == "content":
             story = db.session.get(ShortStory, args.id)
             if not story:
@@ -680,8 +1309,12 @@ def cmd_short(args):
                 if confirm != "y":
                     print("已取消")
                     return
-            ShortStoryVersion.query.filter_by(short_story_id=args.id).delete()
-            ShortStoryReview.query.filter_by(short_story_id=args.id).delete()
+            # 先删评审（按 version_id 关联）再删版本
+            vids = [v.id for v in ShortStoryVersion.query.filter_by(story_id=args.id).all()]
+            if vids:
+                ShortStoryReview.query.filter(ShortStoryReview.version_id.in_(vids)).delete(
+                    synchronize_session=False)
+            ShortStoryVersion.query.filter_by(story_id=args.id).delete()
             db.session.delete(story)
             db.session.commit()
             print(f"✓ 已删除短篇 [{args.id}] {story.title}")
@@ -1345,6 +1978,48 @@ def cmd_optimize(args):
                     for issue in ch['issues'][:3]:
                         print(f"    - [{issue['severity']}] {issue['dimension']}: {truncate(issue['issue'], 50)}")
 
+        elif args.action == "deai":
+            # 去AI化处理章节（诊断 + 可选保存新版本）
+            novel = db.session.get(Novel, args.novel)
+            if not novel:
+                print(f"✗ 小说 {args.novel} 不存在")
+                return
+            if not args.number:
+                print("✗ 请用 --number 指定章节号")
+                return
+            ch = Chapter.query.filter_by(novel_id=args.novel, chapter_number=args.number).first()
+            if not ch:
+                print(f"✗ 第{args.number}章不存在")
+                return
+            ver = ChapterVersion.query.filter_by(chapter_id=ch.id).order_by(
+                ChapterVersion.version_number.desc()).first()
+            if not ver:
+                print(f"第{args.number}章暂无内容")
+                return
+            from app.services.deai_agent import deai_process, get_deai_stats
+            original = ver.content
+            processed = deai_process(original)
+            stats = get_deai_stats(original, processed)
+            print(f"第{args.number}章 去AI化诊断 (V{ver.version_number}, {len(original)}字)")
+            print("-" * 60)
+            for k, v in stats.items():
+                print(f"  {k}: {v}")
+            if original == processed:
+                print("\n✓ 无需处理（未命中任何模式）")
+                return
+            if args.save:
+                max_ver = db.session.query(
+                    db.func.max(ChapterVersion.version_number)).filter_by(
+                    chapter_id=ch.id).scalar()
+                nv = ChapterVersion(
+                    chapter_id=ch.id, version_number=(max_ver or 0) + 1,
+                    content=processed, source="deai", prompt_used=ver.prompt_used)
+                db.session.add(nv)
+                db.session.commit()
+                print(f"\n✓ 已保存为新版本 V{nv.version_number}（原 V{ver.version_number} 保留）")
+            else:
+                print(f"\n处理后 {len(processed)}字（用 --save 保存为新版本）")
+
 
 # ---------------------------------------------------------------------------
 # 系统管理
@@ -1383,6 +2058,16 @@ def cmd_sys(args):
                 print(f"✓ 已备份到: {args.output}")
             except Exception as e:
                 print(f"✗ 备份失败: {e}")
+
+        elif args.action == "sample-data":
+            # 加载示例小说数据（对齐 Web 首页「一键加载示例数据」）
+            from app.routes.sample_data import create_sample_novels
+            created = create_sample_novels()
+            new_count = sum(1 for c in created if not c["existed"])
+            print(f"✓ 已加载 {len(created)} 部示例小说（新增 {new_count}，已存在 {len(created) - new_count}）")
+            for c in created:
+                mark = "新增" if not c["existed"] else "已存在"
+                print(f"  [{c.get('id', '?')}] {c.get('title', '?')} ({mark})")
 
         elif args.action == "reset":
             print("⚠️  危险操作: 这将删除所有数据!")
@@ -1445,7 +2130,7 @@ def main():
         epilog="""示例:
   python cli.py novel list
   python cli.py novel create --title "我的小说"
-  python cli.py chapter generate --novel 1 --number 1
+  python cli.py chapter content --novel 1 --number 1 --full
   python cli.py character list --novel 1
   python cli.py short list
   python cli.py setting list
@@ -1468,19 +2153,25 @@ def main():
 
     # ========== 小说 ==========
     p_novel = subparsers.add_parser("novel", help="小说管理")
-    p_novel.add_argument("action", choices=["list", "create", "delete", "info", "update"])
+    p_novel.add_argument("action", choices=["list", "create", "delete", "info", "update",
+                                            "export", "delete-all"])
     p_novel.add_argument("--id", type=int, help="小说 ID")
     p_novel.add_argument("--title", help="小说标题")
     p_novel.add_argument("--genre", help="小说类型")
     p_novel.add_argument("--synopsis", help="小说简介")
     p_novel.add_argument("--world-intro", dest="world_intro", help="世界观介绍")
+    p_novel.add_argument("--format", help="导出格式 txt/docx/md/html/epub（export 用，默认 txt）")
+    p_novel.add_argument("--output", help="导出文件路径（export 用，默认 标题.格式）")
     p_novel.add_argument("-y", "--yes", action="store_true", help="跳过确认")
 
     # ========== 章节 ==========
     p_chapter = subparsers.add_parser("chapter", help="章节管理")
-    p_chapter.add_argument("action", choices=["list", "create", "content", "approve", "update", "delete"])
+    p_chapter.add_argument("action", choices=["list", "create", "content", "approve", "update", "delete",
+                                              "version-list", "version-content", "version-delete", "deai"])
     p_chapter.add_argument("--novel", type=int, required=True, help="小说 ID")
     p_chapter.add_argument("--number", type=int, help="章节号")
+    p_chapter.add_argument("--version", type=int, help="版本号（version-* 用）")
+    p_chapter.add_argument("--save", action="store_true", help="保存结果（deai 用）")
     p_chapter.add_argument("--title", help="章节标题")
     p_chapter.add_argument("--outline", help="章节大纲")
     p_chapter.add_argument("--directive", help="用户指示")
@@ -1490,9 +2181,11 @@ def main():
 
     # ========== 角色 ==========
     p_char = subparsers.add_parser("character", help="角色管理")
-    p_char.add_argument("action", choices=["list", "create", "info", "update", "delete"])
+    p_char.add_argument("action", choices=["list", "create", "info", "update", "delete",
+                                           "template-list", "create-from-template"])
     p_char.add_argument("--novel", type=int, help="小说 ID")
     p_char.add_argument("--id", type=int, help="角色 ID")
+    p_char.add_argument("--template", help="角色模板 Key（create-from-template 用，template-list 查看）")
     p_char.add_argument("--name", help="角色名")
     p_char.add_argument("--personality", help="性格")
     p_char.add_argument("--speaking-style", dest="speaking_style", help="说话风格")
@@ -1514,40 +2207,69 @@ def main():
 
     # ========== 伏笔 ==========
     p_fs = subparsers.add_parser("foreshadow", help="伏笔管理")
-    p_fs.add_argument("action", choices=["list", "create", "status", "delete"])
+    p_fs.add_argument("action", choices=["list", "create", "status", "update", "timeout-check", "delete"])
     p_fs.add_argument("--novel", type=int, help="小说 ID")
     p_fs.add_argument("--id", type=int, help="伏笔 ID")
     p_fs.add_argument("--title", help="伏笔标题")
     p_fs.add_argument("--description", help="伏笔描述")
+    p_fs.add_argument("--notes", help="伏笔记注（update 用）")
     p_fs.add_argument("--importance", type=int, default=5, help="重要度 (1-10)")
     p_fs.add_argument("--planted", type=int, help="埋设章节")
+    p_fs.add_argument("--threshold", type=int, help="超时阈值章节数（update 用）")
     p_fs.add_argument("--status", help="新状态")
+    p_fs.add_argument("--chapter", type=int, help="当前章节号（timeout-check 用，默认最新章）")
     p_fs.add_argument("-y", "--yes", action="store_true", help="跳过删除确认")
 
     # ========== 大纲 ==========
     p_outline = subparsers.add_parser("outline", help="大纲管理")
-    p_outline.add_argument("action", choices=["list", "create"])
+    p_outline.add_argument("action", choices=["list", "create", "update", "delete", "create-chapter"])
     p_outline.add_argument("--novel", type=int, required=True)
+    p_outline.add_argument("--id", type=int, help="节点 ID（update/delete/create-chapter 用）")
     p_outline.add_argument("--title", help="节点标题")
     p_outline.add_argument("--summary", help="节点摘要")
+    p_outline.add_argument("--sort", type=int, help="排序号（update 用）")
     p_outline.add_argument("--type", choices=["volume", "chapter", "scene"], default="chapter", help="节点类型")
     p_outline.add_argument("--parent", type=int, help="父节点 ID")
+    p_outline.add_argument("-y", "--yes", action="store_true", help="跳过删除确认")
 
     # ========== 关系 ==========
     p_rel = subparsers.add_parser("relation", help="角色关系管理")
-    p_rel.add_argument("action", choices=["list", "create", "delete"])
+    p_rel.add_argument("action", choices=["list", "create", "update", "event", "delete"])
     p_rel.add_argument("--novel", type=int, required=True)
-    p_rel.add_argument("--id", type=int, help="关系 ID（delete 用）")
+    p_rel.add_argument("--id", type=int, help="关系 ID（update/event/delete 用）")
     p_rel.add_argument("--char-a", type=int, help="角色 A 的 ID")
     p_rel.add_argument("--char-b", type=int, help="角色 B 的 ID")
     p_rel.add_argument("--type", default="ordinary", help="关系类型")
     p_rel.add_argument("--desc", help="关系描述")
+    p_rel.add_argument("--event", help="关系事件类型（event 用: battle_together/betrayal/life_saving/conflict/open_talk/public_humiliation）")
+    p_rel.add_argument("--intensity", type=float, help="事件强度 0.5~2.0（event 用，默认 1.0）")
     p_rel.add_argument("-y", "--yes", action="store_true", help="跳过删除确认")
+
+    # ========== 故事状态 ==========
+    p_state = subparsers.add_parser("state", help="故事状态引擎（弧线阶段/快照/回滚）")
+    p_state.add_argument("action", choices=["get", "set", "auto-detect", "snapshot", "snapshots", "rollback"])
+    p_state.add_argument("--novel", type=int, required=True, help="小说 ID")
+    p_state.add_argument("--quest", help="主线任务（set 用）")
+    p_state.add_argument("--progress", help="主线进度（set 用）")
+    p_state.add_argument("--phase", help="弧线阶段 setup/development/climax/resolution（set 用）")
+    p_state.add_argument("--intensity", type=int, help="弧线强度 1-5（set 用）")
+    p_state.add_argument("--subplot", help="追加一条支线（set 用）")
+    p_state.add_argument("--conflict", help="追加一条冲突（set 用）")
+    p_state.add_argument("--chapter", type=int, help="章节号（snapshot 用）")
+    p_state.add_argument("--checkpoint", action="store_true", help="标记为检查点快照（snapshot 用）")
+    p_state.add_argument("--snapshot", type=int, help="快照 ID（rollback 用）")
+    p_state.add_argument("--apply", action="store_true", help="应用检测结果（auto-detect 用）")
+    p_state.add_argument("-y", "--yes", action="store_true", help="跳过确认")
 
     # ========== 短篇 ==========
     p_short = subparsers.add_parser("short", help="短篇管理")
-    p_short.add_argument("action", choices=["list", "create", "content", "delete"])
+    p_short.add_argument("action", choices=["list", "create", "content", "update", "delete",
+                                            "version-list", "version-content", "version-load",
+                                            "version-delete", "approve", "export"])
     p_short.add_argument("--id", type=int, help="短篇 ID")
+    p_short.add_argument("--version", type=int, help="版本号（version-*/approve 用）")
+    p_short.add_argument("--format", help="导出格式 txt/docx/md/html/epub（export 用，默认 txt）")
+    p_short.add_argument("--output", help="导出文件路径（export 用，默认 标题.格式）")
     p_short.add_argument("--title", help="短篇标题")
     p_short.add_argument("--mode", choices=["inspiration", "setting", "careful"], help="创作模式")
     p_short.add_argument("--inspiration", help="灵感")
@@ -1624,12 +2346,14 @@ def main():
 
     # ========== 优化 ==========
     p_opt = subparsers.add_parser("optimize", help="全书优化")
-    p_opt.add_argument("action", choices=["diagnose"], help="操作类型")
+    p_opt.add_argument("action", choices=["diagnose", "deai"], help="操作类型")
     p_opt.add_argument("--novel", type=int, required=True, help="小说 ID")
+    p_opt.add_argument("--number", type=int, help="章节号（deai 用）")
+    p_opt.add_argument("--save", action="store_true", help="保存处理后内容为新版本（deai 用）")
 
     # ========== 系统 ==========
     p_sys = subparsers.add_parser("sys", help="系统管理")
-    p_sys.add_argument("action", choices=["info", "backup", "reset"], help="操作类型")
+    p_sys.add_argument("action", choices=["info", "backup", "reset", "sample-data"], help="操作类型")
     p_sys.add_argument("--output", help="备份输出路径")
     p_sys.add_argument("-y", "--yes", action="store_true", help="跳过确认")
 
@@ -1655,6 +2379,7 @@ def main():
         "foreshadow": cmd_foreshadow,
         "outline": cmd_outline,
         "relation": cmd_relation,
+        "state": cmd_story_state,
         "short": cmd_short,
         "template": cmd_template,
         "audit": cmd_audit,
