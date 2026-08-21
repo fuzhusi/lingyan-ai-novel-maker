@@ -9,26 +9,61 @@ from app.config_utils import get_effective_config
 
 generate_bp = Blueprint("generate", __name__, url_prefix="/api")
 
+# 章节字数保障：目标约 2500 字，低于底线自动续写补足（对齐短篇的续写模式）
+CHAPTER_WORD_TARGET = 2500
+CHAPTER_WORD_FLOOR = 2000
+CHAPTER_MAX_CONTINUE_ROUNDS = 3
+
 
 def _sse_event(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _stream_to_sse(messages, cfg):
-    """Shared streaming helper — yields SSE event strings."""
+def _stream_to_sse(messages, cfg, word_target=None):
+    """Shared streaming helper — yields SSE event strings.
+
+    word_target: 传入时启用字数保障——流结束后正文不足 CHAPTER_WORD_FLOOR
+    则携带前文尾部自动续写，续写 token 继续推入同一 SSE 流。
+    """
     collected = []
-    try:
+
+    def _single_round(msgs, max_tokens):
         for token in stream_llm_tokens(
             model=cfg["model_name"],
-            messages=messages,
+            messages=msgs,
             api_key=cfg.get("api_key", ""),
             base_url=cfg.get("base_url", ""),
             provider_type=cfg.get("provider_type", "deepseek"),
             temperature=cfg.get("temperature", 0.8),
-            max_tokens=cfg.get("max_tokens", 4096),
+            max_tokens=max_tokens,
         ):
             collected.append(token)
             yield _sse_event({"token": token})
+
+    try:
+        for event in _single_round(messages, cfg.get("max_tokens", 4096)):
+            yield event
+        # 字数保障：仅章节生成传入 word_target 时启用
+        if word_target:
+            rounds = 0
+            while len("".join(collected)) < CHAPTER_WORD_FLOOR and rounds < CHAPTER_MAX_CONTINUE_ROUNDS:
+                rounds += 1
+                full = "".join(collected)
+                remaining = word_target - len(full)
+                yield _sse_event({"token": "\n\n"})
+                continue_messages = [
+                    {"role": "system", "content": (
+                        "你正在续写一章小说。直接接续前文写下去，"
+                        "不要重复已有内容，不要总结前文，不要输出任何说明文字。"
+                    )},
+                    {"role": "user", "content": (
+                        f"【本章已写内容（结尾部分）】\n{full[-3000:]}\n\n"
+                        f"【要求】从上文断点直接继续，自然推进本章大纲中的情节，"
+                        f"还需写约 {max(remaining, 500)} 字。"
+                    )},
+                ]
+                for event in _single_round(continue_messages, min(remaining * 2, 16000)):
+                    yield event
         yield _sse_event({"done": True, "full_text": "".join(collected)})
     except LLMError as e:
         yield _sse_event({"error": str(e), "full_text": "".join(collected)})
@@ -134,7 +169,8 @@ def generate_stream():
 
     novel = Novel.query.get(novel_id) if novel_id else None
     cfg = get_effective_config(novel, agent_type="writer")
-    return Response(_stream_to_sse(messages, cfg), mimetype="text/event-stream")
+    return Response(_stream_to_sse(messages, cfg, word_target=CHAPTER_WORD_TARGET),
+                    mimetype="text/event-stream")
 
 
 @generate_bp.route("/outline-stream", methods=["POST"])

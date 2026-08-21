@@ -129,6 +129,10 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
     if user_directive:
         blocks.append(_section("特别指示 - 最高优先级", user_directive))
 
+    blocks.append(_section(
+        "字数要求",
+        "本章正文目标约 2500 字（不得低于 2000 字）。"
+        "请充分展开场景、对话与心理描写，宁可细节丰盈，不可草草收束。"))
     blocks.append("\n请直接输出本章的小说正文内容。")
 
     return [
