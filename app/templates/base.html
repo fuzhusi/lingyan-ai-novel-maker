@@ -19,7 +19,7 @@
         <nav>
             {% block nav %}{% endblock %}
         </nav>
-        <nav class="topbar-nav" style="margin-left:auto">
+        <nav class="topbar-nav">
             <a href="/novel/">长篇</a>
             <a href="/short/">短篇</a>
             <a href="/plagiarize/">借鉴</a>
@@ -66,6 +66,16 @@
     // Esc 关闭
     document.addEventListener('keydown', function(e) {
         if (e.key === 'Escape') menu.classList.remove('open');
+    });
+})();
+
+// 书脊导航高亮当前页
+(function() {
+    var path = location.pathname;
+    document.querySelectorAll('.topbar-nav a').forEach(function(a) {
+        var href = a.getAttribute('href');
+        var hit = href === '/' ? path === '/' : path === href || path.startsWith(href);
+        if (hit) a.classList.add('active');
     });
 })();
 </script>

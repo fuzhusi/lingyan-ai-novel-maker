@@ -185,6 +185,82 @@ a:hover { color: var(--accent); }
     user-select: none;
 }
 
+/* --- 书脊（桌面端立轴导航） -------------------------------- */
+@media (min-width: 1024px) {
+    body:not(:has(.gateway-scene)) {
+        padding-left: 208px;
+    }
+
+    /* 网关沉浸页不出现书脊，保持全幅流光 */
+    body:has(.gateway-scene) .topbar { display: none; }
+
+    .topbar {
+        position: fixed;
+        top: 0; bottom: 0; left: 0;
+        width: 208px;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0;
+        padding: 1.5rem 0.9rem 1.25rem;
+        background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg) 100%);
+        border-bottom: none;
+        border-right: 1px solid var(--border);
+        overflow-y: auto;
+        z-index: 60;
+    }
+
+    /* 印章题签居顶 */
+    .topbar .logo {
+        align-self: center;
+        margin-bottom: 1.6rem;
+        white-space: nowrap;
+    }
+
+    /* 主导航置顶（DOM 在面包屑之后，用 order 提前），
+       面包屑作为次级目录垫在下方 */
+    .topbar .topbar-nav {
+        order: -1;
+        margin: 0 0 1.1rem;
+        padding-bottom: 1.1rem;
+        border-bottom: 1px dashed var(--border);
+        flex-direction: column;
+        align-items: stretch;
+        gap: 2px;
+    }
+
+    .topbar nav {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 2px;
+        font-size: 0.95rem;
+    }
+
+    .topbar nav a {
+        font-family: var(--font-display);
+        letter-spacing: 0.14em;
+        padding: 0.5rem 0.75rem;
+        border-radius: 6px;
+        color: var(--text-dim);
+    }
+    .topbar nav a:hover {
+        color: var(--text-bright);
+        background: var(--accent-ghost);
+        box-shadow: inset 2px 0 0 var(--accent-dim);
+    }
+    .topbar nav a.active {
+        color: var(--text-bright);
+        background: var(--accent-ghost);
+        box-shadow: inset 3px 0 0 var(--accent);
+    }
+
+    .topbar nav .sep { display: none; }
+
+    .mobile-menu-btn { display: none; }
+
+    /* 顶栏改书脊后，写作工具栏吸附点上移 */
+    .write-layout .toolbar { top: 16px; }
+}
+
 /* --- Layout ----------------------------------------------- */
 .main-content {
     max-width: 1160px;
@@ -200,10 +276,12 @@ a:hover { color: var(--accent); }
 
 /* --- Cards ------------------------------------------------ */
 .card {
-    background: var(--surface);
+    background: linear-gradient(180deg, var(--surface) 0%, rgba(26, 35, 30, 0.6) 100%);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     padding: 1.75rem;
+    /* 册页内衬光：顶缘一线微亮 */
+    box-shadow: inset 0 1px 0 rgba(237, 232, 219, 0.035);
     transition: border-color 0.25s var(--ease), box-shadow 0.25s var(--ease);
 }
 .card:hover {
@@ -307,18 +385,27 @@ button, .btn {
     border-radius: var(--radius);
     padding: 0.6rem 1.2rem;
     font-size: 0.9rem;
-    font-family: var(--font-body);
+    font-family: var(--font-display);
     font-weight: 500;
     cursor: pointer;
-    transition: background 0.2s var(--ease), transform 0.15s var(--ease), box-shadow 0.2s var(--ease);
-    letter-spacing: 0.01em;
+    letter-spacing: 0.08em;
+    /* 墨锭：顶缘一线内衬高光 */
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+    transition: background 0.2s var(--ease), transform 0.15s var(--ease),
+                box-shadow 0.2s var(--ease), filter 0.2s var(--ease);
 }
-button:hover { background: var(--accent); }
+button:hover { background: var(--accent); filter: brightness(1.06); }
 button:active { transform: scale(0.98); }
 button:disabled { opacity: 0.35; cursor: not-allowed; }
 
-.btn-primary { background: var(--accent); font-weight: 600; }
-.btn-primary:hover { background: var(--accent-light); box-shadow: var(--shadow-glow); }
+.btn-primary {
+    background: linear-gradient(180deg, var(--accent) 0%, var(--accent-dim) 100%);
+    font-weight: 700;
+}
+.btn-primary:hover {
+    filter: brightness(1.12);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), var(--shadow-glow);
+}
 
 .btn-danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
 .btn-danger:hover { background: var(--danger); color: #f0ebe0; }
@@ -413,19 +500,20 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
 }
 
 .novel-card {
-    background: var(--surface);
+    background: linear-gradient(180deg, var(--surface) 0%, rgba(26, 35, 30, 0.6) 100%);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     padding: 1.5rem;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    box-shadow: inset 0 1px 0 rgba(237, 232, 219, 0.035);
     transition: border-color 0.25s var(--ease), transform 0.2s var(--ease), box-shadow 0.25s var(--ease);
 }
 .novel-card:hover {
     border-color: var(--accent-dim);
     transform: translateY(-2px);
-    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    box-shadow: inset 0 1px 0 rgba(237, 232, 219, 0.05), 0 6px 20px rgba(0, 0, 0, 0.45), 0 0 24px rgba(208, 73, 59, 0.05);
 }
 
 .novel-card-body { flex: 1; }
