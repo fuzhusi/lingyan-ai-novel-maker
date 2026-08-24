@@ -58,5 +58,5 @@ desktop.ini
 logs/
 *.tmp
 *.bak
-.tmp*/
+.tmp*
 tests/.tmp*/
