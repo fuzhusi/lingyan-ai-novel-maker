@@ -58,6 +58,10 @@ def create_chapter_from_outline(novel_id, node_id):
 @knowledge_bp.route("/outline/create", methods=["POST"])
 def create_outline_node(novel_id):
     parent_id = request.form.get("parent_id", type=int) or None
+    # 父节点归属校验：parent_id 必须指向同一本小说的大纲节点，
+    # 否则会产生跨书父子关系，删除父书时子节点成孤儿/级联错乱
+    if parent_id is not None:
+        OutlineNode.query.filter_by(id=parent_id, novel_id=novel_id).first_or_404()
     max_order = db.session.query(db.func.max(OutlineNode.sort_order)).filter_by(
         novel_id=novel_id, parent_id=parent_id
     ).scalar()
@@ -76,7 +80,8 @@ def create_outline_node(novel_id):
 
 @knowledge_bp.route("/outline/<int:node_id>/edit", methods=["POST"])
 def edit_outline_node(novel_id, node_id):
-    node = OutlineNode.query.get_or_404(node_id)
+    # 归属校验：防止跨小说编辑大纲节点
+    node = OutlineNode.query.filter_by(id=node_id, novel_id=novel_id).first_or_404()
     for field in ["title", "summary", "node_type"]:
         val = request.form.get(field, "")
         if val:
@@ -87,13 +92,23 @@ def edit_outline_node(novel_id, node_id):
 
 @knowledge_bp.route("/outline/<int:node_id>/delete", methods=["POST"])
 def delete_outline_node(novel_id, node_id):
-    node = OutlineNode.query.get_or_404(node_id)
+    # 归属校验：防止跨小说删除大纲节点
+    node = OutlineNode.query.filter_by(id=node_id, novel_id=novel_id).first_or_404()
 
-    def delete_children(parent):
-        for child in OutlineNode.query.filter_by(parent_id=parent.id).all():
-            delete_children(child)
-            db.session.delete(child)
-    delete_children(node)
-    db.session.delete(node)
+    # 迭代式子树收集（BFS）：递归实现在深层大纲上会触发 Python 递归上限，
+    # 且每层一次查询效率低；一次取全小说节点在内存里按 parent 指针闭包
+    all_nodes = OutlineNode.query.filter_by(novel_id=novel_id).all()
+    children_map = {}
+    for n in all_nodes:
+        children_map.setdefault(n.parent_id, []).append(n)
+    to_delete = [node]
+    stack = [node.id]
+    while stack:
+        pid = stack.pop()
+        for child in children_map.get(pid, []):
+            to_delete.append(child)
+            stack.append(child.id)
+    for n in to_delete:
+        db.session.delete(n)
     db.session.commit()
     return redirect(url_for("knowledge.outline_page", novel_id=novel_id))

@@ -248,6 +248,13 @@
 (function() {
     const novelId = {{ novel.id }};
 
+    // XSS protection helper
+    function escapeHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s == null ? '' : s;
+        return d.innerHTML;
+    }
+
     document.getElementById('btn-diagnose').addEventListener('click', async function() {
         this.disabled = true;
         this.textContent = '诊断中...';
@@ -262,9 +269,9 @@
             for (const ch of (data.chapters || [])) {
                 if (ch.issues && ch.issues.length) {
                     html += `<div style="margin-bottom:0.4rem;padding:0.4rem;background:var(--bg);border-radius:6px">`;
-                    html += `<div style="font-weight:600">第${ch.chapter_number}章 ${ch.title||''} <span style="color:var(--text-dim);font-weight:400">${ch.grade} ${ch.audit_score}/10</span></div>`;
+                    html += `<div style="font-weight:600">第${ch.chapter_number}章 ${escapeHtml(ch.title||'')} <span style="color:var(--text-dim);font-weight:400">${ch.grade} ${ch.audit_score}/10</span></div>`;
                     for (const issue of ch.issues.slice(0, 3)) {
-                        html += `<div style="font-size:0.78rem;color:var(--accent);margin-left:0.5rem">[${issue.dimension}] ${issue.issue}</div>`;
+                        html += `<div style="font-size:0.78rem;color:var(--accent);margin-left:0.5rem">[${escapeHtml(issue.dimension||'')}] ${escapeHtml(issue.issue||'')}</div>`;
                     }
                     html += `</div>`;
                 }
@@ -278,44 +285,57 @@
     });
 
     document.getElementById('btn-load-chain').addEventListener('click', async function() {
-        const resp = await fetch(`/api/novels/${novelId}/causal-chain/full`);
-        const chain = await resp.json();
         const list = document.getElementById('chain-list');
-        if (!chain.length) { list.innerHTML = '<div style="color:var(--text-faint)">暂无数据</div>'; return; }
-        let html = '';
-        for (const c of chain) {
-            html += `<div style="margin-bottom:0.5rem;padding:0.5rem;background:var(--bg);border-radius:6px;border-left:3px solid var(--accent-dim)">`;
-            html += `<div style="font-weight:600">第${c.chapter_number}章 ${c.title||''}</div>`;
-            if (c.cause) html += `<div style="font-size:0.82rem"><span style="color:var(--accent)">起因：</span>${c.cause}</div>`;
-            if (c.event) html += `<div style="font-size:0.82rem"><span style="color:var(--text-bright)">经过：</span>${c.event}</div>`;
-            if (c.effect) html += `<div style="font-size:0.82rem"><span style="color:var(--success)">结果：</span>${c.effect}</div>`;
-            if (c.decision) html += `<div style="font-size:0.82rem"><span style="color:#8b5cf6">决策：</span>${c.decision}</div>`;
-            html += `</div>`;
+        try {
+            const resp = await fetch(`/api/novels/${novelId}/causal-chain/full`);
+            const chain = await resp.json();
+            if (!chain.length) { list.innerHTML = '<div style="color:var(--text-faint)">暂无数据</div>'; return; }
+            let html = '';
+            for (const c of chain) {
+                html += `<div style="margin-bottom:0.5rem;padding:0.5rem;background:var(--bg);border-radius:6px;border-left:3px solid var(--accent-dim)">`;
+                html += `<div style="font-weight:600">第${c.chapter_number}章 ${escapeHtml(c.title||'')}</div>`;
+                if (c.cause) html += `<div style="font-size:0.82rem"><span style="color:var(--accent)">起因：</span>${escapeHtml(c.cause)}</div>`;
+                if (c.event) html += `<div style="font-size:0.82rem"><span style="color:var(--text-bright)">经过：</span>${escapeHtml(c.event)}</div>`;
+                if (c.effect) html += `<div style="font-size:0.82rem"><span style="color:var(--success)">结果：</span>${escapeHtml(c.effect)}</div>`;
+                if (c.decision) html += `<div style="font-size:0.82rem"><span style="color:#8b5cf6">决策：</span>${escapeHtml(c.decision)}</div>`;
+                html += `</div>`;
+            }
+            list.innerHTML = html;
+        } catch(e) {
+            list.innerHTML = '<div style="color:var(--danger)">因果链加载失败: ' + escapeHtml(e.message) + '</div>';
         }
-        list.innerHTML = html;
     });
 
     document.getElementById('btn-load-truths').addEventListener('click', async function() {
-        const resp = await fetch(`/api/novels/${novelId}/truths`);
-        const truths = await resp.json();
         const list = document.getElementById('truth-list');
-        if (!truths.length) { list.innerHTML = '<div style="color:var(--text-faint)">暂无数据</div>'; return; }
-        let html = '';
-        for (const t of truths) {
-            const to = t.to_chapter ? `→第${t.to_chapter}章` : '(持续中)';
-            html += `<div style="padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.82rem">`;
-            html += `<span style="font-weight:600">${t.subject}</span> <span style="color:var(--text-dim)">${t.property}=</span><span style="color:var(--accent)">${t.value}</span> <span style="color:var(--text-faint);font-size:0.75rem">(第${t.from_chapter}章${to})</span>`;
-            html += `</div>`;
+        try {
+            const resp = await fetch(`/api/novels/${novelId}/truths`);
+            const truths = await resp.json();
+            if (!truths.length) { list.innerHTML = '<div style="color:var(--text-faint)">暂无数据</div>'; return; }
+            let html = '';
+            for (const t of truths) {
+                const to = t.to_chapter ? `→第${t.to_chapter}章` : '(持续中)';
+                html += `<div style="padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.82rem">`;
+                html += `<span style="font-weight:600">${escapeHtml(t.subject)}</span> <span style="color:var(--text-dim)">${escapeHtml(t.property)}=</span><span style="color:var(--accent)">${escapeHtml(t.value)}</span> <span style="color:var(--text-faint);font-size:0.75rem">(第${t.from_chapter}章${to})</span>`;
+                html += `</div>`;
+            }
+            list.innerHTML = html;
+        } catch(e) {
+            list.innerHTML = '<div style="color:var(--danger)">时间真相加载失败: ' + escapeHtml(e.message) + '</div>';
         }
-        list.innerHTML = html;
     });
 
     document.getElementById('btn-extract-truths').addEventListener('click', async function() {
         this.disabled = true; this.textContent = '提取中...';
-        const fd = new FormData();
-        fd.append('chapter_number', {{ chapter_stats[-1].chapter_number if chapter_stats else 0 }});
-        await fetch(`/api/novels/${novelId}/truths/extract`, {method: 'POST', body: fd});
-        document.getElementById('btn-load-truths').click();
+        try {
+            const fd = new FormData();
+            fd.append('chapter_number', {{ chapter_stats[-1].chapter_number if chapter_stats else 0 }});
+            await fetch(`/api/novels/${novelId}/truths/extract`, {method: 'POST', body: fd});
+            document.getElementById('btn-load-truths').click();
+        } catch(e) {
+            document.getElementById('truth-list').innerHTML =
+                '<div style="color:var(--danger)">事实提取失败: ' + escapeHtml(e.message) + '</div>';
+        }
         this.disabled = false; this.textContent = 'AI 提取最新章事实';
     });
 })();

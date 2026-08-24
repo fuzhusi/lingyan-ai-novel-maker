@@ -160,7 +160,7 @@
     const GENRE = {{ novel_genre|tojson|safe }};
     const SYNOPSIS = {{ novel_synopsis|tojson|safe }};
     const WORLD_INTRO = {{ novel_world_intro|tojson|safe }};
-    let versions = {{ versions_json|safe }};
+    let versions = {{ versions_data|tojson }};
     let generating = false;
     let fullText = '';
     let currentVersionId = null;
@@ -231,9 +231,9 @@
     }
 
     window._loadVer = async function(versionId) {
-        currentVersionId = versionId;
         const v = versions.find(v => v.id === versionId);
         if (v && v.fullContent) {
+            currentVersionId = versionId;
             fullText = v.fullContent;
             outputArea.value = fullText;
             renderVersions();
@@ -243,14 +243,16 @@
         }
         try {
             const resp = await fetch(`/novel/${NOVEL_ID}/chapter/${CHAPTER_NUM}/version/${versionId}`);
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
             const data = await resp.json();
             if (v) v.fullContent = data.content;
+            currentVersionId = versionId;
             fullText = data.content;
             outputArea.value = fullText;
             renderVersions();
             updateButtons();
             loadReview(versionId);
-        } catch(e) {}
+        } catch(e) { alert('加载版本失败: ' + e.message); }
     };
 
     async function loadReview(versionId) {
@@ -509,12 +511,14 @@
         errorBox.style.display = 'none';
         updateButtons();
 
-        // Quick API key validation
+        // Quick API config validation。
+        // api_key 已被后端掩码（前6位+****），明文校验不再可靠；
+        // 改用 has_provider_config：存在已启用厂商+勾选模型才放行
         try {
             const configResp = await fetch('/settings/api/config');
             const config = await configResp.json();
-            if (!config.api_key || config.api_key.trim() === '') {
-                errorBox.textContent = 'API Key 未设置，请先在设置页面配置 API Key';
+            if (!config.has_provider_config) {
+                errorBox.textContent = '尚未配置可用的模型厂商，请先到「设置 → 模型配置」添加厂商并勾选模型';
                 errorBox.style.display = 'block';
                 generating = false; btnGen.innerHTML = '&#x2699; AI 生成本章'; btnGen.disabled = false;
                 updateButtons();
@@ -546,9 +550,14 @@
                 });
                 const saveForm = new URLSearchParams();
                 saveForm.append('outline', outlineText);
-                await fetch(`/novel/${NOVEL_ID}/chapter/${CHAPTER_NUM}/save-outline`, { method: 'POST', body: saveForm });
-                hasOutline = true;
-                outlineStatus.textContent = '（&#x2713;）';
+                const saveResp = await fetch(`/novel/${NOVEL_ID}/chapter/${CHAPTER_NUM}/save-outline`, { method: 'POST', body: saveForm });
+                const saveData = await saveResp.json();
+                if (saveResp.ok && saveData.ok) {
+                    hasOutline = true;
+                    outlineStatus.textContent = '（✓ 已保存大纲）';
+                } else {
+                    outlineStatus.textContent = '（大纲保存失败）';
+                }
             } catch(e) {
                 outlineStatus.textContent = '（生成失败）';
                 outlineContent.innerHTML = '<span style="color:var(--danger)">大纲生成失败: ' + e.message + '</span>';
@@ -888,7 +897,7 @@
             for (const [d, info] of Object.entries(data.dimensions || {})) {
                 const color = info.score >= 8 ? 'var(--success)' : info.score >= 6 ? 'var(--accent)' : 'var(--danger)';
                 dimHtml += `<div style="display:flex;justify-content:space-between;padding:0.3rem 0.5rem;font-size:0.82rem;border-bottom:1px solid var(--border)">
-                    <span style="color:var(--text-dim)">${info.name}</span>
+                    <span style="color:var(--text-dim)">${escapeHtml(info.name || '')}</span>
                     <span style="color:${color};font-weight:600">${info.score}</span>
                 </div>`;
             }
@@ -901,7 +910,7 @@
                 for (const issue of data.issues.slice(0, 10)) {
                     const sevColor = issue.severity === 'high' ? 'var(--danger)' : issue.severity === 'medium' ? 'var(--accent)' : 'var(--text-dim)';
                     issueHtml += `<div style="padding:0.4rem 0.6rem;margin-bottom:0.3rem;background:var(--bg-card);border-left:3px solid ${sevColor};border-radius:0 6px 6px 0;font-size:0.85rem">
-                        <span style="color:${sevColor};font-weight:600">[${issue.dimension_name}]</span> ${issue.issue}
+                        <span style="color:${sevColor};font-weight:600">[${escapeHtml(issue.dimension_name || '')}]</span> ${escapeHtml(issue.issue || '')}
                     </div>`;
                 }
                 $('audit-issues').innerHTML = issueHtml;

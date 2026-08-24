@@ -56,6 +56,7 @@
     <div class="section-header">
         <h2>我的小说 <span class="count-badge">{{ novel_data|length }}</span></h2>
         <form method="POST" action="/novel/delete-all" onsubmit="return confirm('⚠️ 这将永久删除所有小说及其全部数据，不可恢复！\n\n请输入 DELETE 确认：');" style="display:flex;align-items:center;gap:0.5rem">
+            <input type="hidden" name="confirm" value="YES">
             <input type="text" id="delete-confirm" placeholder="输入 DELETE 确认" style="width:180px" autocomplete="off">
             <button type="submit" id="btn-delete-all" class="btn-danger" disabled>删除全部</button>
         </form>
@@ -83,7 +84,7 @@
             </div>
             <div class="novel-card-actions">
                 <a href="/novel/{{ novel.id }}/" class="btn btn-primary btn-sm">进入写作</a>
-                <form method="POST" action="/novel/{{ novel.id }}/delete" onsubmit="return confirm('确认删除《{{ novel.title }}》及所有章节？')" style="display:inline">
+                <form method="POST" action="/novel/{{ novel.id }}/delete" onsubmit='return confirm("确认删除《" + {{ novel.title|tojson }} + "》及所有章节？")' style="display:inline">
                     <button type="submit" class="btn-sm btn-danger">删除</button>
                 </form>
             </div>

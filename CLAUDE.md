@@ -176,8 +176,10 @@ app/
 
 ### 去 AI 化 (De-AI)
 - **三层防御**：Prompt 约束（最高优先级）→ 文本后处理 → 质量审计
-- 自动应用于章节保存：`deai_process(content)`
+- 自动应用于章节保存：`deai_process(content)`（仅 `source == "ai"` 的版本）
+- **全局开关**：Setting 键 `deai_auto = "0"` 可整体关闭自动去AI化（CLI `force=True` 不受影响）
 - 120+ 禁用模式分 8 类：虚词、情感、副词、模式化描写、对话、过渡、解释性开头、成语
+- 规则带负向断言守卫（如"坚持了三天""决定权"不会被误削），口语化剥离仅作用于话语连接词开头
 - 5 步处理流程：禁用词 → 正则 → 句式节奏 → 口语化 → 段落流畅
 - **Few-shot 对比示例**：8 个"AI味 vs 人味"具体对比，引导模型写出人味
 - **Rewrite/Editor 约束**：明确指示"保留自然的不完美"，避免"修复"人味
@@ -319,8 +321,11 @@ python cli.py sys sample-data         # 加载示例小说（对齐 Web 一键�
 
 ### 📊 Dashboard 统计
 - 6 个统计卡片（字数/进度/完成度/连续创作/本周/平均）
+- 连续创作天数为真实计算：从今天（或昨天）起回溯连续有版本创建的天数
+- 本周字数 = 近 7 天创建的版本正文字数之和
 - 字数趋势 SVG 折线图
-- 进度条 + 超时伏笔警告
+- 进度条 + 超时伏笔警告（口径与 `/api/foreshadowing/timeout-check` 一致：
+  全部未回收状态，含 reclaimable，以最新章节号为基准）
 
 ### 📝 大纲模板 (4 种)
 - 节拍式 (15 节点)
@@ -434,7 +439,7 @@ print(get_deai_stats(raw_text, cleaned))
 2. **MCP Server** 通过 stdio 协议通信，需要由 Claude Code 等 IDE 启动
 3. **CLI** 直接操作数据库，免登录
 4. 所有时间戳使用 UTC（`now()` 函数）
-5. SSL 问题已通过 `verify=False` 兼容处理（`app/services/llm.py`）
+5. SSL 默认强制证书校验；仅内网地址（localhost/127.x/10.x/192.168.x/172.16-31.x/.local）自动豁免。对公网域跳过校验需显式设 `LINGYAN_INSECURE_SSL=1`（`app/services/llm.py`）
 6. 中文 UI 字符串直接硬编码在模板中，未做 i18n
 7. **单用户模式**：无登录环节，`g.user` 恒为默认管理员
 
@@ -445,6 +450,6 @@ print(get_deai_stats(raw_text, cleaned))
 | 端口 5000 被占用 | `pkill -9 -f "python run.py"` |
 | 数据库锁定 | 等待其他进程完成或重启 Flask |
 | API 401 错误 | 到 `/settings/llm` 确认厂商 api_key 有效并已勾选模型（点「测试」验证） |
-| SSL 错误 | 已自动禁用证书验证 (`app/services/llm.py`) |
+| SSL 错误 | 默认强制校验；自签证书的内网地址自动豁免。公网自签域可临时设 `LINGYAN_INSECURE_SSL=1` |
 | 模型不生效 | `llm effective --agent-type X` 看实际生效来源；厂商是否禁用（禁用则回退默认）；该 Agent 是否显式指定了其他模型 |
 | 短篇发散后无节点进度条 | 发散输出未按节点格式（旧 prompt 缓存），重新发散即可 |

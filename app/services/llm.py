@@ -5,13 +5,41 @@
 """
 import json
 import logging
+import os
 from typing import Generator
+from urllib.parse import urlsplit
 
 import httpx
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 logger = logging.getLogger(__name__)
+
+
+def _ssl_verify_for(base_url: str) -> bool:
+    """SSL 证书校验策略。
+
+    默认开启校验（防公网 API 的 key 与内容被中间人窃取）；
+    仅两种情况降级为不校验：
+    1. 显式设置环境变量 LINGYAN_INSECURE_SSL=1
+    2. 目标是本机/局域网自建服务（localhost / 127.x / 10.x / 192.168.x / 172.16-31.x）
+    """
+    if os.getenv("LINGYAN_INSECURE_SSL", "").strip() == "1":
+        return False
+    try:
+        host = (urlsplit(base_url or "").hostname or "").lower()
+    except ValueError:
+        return True
+    if not host:
+        return True
+    if host in ("localhost", "::1") or host.endswith(".local"):
+        return False
+    if host.startswith("127.") or host.startswith("10.") or host.startswith("192.168."):
+        return False
+    parts = host.split(".")
+    if len(parts) == 4 and parts[0] == "172" and parts[1].isdigit() and 16 <= int(parts[1]) <= 31:
+        return False
+    return True
 
 
 class LLMError(Exception):
@@ -63,7 +91,7 @@ def fetch_models_from_provider(base_url: str, api_key: str, provider_type: str =
     last_err = None
     for attempt in range(3):
         try:
-            resp = httpx.get(url, headers=headers, timeout=30.0, verify=False)
+            resp = httpx.get(url, headers=headers, timeout=30.0, verify=_ssl_verify_for(base_url))
             resp.raise_for_status()
             data = resp.json()
             break
@@ -105,9 +133,9 @@ def test_provider_connection(base_url: str, api_key: str, provider_type: str = "
         return {"ok": False, "error": str(e)[:200]}
 
 
-def _build_http_client() -> httpx.Client:
-    """构建 SSL 容错的 httpx 客户端（共享配置）。"""
-    return httpx.Client(verify=False, timeout=httpx.Timeout(300.0, connect=10.0))
+def _build_http_client(base_url: str = "") -> httpx.Client:
+    """构建 httpx 客户端（共享配置）。证书校验策略见 _ssl_verify_for。"""
+    return httpx.Client(verify=_ssl_verify_for(base_url), timeout=httpx.Timeout(300.0, connect=10.0))
 
 
 def get_llm(
@@ -146,8 +174,8 @@ def get_llm(
     if provider_type == "deepseek":
         kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
-    # SSL 容错：通过自定义 httpx client
-    kwargs["http_client"] = _build_http_client()
+    # SSL 策略：通过自定义 httpx client（默认校验证书，本机/私网自动放行）
+    kwargs["http_client"] = _build_http_client(base_url)
 
     return ChatOpenAI(**kwargs)
 
@@ -203,11 +231,20 @@ def stream_llm_tokens(
         lc_messages = _messages_to_langchain(messages)
         for chunk in llm.stream(lc_messages):
             text = chunk.content
-            if text:
+            # 部分兼容网关会返回分片列表形式的 content，统一拼接为字符串
+            if isinstance(text, list):
+                text = "".join(
+                    p.get("text", "") for p in text if isinstance(p, dict)
+                )
+            if isinstance(text, str) and text:
                 yield text
-            # DeepSeek reasoning_content fallback
-            if hasattr(chunk, "additional_kwargs") and chunk.additional_kwargs.get("reasoning_content"):
-                yield chunk.additional_kwargs["reasoning_content"]
+            # DeepSeek reasoning_content fallback —— 思维链绝不并入正文流，
+            # 否则会被前端展示并随保存入库污染正文
+            reasoning = None
+            if hasattr(chunk, "additional_kwargs"):
+                reasoning = chunk.additional_kwargs.get("reasoning_content")
+            if isinstance(reasoning, str) and reasoning:
+                logger.debug("reasoning token suppressed from stream (%d chars)", len(reasoning))
     except LLMError:
         raise
     except Exception as e:
@@ -243,7 +280,12 @@ def call_llm_sync(
         )
         lc_messages = _messages_to_langchain(messages)
         result = llm.invoke(lc_messages)
-        return result.content
+        content = result.content
+        if isinstance(content, list):
+            content = "".join(
+                p.get("text", "") for p in content if isinstance(p, dict)
+            )
+        return content if isinstance(content, str) else str(content)
     except LLMError:
         raise
     except Exception as e:

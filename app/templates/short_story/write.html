@@ -439,16 +439,16 @@
         let lastBoundary = 0;               // 最近一个完整节点的结束位置（displayText 坐标）
 
         function handleNodeMarkers() {
-            const nodeRe = /===NODE:(\d+):([^=]*)===/g;
+            const nodeRe = /===NODE:(\d+):(.*?)===/g;
             let m;
             while ((m = nodeRe.exec(rawText)) !== null) {
                 // 该标记出现前的内容（剔除之前的标记）即上一个节点的完整文本
                 const cleanBefore = rawText.slice(0, m.index)
-                    .replace(/===NODE:\d+:[^=]*===/g, '');
+                    .replace(/===NODE:\d+:.*?===/g, '');
                 lastBoundary = cleanBefore.length;
                 if (opts.onNode) opts.onNode(parseInt(m[1]), m[2].trim(), lastBoundary);
             }
-            displayText = rawText.replace(/===NODE:\d+:[^=]*===/g, '');
+            displayText = rawText.replace(/===NODE:\d+:.*?===/g, '');
         }
 
         fetch(url, {
@@ -456,7 +456,8 @@
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: body || '',
             signal: controller.signal,
-        }).then(resp => {
+        }).then(async resp => {
+            if (!resp.ok) { const errText = await resp.text(); throw new Error(errText || ('HTTP ' + resp.status)); }
             const reader = resp.body.getReader();
             const decoder = new TextDecoder();
 
@@ -518,7 +519,8 @@
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: body || '',
             signal: controller.signal,
-        }).then(resp => {
+        }).then(async resp => {
+            if (!resp.ok) { const errText = await resp.text(); throw new Error(errText || ('HTTP ' + resp.status)); }
             const reader = resp.body.getReader();
             const decoder = new TextDecoder();
             let acc = '';
@@ -554,7 +556,8 @@
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: body || '',
             signal: controller.signal,
-        }).then(resp => {
+        }).then(async resp => {
+            if (!resp.ok) { const errText = await resp.text(); throw new Error(errText || ('HTTP ' + resp.status)); }
             const reader = resp.body.getReader();
             const decoder = new TextDecoder();
             let acc = '';

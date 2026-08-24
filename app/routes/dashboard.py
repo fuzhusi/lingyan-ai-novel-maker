@@ -67,33 +67,47 @@ def dashboard_page(novel_id):
     world_settings = WorldSetting.query.filter_by(novel_id=novel_id).all()
     outline_nodes = OutlineNode.query.filter_by(novel_id=novel_id).all()
     foreshadowing_items = Foreshadowing.query.filter_by(novel_id=novel_id).all()
-    open_foreshadowing = [f for f in foreshadowing_items if f.status == "open"]
+    open_foreshadowing = [f for f in foreshadowing_items
+                          if f.status not in ("resolved", "abandoned")]
+    # 超时口径与 /api/foreshadowing/timeout-check 对齐：
+    # 全部未回收状态 + 以最新章节号为基准（此前用"现有章节数"，
+    # 章节号不从 1 开始或有跳号时全部错位）
+    latest_chapter_number = max((ch.chapter_number for ch in chapters), default=0)
     timeout_foreshadowing = [
         f for f in open_foreshadowing
-        if f.planted_chapter and len(chapters) - f.planted_chapter > f.timeout_threshold
+        if f.planted_chapter
+        and (latest_chapter_number - f.planted_chapter) > (f.timeout_threshold or 15)
     ]
     summaries = ChapterSummary.query.join(Chapter).filter(Chapter.novel_id == novel_id).all()
 
-    # 写作连续天数（简化版：检查今天是否有创作）
+    # 收集本小说全部版本创建日期（UTC 口径，与 models.now() 一致）
+    all_versions = ChapterVersion.query.join(Chapter).filter(
+        Chapter.novel_id == novel_id).all()
+    creation_dates = set()
+    for v in all_versions:
+        d = _parse_date(v.created_at)
+        if d:
+            creation_dates.add(d.date())
+
+    # 写作连续天数：从今天（或昨天）起往回数连续有创作的天数。
+    # 此前恒为 0/1 的"简化版"与卡片文案"连续创作 N 天"不符
     today = datetime.now().date()
     streak = 0
-    has_today_creation = False
-    for ch in chapters:
-        for v in ChapterVersion.query.filter_by(chapter_id=ch.id).all():
-            d = _parse_date(v.created_at)
-            if d and d.date() == today:
-                has_today_creation = True
-                break
-        if has_today_creation:
-            break
-    streak = 1 if has_today_creation else 0
+    cursor = today if today in creation_dates else (
+        today.fromordinal(today.toordinal() - 1) if
+        today.fromordinal(today.toordinal() - 1) in creation_dates else None)
+    while cursor is not None and cursor in creation_dates:
+        streak += 1
+        cursor = today.fromordinal(cursor.toordinal() - 1)
 
-    # 本周字数
+    # 本周字数 = 近 7 天创建的版本正文字数之和。
+    # 此前统计的是"摘要字符数"，语义完全不对（摘要是 AI 生成的压缩文本）
     week_chars = 0
-    for cs in summaries:
-        d = _parse_date(cs.generated_at)
-        if d and (today - d.date()).days <= 7:
-            week_chars += cs.summary and len(cs.summary) or 0
+    week_start = today.fromordinal(today.toordinal() - 7)
+    for v in all_versions:
+        d = _parse_date(v.created_at)
+        if d and d.date() >= week_start:
+            week_chars += len(v.content or "")
 
     # 进度（30 章目标）
     target_chapters = 30

@@ -17,3 +17,5 @@ class AppConfig:
     SQLALCHEMY_DATABASE_URI = f"sqlite:///{db_path}"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     TEMPLATES_AUTO_RELOAD = True
+    # 上传体积上限：防止超大文件 / 解压炸弹耗尽内存与磁盘
+    MAX_CONTENT_LENGTH = int(os.getenv("MAX_UPLOAD_MB", "50")) * 1024 * 1024

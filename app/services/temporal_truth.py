@@ -50,6 +50,9 @@ def _save_truths(novel_id, truths):
 def add_truth(novel_id, subject, property_name, value, from_chapter, to_chapter=None):
     """Add a temporal truth.
 
+    同一 (subject, property) 若已有进行中记录，先闭合并写入 to_chapter，
+    否则同一属性会同时存在两条"ongoing"记录，时序查询无法判定哪条为真。
+
     Args:
         novel_id: Novel ID
         subject: What (character name, item, faction)
@@ -59,6 +62,14 @@ def add_truth(novel_id, subject, property_name, value, from_chapter, to_chapter=
         to_chapter: When this stopped being true (None = ongoing)
     """
     truths = _get_truths(novel_id)
+
+    # 闭合同主体同属性的旧进行中记录（与 update_truth 的闭合逻辑对齐）
+    for truth in truths:
+        if (truth.get("subject") == subject and
+                truth.get("property") == property_name and
+                truth.get("to_chapter") is None):
+            truth["to_chapter"] = max((from_chapter - 1), truth.get("from_chapter", from_chapter))
+
     truths.append({
         "subject": subject,
         "property": property_name,

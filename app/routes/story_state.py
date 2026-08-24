@@ -208,7 +208,8 @@ def rollback_state(novel_id):
     if not snapshot_id:
         return jsonify({"error": "missing snapshot_id"}), 400
 
-    snapshot = StoryStateSnapshot.query.get_or_404(snapshot_id)
+    # 归属校验：快照必须属于当前小说，防止跨书覆盖状态
+    snapshot = StoryStateSnapshot.query.filter_by(id=snapshot_id, novel_id=novel_id).first_or_404()
     state_data = json.loads(snapshot.state_json or "{}")
 
     state = StoryState.query.filter_by(novel_id=novel_id).first()
@@ -223,6 +224,18 @@ def rollback_state(novel_id):
     state.arc_phase = state_data.get("arcPhase", "setup")
     state.arc_intensity = state_data.get("arcIntensity", 3)
     state.risk_flags = json.dumps(state_data.get("riskFlags", {}), ensure_ascii=False)
+    # 完整回滚：恢复快照中已序列化的引擎字段（此前只回滚 7 个主线字段，
+    # 导致兴奋度/节奏/章节进度与主线状态时间线错位）
+    if "excitementHistory" in state_data:
+        state.excitement_history = json.dumps(state_data.get("excitementHistory", []), ensure_ascii=False)
+    if "currentExcitementDensity" in state_data:
+        state.current_excitement_density = state_data.get("currentExcitementDensity") or 0.0
+    if "recentPacing" in state_data:
+        state.recent_pacing = json.dumps(state_data.get("recentPacing", []), ensure_ascii=False)
+    if "lastExcitementChapter" in state_data:
+        state.last_excitement_chapter = state_data.get("lastExcitementChapter")
+    if "currentChapter" in state_data:
+        state.current_chapter = state_data.get("currentChapter") or 0
 
     db.session.commit()
     return jsonify({"ok": True, "state": _serialize_state(state)})

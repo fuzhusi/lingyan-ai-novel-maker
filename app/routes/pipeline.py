@@ -25,16 +25,9 @@ def _sse_event(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _call_ai(messages, cfg, stream=False):
+def _call_ai(messages, cfg):
     """Call AI API (non-streaming) and return the response text."""
     try:
-        if stream:
-            return "".join(stream_llm_tokens(
-                cfg["model_name"], messages,
-                cfg["api_key"], cfg["base_url"],
-                cfg.get("provider_type", "deepseek"),
-                cfg["temperature"], cfg["max_tokens"],
-            ))
         return call_llm_sync(
             cfg["model_name"], messages,
             cfg["api_key"], cfg["base_url"],
@@ -42,7 +35,9 @@ def _call_ai(messages, cfg, stream=False):
             cfg["temperature"], cfg["max_tokens"],
         )
     except LLMError as e:
-        return json.dumps({"error": str(e), "pass": False})
+        # 标记为显式失败：调用方据此把该 Agent 计入 failed 列表，
+        # 绝不能伪装成"检查通过"
+        return json.dumps({"error": str(e), "pass": False, "agent_status": "error"})
 
 
 def _parse_keeper_result(raw_text):
@@ -74,8 +69,18 @@ def _run_keeper(keeper_type, messages, cfg):
     """Run a single keeper agent and return parsed result."""
     raw = _call_ai(messages, cfg)
     result = _parse_keeper_result(raw)
+    # 解析失败（LLM 输出非 JSON）同样视为该 Agent 不可用，而非"通过"
+    if result.get("parse_error"):
+        result["agent_status"] = "error"
+        result["pass"] = False
     result["agent"] = keeper_type
     return result
+
+
+def _failed_agents(results):
+    """收集本次运行中不可用的 Agent（LLM 失败 / 输出无法解析 / 线程异常）。"""
+    return [name for name, r in results.items()
+            if r.get("agent_status") == "error" or r.get("error")]
 
 
 @pipeline_bp.route("/pipeline/check", methods=["POST"])
@@ -176,22 +181,26 @@ def pipeline_check():
             try:
                 results[agent_name] = future.result()
             except Exception as e:
-                results[agent_name] = {"pass": True, "error": str(e), "agent": agent_name}
+                results[agent_name] = {"pass": False, "error": str(e),
+                                       "agent_status": "error", "agent": agent_name}
 
     # Determine if any keeper found issues
     has_issues = any(
         not r.get("pass", True) and r.get("issues")
         for k, r in results.items() if k != "critic"
     )
+    failed = _failed_agents(results)
 
-    # Apply foreshadow updates from foreshadow keeper
+    # Apply foreshadow updates from foreshadow keeper（带归属校验，
+    # 防止 LLM 幻觉出其他小说的伏笔 id 造成跨书改数据）
+    foreshadow_updates_applied = []
     foreshadow_updates = results.get("foreshadow_keeper", {}).get("foreshadow_updates", [])
     for update in foreshadow_updates:
         fs_id = update.get("id")
         new_status = update.get("new_status")
         if fs_id and new_status:
             fs = Foreshadowing.query.get(fs_id)
-            if fs:
+            if fs and fs.novel_id == novel_id:
                 valid = {
                     "open": ["planned", "buried"],
                     "planned": ["buried"],
@@ -201,6 +210,7 @@ def pipeline_check():
                 }
                 if new_status in valid.get(fs.status, []):
                     fs.status = new_status
+                    foreshadow_updates_applied.append({"id": fs_id, "status": new_status})
     db.session.commit()
 
     # Run editor if issues found
@@ -235,11 +245,20 @@ def pipeline_check():
         db.session.add(review)
         db.session.commit()
 
+    # 全部 Agent 失败时显式报错，绝不伪装成"一切正常"
+    if failed and len(failed) == len(results):
+        return jsonify({
+            "error": "所有检查 Agent 均不可用（API key / 网络 / 模型输出异常），本次结果无效",
+            "failed_agents": failed,
+        }), 502
+
     return jsonify({
         "results": results,
         "hasIssues": has_issues,
         "editorResult": editor_result,
         "criticScore": overall_score,
+        "failedAgents": failed,
+        "foreshadowUpdatesApplied": foreshadow_updates_applied,
     })
 
 
@@ -332,7 +351,7 @@ def pipeline_check_stream():
                 try:
                     result = future.result()
                 except Exception as e:
-                    result = {"pass": True, "error": str(e)}
+                    result = {"pass": False, "error": str(e), "agent_status": "error"}
                 result["agent"] = agent_name
                 results[agent_name] = result
                 yield _sse_event({"type": "agent_complete", "agent": agent_name, "result": result})
@@ -342,6 +361,19 @@ def pipeline_check_stream():
             not r.get("pass", True) and r.get("issues")
             for k, r in results.items() if k != "critic"
         )
-        yield _sse_event({"type": "check_complete", "hasIssues": has_issues, "results": results})
+        failed = _failed_agents(results)
+        if failed and len(failed) == len(results):
+            yield _sse_event({
+                "type": "check_failed",
+                "error": "所有检查 Agent 均不可用（API key / 网络 / 模型输出异常）",
+                "failedAgents": failed,
+            })
+            return
+        yield _sse_event({
+            "type": "check_complete",
+            "hasIssues": has_issues,
+            "results": results,
+            "failedAgents": failed,
+        })
 
     return Response(generate(), mimetype="text/event-stream")

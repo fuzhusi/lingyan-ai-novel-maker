@@ -29,6 +29,12 @@ def create_chapter(novel_id):
     if not chapter_number:
         max_num = db.session.query(db.func.max(Chapter.chapter_number)).filter_by(novel_id=novel_id).scalar()
         chapter_number = (max_num or 0) + 1
+    else:
+        # 章节号唯一性：重复号会让所有 /chapter/<number> 路由 first() 命中
+        # 错误章节，版本/评审全部串章
+        dup = Chapter.query.filter_by(novel_id=novel_id, chapter_number=chapter_number).first()
+        if dup:
+            return jsonify({"error": f"第 {chapter_number} 章已存在，请换一个章节号"}), 400
 
     chapter = Chapter(
         novel_id=novel_id,
@@ -81,7 +87,10 @@ def write_chapter(novel_id, chapter_number):
     characters = Character.query.filter_by(novel_id=novel_id).order_by(Character.id).all()
 
     return render_template("chapter_write.html", novel=novel, chapter=chapter,
-                           versions=versions, versions_json=_json.dumps(versions_data),
+                           versions=versions,
+                           # 模板用 {{ versions_data|tojson }} 注入，传原生 list
+                           # （旧 versions_json 字符串 + |safe 是 XSS 注入点，已弃用）
+                           versions_data=versions_data,
                            novel_genre=novel.genre, novel_synopsis=novel.synopsis,
                            novel_world_intro=novel.world_intro,
                            characters=characters,
@@ -128,7 +137,12 @@ def save_version(novel_id, chapter_number):
 
 @chapter_bp.route("/chapter/<int:chapter_number>/version/<int:version_id>")
 def get_version(novel_id, chapter_number, version_id):
-    version = ChapterVersion.query.get_or_404(version_id)
+    # 归属校验：版本必须属于 URL 指定的小说与章节
+    version = (ChapterVersion.query.join(Chapter, ChapterVersion.chapter_id == Chapter.id)
+               .filter(ChapterVersion.id == version_id,
+                       Chapter.novel_id == novel_id,
+                       Chapter.chapter_number == chapter_number)
+               .first_or_404())
     return jsonify({
         "id": version.id,
         "version_number": version.version_number,
@@ -141,10 +155,15 @@ def get_version(novel_id, chapter_number, version_id):
 
 @chapter_bp.route("/chapter/<int:chapter_number>/version/<int:version_id>/delete", methods=["POST"])
 def delete_version(novel_id, chapter_number, version_id):
-    version = ChapterVersion.query.get_or_404(version_id)
+    # 归属校验：同上，防止跨小说删除版本
+    version = (ChapterVersion.query.join(Chapter, ChapterVersion.chapter_id == Chapter.id)
+               .filter(ChapterVersion.id == version_id,
+                       Chapter.novel_id == novel_id,
+                       Chapter.chapter_number == chapter_number)
+               .first_or_404())
     # Delete associated reviews first
     from app.models import CriticReview
-    CriticReview.query.filter_by(version_id=version_id).delete()
+    CriticReview.query.filter_by(version_id=version.id).delete()
     db.session.delete(version)
     db.session.commit()
     return jsonify({"ok": True})

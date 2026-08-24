@@ -59,8 +59,18 @@ def _cjk_detokenize(text):
     return "".join(out)
 
 
+_fts_ready = False
+
+
 def init_fts():
-    """Create FTS5 virtual tables for memory search."""
+    """Create FTS5 virtual tables for memory search.
+
+    进程内缓存：DDL 每次搜索都跑一遍纯属浪费（SQLite 建表有写锁开销），
+    首次成功后本进程内直接跳过。
+    """
+    global _fts_ready
+    if _fts_ready:
+        return
     with db.engine.connect() as conn:
         conn.execute(db.text("""
             CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
@@ -72,6 +82,15 @@ def init_fts():
                 tokenize='unicode61'
             )
         """))
+        conn.commit()
+    _fts_ready = True
+
+
+def delete_novel_memory(novel_id):
+    """删除小说时同步清理其 FTS 索引，防止残留脏数据被其他小说检索命中。"""
+    init_fts()
+    with db.engine.connect() as conn:
+        conn.execute(db.text("DELETE FROM memory_fts WHERE novel_id = :nid"), {"nid": novel_id})
         conn.commit()
 
 
@@ -193,7 +212,9 @@ def search_memory(novel_id, query, memory_type=None, limit=10):
             "memoryType": row[1],
             "sourceId": row[2],
             "chapterNumber": row[3],
-            "relevance": abs(row[4]) if row[4] else 0,
+            # FTS5 rank 为负的 bm25（越负越相关），取负号后越大越相关；
+            # 此前 abs() 把最差匹配映成了最大值，相关性排序完全颠倒
+            "relevance": -row[4] if row[4] else 0,
         } for row in rows]
 
 

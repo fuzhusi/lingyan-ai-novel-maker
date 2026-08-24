@@ -33,7 +33,7 @@ def parse_outline_nodes(concept_text, word_target=None):
         节点1（第一幕·开端，约1200字）：标题 —— 描述
 
     Returns:
-        list[dict]: [{id, act, title, word_count, status}]，解析失败返回 []
+        list[dict]: [{id, act, title, summary, word_count, status}]，解析失败返回 []
     """
     if not concept_text:
         return []
@@ -41,13 +41,28 @@ def parse_outline_nodes(concept_text, word_target=None):
     for m in NODE_LINE_RE.finditer(concept_text):
         node_id = int(m.group(1))
         act = m.group(2).strip()
-        word_count = int(m.group(3))
-        title = m.group(4).strip()
+        raw_title = m.group(4).strip()
+        # 「标题 —— 描述」两段式：拆出 summary。
+        # 此前整体吞进 title，导致节点大纲描述永久丢失、后续提示词退化
+        title, summary = raw_title, ""
+        for sep in ("——", "──"):
+            if sep in raw_title:
+                title, _, summary = raw_title.partition(sep)
+                title = title.strip()
+                summary = summary.strip()
+                break
+        try:
+            wc = int(float(m.group(3)))
+        except (TypeError, ValueError):
+            wc = 1200
+        # 钳制字数：AI 可能输出超大值导致 token 触顶后正文必然不足却照样标 done
+        wc = min(max(wc, 300), 3000)
         nodes.append({
             "id": node_id,
             "act": act,
             "title": title,
-            "word_count": word_count,
+            "summary": summary,
+            "word_count": wc,
             "status": "pending",
         })
     # 校验节点 id 连续
@@ -56,6 +71,15 @@ def parse_outline_nodes(concept_text, word_target=None):
         if ids != list(range(1, len(nodes) + 1)):
             return []
     return nodes
+
+
+def _node_marker(node):
+    """生成 ===NODE:id:title=== 进度标记。
+
+    标题中的 = 和换行会破坏前端解析正则，统一替换为下划线。
+    """
+    safe_title = re.sub(r"[=\r\n]+", "_", str(node.get("title", "")))
+    return f"\n\n===NODE:{node['id']}:{safe_title}===\n\n"
 
 
 def load_outline_nodes(story):
@@ -224,6 +248,10 @@ def expand_inspiration(story_id):
         fallback = parse_outline_nodes(raw or "", story.word_target)
         story.outline_nodes = json.dumps(fallback, ensure_ascii=False) if fallback else "[]"
         story.status = "concept_ready"
+
+    # 大纲已重置为全新 pending 节点：旧全文与新节点失配，必须清空。
+    # 否则「继续生成」会把旧全文当上下文前文，新节点 append 后整篇重复
+    story.content = ""
     db.session.commit()
 
     return jsonify({
@@ -311,6 +339,7 @@ def write_from_concept(story_id):
             story.outline_nodes = json.dumps(nodes, ensure_ascii=False)
         db.session.commit()
 
+    prev_status = story.status if story.status not in ("generating", "expanding") else "concept_ready"
     story.status = "generating"
     db.session.commit()
 
@@ -345,7 +374,7 @@ def write_from_concept(story_id):
                 if node.get("status") == "done":
                     continue
                 # 节点分隔标记（不进入正文，前端据此更新进度）
-                yield f"\n\n===NODE:{node['id']}:{node.get('title', '')}===\n\n"
+                yield _node_marker(node)
                 sep = "\n\n" if all_text else ""
                 if sep:
                     yield sep
@@ -401,6 +430,12 @@ def write_from_concept(story_id):
                 all_text += token
                 yield token
         except LLMError as e:
+            # 状态回滚：否则 status 永久卡在 "generating"（列表页永远显示生成中）
+            with app.app_context():
+                s = db.session.get(ShortStory, story_id)
+                if s:
+                    s.status = prev_status
+                    db.session.commit()
             yield f"\n[生成失败: {e}]"
             return
 
@@ -494,17 +529,20 @@ def rewrite_node(story_id, node_id):
     app = current_app._get_current_object()
 
     def generate():
-        yield f"\n\n===NODE:{node_id}:{nodes[idx].get('title', '')}===\n\n"
+        yield _node_marker(nodes[idx])
         node_text = ""
         with app.app_context():
             s = db.session.get(ShortStory, story_id)
             messages = build_node_prompt(s, nodes, idx, prev_text)
-        node_tokens = min(int(nodes[idx].get("word_count", 1200)) * 2, 12000)
+        # word_count 可能为 None/浮点串（旧数据/AI 输出），float() 容错
+        # （与主生成路径 L358 保持一致；此前 int(None) 会在流中途崩溃）
+        node_tokens = min(int(float(nodes[idx].get("word_count") or 1200)) * 2, 12000)
         try:
             for token in _stream_ai_tokens(cfg, messages, node_tokens):
                 node_text += token
                 yield token
         except LLMError as e:
+            # 本路由不修改 story.status，无需回滚
             yield f"\n[生成失败: {e}]"
             return
         if not node_text.strip():
@@ -519,7 +557,10 @@ def rewrite_node(story_id, node_id):
                 s.outline_nodes = json.dumps(nodes, ensure_ascii=False)
                 # 重建全文：其它节点正文保持不变 + 本次重写结果
                 s.content = _rebuild_content_from_nodes(nodes)
-                s.status = "done"
+                # 只有全部节点完成才能标记 done；
+                # 之后仍有 pending 节点时保持可续写状态，防止残文被当完整作品
+                all_done = all(n.get("status") == "done" for n in nodes)
+                s.status = "done" if all_done else "concept_ready"
                 db.session.commit()
 
     return Response(generate(), mimetype="text/plain")
@@ -565,6 +606,7 @@ def continue_story(story_id):
                 new_text += token
                 yield token
         except LLMError as e:
+            # 本路由不修改 story.status，无需回滚
             yield f"\n[生成失败: {e}]"
             return
         if not new_text.strip():
@@ -575,12 +617,18 @@ def continue_story(story_id):
             s = db.session.get(ShortStory, story_id)
             if s:
                 cur_nodes = load_outline_nodes(s)
-                if cur_nodes and cur_nodes[-1].get("content"):
-                    # 节点模式：并入最后一个节点，保持节点正文与全文一致
-                    cur_nodes[-1]["content"] = cur_nodes[-1]["content"] + "\n\n" + new_text
-                    s.outline_nodes = json.dumps(cur_nodes, ensure_ascii=False)
-                    s.content = _rebuild_content_from_nodes(cur_nodes)
-                else:
+                merged = False
+                if cur_nodes:
+                    # 并入最近一个有正文的节点（而非仅当末节点 done 才并入）：
+                    # 断点暂停后末节点必为 pending，若走 else 分支追加到全文，
+                    # 恢复生成时 rebuild 会把这段续写整体覆盖丢失
+                    last_done = next((n for n in reversed(cur_nodes) if n.get("content")), None)
+                    if last_done is not None:
+                        last_done["content"] = last_done["content"] + "\n\n" + new_text
+                        s.outline_nodes = json.dumps(cur_nodes, ensure_ascii=False)
+                        s.content = _rebuild_content_from_nodes(cur_nodes)
+                        merged = True
+                if not merged:
                     s.content = (s.content or "") + "\n\n" + new_text
                 db.session.commit()
 
@@ -618,6 +666,7 @@ def expand_selection(story_id):
             for token in _stream_ai_tokens(cfg, messages, min((len(text) + add_words) * 2, 8000)):
                 yield token
         except LLMError as e:
+            # 本路由不修改 story.status，无需回滚
             yield f"\n[生成失败: {e}]"
             return
 
@@ -658,6 +707,7 @@ def rewrite_selection(story_id):
             for token in _stream_ai_tokens(cfg, messages, min(len(text) * 3 + 2000, 8000)):
                 yield token
         except LLMError as e:
+            # 本路由不修改 story.status，无需回滚
             yield f"\n[生成失败: {e}]"
             return
 
@@ -744,6 +794,7 @@ def rewrite_story(story_id):
                 full_text += token
                 yield token
         except LLMError as e:
+            # 本路由不修改 story.status，无需回滚
             yield f"\n[生成失败: {e}]"
             return
         with app.app_context():

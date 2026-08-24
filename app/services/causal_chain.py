@@ -68,7 +68,11 @@ def extract_causal_chain(chapter_content, chapter_number, novel_title="", previo
             lines = text.split("\n")
             json_lines = [l for l in lines[1:] if not l.startswith("```")]
             text = "\n".join(json_lines)
-        return json.loads(text)
+        data = json.loads(text)
+        # LLM 可能返回 list/str/bool——调用方按 dict 取键会 AttributeError
+        if not isinstance(data, dict):
+            raise ValueError(f"因果链输出不是 JSON 对象: {type(data).__name__}")
+        return data
     except LLMError as e:
         return {
             "cause": "", "event": "", "effect": "", "decision": "",

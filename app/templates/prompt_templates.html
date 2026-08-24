@@ -124,7 +124,7 @@
                 <div style="display:flex;gap:0.3rem;flex-shrink:0;margin-left:1rem">
                     <button class="btn-sm" onclick="document.getElementById('edit-pt-{{ t.id }}').style.display='block'">编辑</button>
                     <form method="POST" action="/prompt-templates/{{ t.id }}/delete"
-                          onsubmit="return confirm('确定删除模板 {{ t.name }}？')" style="display:inline">
+                          onsubmit='return confirm("确定删除模板 " + {{ t.name|tojson }} + "？")' style="display:inline">
                         <button type="submit" class="btn-sm btn-danger">删除</button>
                     </form>
                 </div>

@@ -41,7 +41,7 @@
         按分类筛选：
         <a href="#all" class="kb-filter active" onclick="filterCat('all')">全部</a>
         {% for cat in categories %}
-        <a href="#{{ cat }}" class="kb-filter" onclick="filterCat('{{ cat }}')">{{ cat }}</a>
+        <a href="#{{ cat }}" class="kb-filter" onclick='filterCat({{ cat|tojson }})'>{{ cat }}</a>
         {% endfor %}
     </div>
     {% endif %}
@@ -60,7 +60,7 @@
                 <div style="display:flex;gap:0.3rem;flex-shrink:0;margin-left:1rem">
                     <button class="btn-sm" onclick="document.getElementById('edit-ws-{{ ws.id }}').style.display='block'">编辑</button>
                     <form method="POST" action="/novel/{{ novel.id }}/world-settings/{{ ws.id }}/delete"
-                          onsubmit="return confirm('确定删除 {{ ws.title }}？')">
+                          onsubmit='return confirm("确定删除 " + {{ ws.title|tojson }} + "？")'>
                         <button type="submit" class="btn-sm btn-danger">删除</button>
                     </form>
                 </div>

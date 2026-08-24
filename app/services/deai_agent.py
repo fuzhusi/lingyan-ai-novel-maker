@@ -27,6 +27,10 @@ from app.services.deai_patterns import (
 
 def _fix_sentence_rhythm(text):
     """Break monotonous sentence patterns."""
+    # 开头重复时允许剥离的词白名单：只剥离话语连接词，
+    # 名词/代词主语（他/她/林晚/刀光）被剥离会产出无主残句
+    _STRIPPABLE_OPENERS = {"然后", "接着", "于是", "突然", "这时", "随后",
+                           "立刻", "马上", "顿时", "瞬间", "终于", "还是", "又"}
     lines = text.split("\n")
     fixed = []
 
@@ -47,9 +51,10 @@ def _fix_sentence_rhythm(text):
                 prev_sent = new_sentences[-1]
                 prev_words = re.findall(r'[一-鿿]+', prev_sent[:6])
                 curr_words = re.findall(r'[一-鿿]+', sent[:6])
-                if prev_words and curr_words and prev_words[0] == curr_words[0]:
-                    if len(curr_words[0]) <= 2 and len(sent) > len(curr_words[0]):
-                        sent = sent[len(curr_words[0]):]
+                if (prev_words and curr_words and prev_words[0] == curr_words[0]
+                        and curr_words[0] in _STRIPPABLE_OPENERS
+                        and len(sent) > len(curr_words[0])):
+                    sent = sent[len(curr_words[0]):]
 
             # Fix: sentences that are too similar in length (±3 chars)
             if new_sentences:
@@ -81,8 +86,9 @@ def _fix_sentence_rhythm(text):
 
 def _fix_sentence_structure(text):
     """Fix common AI sentence structures."""
-    text = re.sub(r'是(\w{2,6})的', r'\1', text, count=2)
-    text = re.sub(r'有(\w{2,6})的', r'\1', text, count=2)
+    # 「是X的」「有X的」两条通配规则已移除：
+    # 它们会命中"这是他的书/有的是时间/有经验的老师"等完全合法的句子并删字。
+    # AI 腔治理交给禁用词表与审计维度，不做这种高风险通配替换。
     text = re.sub(r'像(\w{2,6})一样', r'\1', text, count=2)
     text = re.sub(r'如同(\w{2,6})一般', r'\1', text, count=2)
     text = re.sub(r'好像(\w{2,6})似的', r'\1', text, count=2)
@@ -130,17 +136,38 @@ def _fix_paragraph_flow(text):
 # Main processing
 # ---------------------------------------------------------------------------
 
-def deai_process(text, strict=False):
+def deai_enabled():
+    """全局「自动去AI化」开关（Setting 键 deai_auto，缺省开启）。
+
+    设为 "0" 后，保存/生成链路上的 deai_process 调用全部直通原文；
+    CLI 显式 --save 去AI化等场景可传 force=True 绕过开关。
+    """
+    try:
+        from app.models import Setting
+        row = Setting.query.filter_by(key="deai_auto").first()
+        if row is not None:
+            return str(row.value).strip() != "0"
+    except Exception:
+        # 表不存在/无应用上下文时保持默认开启，不阻塞文本处理
+        pass
+    return True
+
+
+def deai_process(text, strict=False, force=False):
     """Process text to remove AI artifacts.
 
     Args:
         text: Input text
         strict: If True, apply all rules aggressively. If False, be conservative.
+        force: True 时忽略全局开关强制处理（CLI / 诊断场景）
 
     Returns:
         Processed text with AI artifacts removed
     """
     if not text:
+        return text
+
+    if not force and not deai_enabled():
         return text
 
     # Pass 1: Banned pattern replacement

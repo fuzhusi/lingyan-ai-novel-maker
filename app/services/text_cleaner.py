@@ -2,17 +2,26 @@
 
 import re
 
+# 编号列表标记的序号上限：正文里 "1995. 那一年…" 这种年份开头的句子
+# 不是列表，绝不能当列表标记删掉序号
+_MAX_LIST_NUMBER = 99
+
+_NUM_LIST_RE = re.compile(r"^(\s*)(\d{1,3})\.\s+")
+_BOLD_STAR_RE = re.compile(r"(?<!\*)\*([^*\n]+)\*(?!\*)")
+_BOLD_ULINE_RE = re.compile(r"(?<!_)_([^_\n]+)_(?!_)")
+_ITALIC_PAIR_STAR_RE = re.compile(r"\*{1,3}([^*\n]+?)\*{1,3}")
+
 
 def clean_ai_text(text):
     """Clean up AI-generated text by removing formatting artifacts.
 
     Handles:
     - Markdown headings (# ## ### etc.)
-    - Bold/italic markers (** __ * _)
+    - Bold/italic markers (** __ * _) — 仅成对出现时剥离
     - Code blocks (``` `` `)
     - Horizontal rules (--- ___ ***)
     - Bullet markers (- * + at line start)
-    - Numbered list markers (1. 2. etc. at line start)
+    - Numbered list markers (1. 2. etc. at line start，序号 < 100)
     - Excessive blank lines
     - Leading/trailing whitespace per line
     """
@@ -30,9 +39,12 @@ def clean_ai_text(text):
         if re.match(r"^[-*_]{3,}\s*$", line):
             continue
 
-        # Remove bold/italic markers
-        line = re.sub(r"\*{1,3}(.+?)\*{1,3}", r"\1", line)
-        line = re.sub(r"_{1,3}(.+?)_{1,3}", r"\1", line)
+        # Remove bold/italic markers。
+        # 成对优先：**x** / __x__ / 单星单下划线；要求两侧紧邻非同类符号，
+        # 避免把数学/拟声里的孤立 * _（"他划了一条___"）误删
+        line = _BOLD_STAR_RE.sub(r"\1", line)
+        line = _BOLD_ULINE_RE.sub(r"\1", line)
+        line = _ITALIC_PAIR_STAR_RE.sub(r"\1", line)
 
         # Remove inline code
         line = re.sub(r"`(.+?)`", r"\1", line)
@@ -40,8 +52,11 @@ def clean_ai_text(text):
         # Remove bullet markers at line start
         line = re.sub(r"^\s*[-*+]\s+", "", line)
 
-        # Remove numbered list markers at line start
-        line = re.sub(r"^\s*\d+\.\s+", "", line)
+        # Remove numbered list markers at line start（仅小序号）。
+        # 大序号（≥100，如年份"1995. …"）是叙述句开头，保留原样
+        m = _NUM_LIST_RE.match(line)
+        if m and int(m.group(2)) <= _MAX_LIST_NUMBER:
+            line = m.group(1) + line[m.end():]
 
         # Remove chapter markers like 【第X章】 or 第X章 at line start
         # Keep the content but clean up the brackets

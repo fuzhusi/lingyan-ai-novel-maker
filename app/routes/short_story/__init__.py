@@ -167,6 +167,8 @@ def save_concept(story_id):
     nodes = parse_outline_nodes(concept, story.word_target)
     story.outline_nodes = json.dumps(nodes, ensure_ascii=False) if nodes else "[]"
     story.status = "concept_ready"
+    # 大纲重置后旧全文与新节点失配，清空防止「继续生成」整篇重复拼接
+    story.content = ""
     db.session.commit()
     return jsonify({"ok": True, "nodes": nodes})
 

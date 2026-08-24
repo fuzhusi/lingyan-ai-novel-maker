@@ -168,9 +168,11 @@
         modeInput.value = mode;
         Object.entries(modeFields).forEach(([k, el]) => {
             el.style.display = k === mode ? 'block' : 'none';
-            // Toggle required attribute
-            el.querySelectorAll('[required]').forEach(input => {
+            // 切换模式时禁用非当前分组的字段（disabled 字段不会随表单提交），
+            // 避免隐藏分组里的同名 input（inspiration/title/theme 等）残留旧值提交
+            el.querySelectorAll('input, textarea, select').forEach(input => {
                 input.required = (k === mode);
+                input.disabled = (k !== mode);
             });
         });
     }

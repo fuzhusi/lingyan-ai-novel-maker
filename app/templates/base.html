@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}AI 小说创作系统{% endblock %}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='favicon.png') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Crimson+Pro:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
@@ -23,8 +25,8 @@
             <a href="/settings/">设置</a>
             <a href="/api/skills/page">技巧</a>
             <a href="/prompt-templates/">模板</a>
-            <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="菜单">&#9776;</button>
         </nav>
+        <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="菜单">&#9776;</button>
     </header>
 
     <!-- 移动端菜单 -->
@@ -49,11 +51,21 @@
 (function() {
     const btn = document.getElementById('mobile-menu-btn');
     const menu = document.getElementById('mobile-menu');
-    if (btn && menu) {
-        btn.addEventListener('click', function() {
-            menu.classList.toggle('open');
-        });
-    }
+    if (!btn || !menu) return;
+    btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        menu.classList.toggle('open');
+    });
+    // 点击菜单外区域关闭
+    document.addEventListener('click', function(e) {
+        if (menu.classList.contains('open') && !menu.contains(e.target)) {
+            menu.classList.remove('open');
+        }
+    });
+    // Esc 关闭
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') menu.classList.remove('open');
+    });
 })();
 </script>
 <style>
@@ -62,11 +74,10 @@
     .topbar { flex-wrap: wrap; padding: 0.6rem 0.8rem !important; }
     .topbar .logo { font-size: 1rem; }
     .topbar-nav { display: none; }
-    .topbar-nav .mobile-menu-btn { display: block; }
+    .mobile-menu-btn { display: inline-flex; align-items: center; margin-left: auto; }
     .topbar-nav { gap: 0.5rem; }
     .topbar-nav a, .user-link, .login-link, .user-name { display: none; }
     .mobile-menu-btn {
-        display: block;
         background: transparent;
         border: 1px solid var(--border);
         color: var(--text);

@@ -66,6 +66,9 @@ def unified_review(novel_id, chapter_number, version_id=None, include_rewrite=Fa
 
     if version_id:
         version = ChapterVersion.query.get(version_id)
+        # 归属校验：版本必须属于该章节，防止 A 章上下文 + B 章正文混合审计
+        if version and version.chapter_id != chapter.id:
+            return {"error": "version_id 与指定章节不匹配"}
     else:
         version = (ChapterVersion.query
                    .filter_by(chapter_id=chapter.id)
@@ -145,6 +148,7 @@ def _call_critic_sync(chapter_content, novel_title, chapter_title, chapter_numbe
         characters=characters,
         world_settings=world_settings,
         foreshadowing_items=foreshadowing_items,
+        db=db,  # 不传会导致用户自定义 critic 模板被静默忽略
     )
 
     try:
@@ -251,7 +255,7 @@ def _merge_report(critic_result, audit_result, original_content):
             "severity": ann.get("severity", "medium"),
             "issue": ann.get("quote", ann.get("issue", "")),
             "suggestion": ann.get("suggestion", ""),
-            "location": f"第{ann.get('paragraph_index', 0) + 1}段" if ann.get("paragraph_index") else "",
+            "location": f"第{ann.get('paragraph_index') + 1}段" if ann.get("paragraph_index") is not None else "",
         })
 
     # 按严重度排序
@@ -315,6 +319,7 @@ def _auto_rewrite(content, issues, novel_title, chapter_title, outline, user_dir
         chapter_title=chapter_title,
         outline=outline,
         user_directive=user_directive,
+        db=db,  # 不传会导致用户自定义 rewrite 模板被静默忽略
     )
 
     try:
@@ -375,6 +380,10 @@ def _save_review(version_id, report, critic_result):
         db.session.add(review)
         db.session.commit()
     except Exception:
+        # 持久化失败必须留痕：花钱跑完的评审静默丢失是严重事故
+        import logging
+        logging.getLogger(__name__).exception(
+            "unified_review: 保存评审结果失败 (version_id=%s)", version_id)
         db.session.rollback()
 
 

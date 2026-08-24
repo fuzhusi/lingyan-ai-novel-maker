@@ -81,7 +81,7 @@
                 <span class="ch-versions">{{ ch.versions|length }} 个版本</span>
             </a>
             <form method="POST" action="/novel/{{ novel.id }}/chapter/{{ ch.chapter_number }}/delete"
-                  onsubmit="return confirm('确定删除第 {{ ch.chapter_number }} 章「{{ ch.title or '无标题' }}」及其所有版本和评审数据？')"
+                  onsubmit='return confirm("确定删除第 {{ ch.chapter_number }} 章「" + {{ (ch.title or "无标题")|tojson }} + "」及其所有版本和评审数据？")'
                   style="position:absolute;top:0.5rem;right:0.5rem">
                 <button type="submit" class="btn-sm btn-danger" title="删除此章节">&times;</button>
             </form>

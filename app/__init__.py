@@ -1,4 +1,4 @@
-from flask import Flask, session
+from flask import Flask, session, request, jsonify
 from datetime import timedelta
 from app.config import AppConfig
 from app.models import db, init_db
@@ -69,5 +69,24 @@ def create_app():
     app.register_blueprint(style_bp)
     app.register_blueprint(skill_bp)
     app.register_blueprint(truth_bp)
+
+    # ---------------------------------------------------------------------------
+    # CSRF 轻量防护：拒绝浏览器标记为跨站的不安全请求。
+    # 现代浏览器对跨站 POST/PUT/PATCH/DELETE 均带 Sec-Fetch-Site: cross-site 头，
+    # 据此可在不改动任何模板的前提下阻断「外部网页静默表单打向本服务」的经典 CSRF
+    # （如自动提交 /novel/delete-all 清空数据）。无此头的旧客户端放行（fail-open），
+    # 配合"仅绑定 127.0.0.1"的默认部署形成纵深。
+    # ---------------------------------------------------------------------------
+    unsafe_methods = {"POST", "PUT", "PATCH", "DELETE"}
+    allowed_fetch_sites = {"same-origin", "same-site", "none"}
+
+    @app.before_request
+    def _reject_cross_site_writes():
+        if request.method not in unsafe_methods:
+            return None
+        site = request.headers.get("Sec-Fetch-Site", "").lower()
+        if site and site not in allowed_fetch_sites:
+            return jsonify({"error": "cross-site write request rejected"}), 403
+        return None
 
     return app

@@ -48,8 +48,11 @@ def create_foreshadowing(novel_id):
 
 @knowledge_bp.route("/foreshadowing/<int:fs_id>/edit", methods=["POST"])
 def edit_foreshadowing(novel_id, fs_id):
-    fs = Foreshadowing.query.get_or_404(fs_id)
-    for field in ["title", "description", "status", "notes"]:
+    # 归属校验：伏笔必须属于当前小说
+    fs = Foreshadowing.query.filter_by(id=fs_id, novel_id=novel_id).first_or_404()
+    # status 不在可编辑字段中：状态推进必须走 /advance 的状态机校验，
+    # 直接表单改状态会绕过转移合法性检查（如 resolved → open 回退）
+    for field in ["title", "description", "notes"]:
         val = request.form.get(field, "")
         if val:
             setattr(fs, field, val)
@@ -63,7 +66,8 @@ def edit_foreshadowing(novel_id, fs_id):
 
 @knowledge_bp.route("/foreshadowing/<int:fs_id>/delete", methods=["POST"])
 def delete_foreshadowing(novel_id, fs_id):
-    fs = Foreshadowing.query.get_or_404(fs_id)
+    # 归属校验：防止跨小说删除伏笔
+    fs = Foreshadowing.query.filter_by(id=fs_id, novel_id=novel_id).first_or_404()
     db.session.delete(fs)
     db.session.commit()
     return redirect(url_for("knowledge.foreshadowing_page", novel_id=novel_id))
@@ -108,8 +112,10 @@ def foreshadow_timeout_check(novel_id):
             Chapter.chapter_number.desc()).first()
         current_chapter = latest.chapter_number if latest else 0
 
+    # reclaimable 同样在等回收，超时检测必须包含（此前遗漏导致
+    # "已可回收但一直没人收"的伏笔永远不会出现在警告里）
     active = Foreshadowing.query.filter_by(novel_id=novel_id).filter(
-        Foreshadowing.status.in_(["open", "planned", "buried", "advancing"])
+        Foreshadowing.status.in_(["open", "planned", "buried", "advancing", "reclaimable"])
     ).all()
 
     warnings = []
@@ -143,7 +149,8 @@ def foreshadow_timeout_check(novel_id):
 @knowledge_bp.route("/api/foreshadowing/<int:fs_id>/advance", methods=["POST"])
 def advance_foreshadow(novel_id, fs_id):
     """Advance foreshadowing state: open→planned→buried→advancing→reclaimable→resolved."""
-    fs = Foreshadowing.query.get_or_404(fs_id)
+    # 归属校验：防止跨小说推进伏笔状态机
+    fs = Foreshadowing.query.filter_by(id=fs_id, novel_id=novel_id).first_or_404()
     data = request.get_json(silent=True) or {}
     new_status = data.get("status", "")
 

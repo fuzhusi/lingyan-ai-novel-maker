@@ -99,7 +99,7 @@
         <div class="outline-actions">
             <button class="btn-sm" onclick="document.getElementById('edit-on-{{ node.id }}').style.display='block'">编辑</button>
             <form method="POST" action="/novel/{{ novel.id }}/outline/{{ node.id }}/delete"
-                  onsubmit="return confirm('确定删除节点 ' + {{ node.title|tojson }} + ' 及其所有子节点？')" style="display:inline">
+                  onsubmit='return confirm("确定删除节点 " + {{ node.title|tojson }} + " 及其所有子节点？")' style="display:inline">
                 <button type="submit" class="btn-sm btn-danger">删除</button>
             </form>
         </div>

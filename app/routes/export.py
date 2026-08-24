@@ -1,8 +1,19 @@
 import io
-from flask import Blueprint, Response, send_file, request
+import re
+from html import escape
+from flask import Blueprint, Response, send_file, request, jsonify
 from app.models import db, Novel, Chapter, ChapterVersion
 
 export_bp = Blueprint("export", __name__, url_prefix="/novel/<int:novel_id>/export")
+
+# 区间筛选一次最多物化的章节数（防止 ?chapters=1-999999999 之类的内存放大）
+MAX_RANGE_SPAN = 10000
+
+
+def _safe_filename(title, ext):
+    """下载文件名清洗：去除路径/头注入相关字符，保证各端可用。"""
+    base = re.sub(r'[\\/:*?"<>|\r\n\t]', "_", (title or "novel").strip()) or "novel"
+    return f"{base}.{ext}"
 
 
 def _get_approved_content(chapter):
@@ -29,51 +40,62 @@ def _get_chapters(novel_id):
             if "-" in part:
                 try:
                     start, end = part.split("-", 1)
-                    for i in range(int(start), int(end) + 1):
-                        chapter_numbers.add(i)
+                    start_i, end_i = int(start), int(end)
                 except ValueError:
-                    pass
+                    continue
+                if end_i < start_i:
+                    start_i, end_i = end_i, start_i
+                if end_i - start_i > MAX_RANGE_SPAN:
+                    end_i = start_i + MAX_RANGE_SPAN
+                chapter_numbers.update(range(start_i, end_i + 1))
             else:
                 try:
                     chapter_numbers.add(int(part))
                 except ValueError:
                     pass
-        
+
         if chapter_numbers:
             return Chapter.query.filter(
                 Chapter.novel_id == novel_id,
                 Chapter.chapter_number.in_(chapter_numbers)
             ).order_by(Chapter.chapter_number).all()
-    
+
     return Chapter.query.filter_by(novel_id=novel_id).order_by(Chapter.chapter_number).all()
+
+
+def _chapter_bodies(chapters):
+    """[(chapter, content)]，过滤空内容；供各格式端点复用与空内容判断。"""
+    bodies = []
+    for ch in chapters:
+        content = _get_approved_content(ch)
+        if content:
+            bodies.append((ch, content))
+    return bodies
 
 
 @export_bp.route("/txt")
 def export_txt(novel_id):
     novel = Novel.query.get_or_404(novel_id)
-    chapters = _get_chapters(novel_id)
+    bodies = _chapter_bodies(_get_chapters(novel_id))
+    if not bodies:
+        return jsonify({"error": "没有可导出的章节内容"}), 400
 
     parts = [f"# {novel.title}\n"]
     if novel.synopsis:
         parts.append(f"{novel.synopsis}\n")
     parts.append("=" * 50 + "\n")
 
-    total_chars = 0
-    for ch in chapters:
-        content = _get_approved_content(ch)
-        if content:
-            parts.append(f"\n\n{'=' * 50}")
-            parts.append(f"第 {ch.chapter_number} 章 {ch.title or ''}")
-            parts.append(f"{'=' * 50}\n")
-            parts.append(content)
-            total_chars += len(content)
+    for ch, content in bodies:
+        parts.append(f"\n\n{'=' * 50}")
+        parts.append(f"第 {ch.chapter_number} 章 {ch.title or ''}")
+        parts.append(f"{'=' * 50}\n")
+        parts.append(content)
 
     text = "\n".join(parts)
     buf = io.BytesIO(text.encode("utf-8"))
     buf.seek(0)
-    filename = f"{novel.title}.txt"
     return send_file(buf, mimetype="text/plain; charset=utf-8",
-                     as_attachment=True, download_name=filename)
+                     as_attachment=True, download_name=_safe_filename(novel.title, "txt"))
 
 
 @export_bp.route("/docx")
@@ -86,7 +108,9 @@ def export_docx(novel_id):
         return "python-docx 未安装，请运行: pip install python-docx", 500
 
     novel = Novel.query.get_or_404(novel_id)
-    chapters = _get_chapters(novel_id)
+    bodies = _chapter_bodies(_get_chapters(novel_id))
+    if not bodies:
+        return jsonify({"error": "没有可导出的章节内容"}), 400
 
     doc = Document()
 
@@ -115,11 +139,7 @@ def export_docx(novel_id):
 
     doc.add_page_break()
 
-    for ch in chapters:
-        content = _get_approved_content(ch)
-        if not content:
-            continue
-
+    for ch, content in bodies:
         # Chapter title
         heading = doc.add_heading(level=1)
         heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -147,17 +167,18 @@ def export_docx(novel_id):
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
-    filename = f"{novel.title}.docx"
     return send_file(buf,
                      mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                     as_attachment=True, download_name=filename)
+                     as_attachment=True, download_name=_safe_filename(novel.title, "docx"))
 
 
 @export_bp.route("/md")
 def export_markdown(novel_id):
     """导出 Markdown 格式 (P2-2)。"""
     novel = Novel.query.get_or_404(novel_id)
-    chapters = _get_chapters(novel_id)
+    bodies = _chapter_bodies(_get_chapters(novel_id))
+    if not bodies:
+        return jsonify({"error": "没有可导出的章节内容"}), 400
 
     lines = [f"# {novel.title}", ""]
 
@@ -175,10 +196,7 @@ def export_markdown(novel_id):
     lines.append("---")
     lines.append("")
 
-    for ch in chapters:
-        content = _get_approved_content(ch)
-        if not content:
-            continue
+    for ch, content in bodies:
         lines.append(f"## 第 {ch.chapter_number} 章 {ch.title or ''}")
         lines.append("")
         lines.append(content)
@@ -189,22 +207,25 @@ def export_markdown(novel_id):
     text = "\n".join(lines)
     buf = io.BytesIO(text.encode("utf-8"))
     buf.seek(0)
-    filename = f"{novel.title}.md"
     return send_file(buf,
                      mimetype="text/markdown; charset=utf-8",
-                     as_attachment=True, download_name=filename)
+                     as_attachment=True, download_name=_safe_filename(novel.title, "md"))
 
 
 @export_bp.route("/html")
 def export_html(novel_id):
-    """导出 HTML 格式 (P2-2)。"""
+    """导出 HTML 格式 (P2-2)。所有插值经 HTML 转义，防止存储型 XSS。"""
     novel = Novel.query.get_or_404(novel_id)
-    chapters = _get_chapters(novel_id)
+    bodies = _chapter_bodies(_get_chapters(novel_id))
+    if not bodies:
+        return jsonify({"error": "没有可导出的章节内容"}), 400
 
+    e = escape
     parts = [
         "<!DOCTYPE html>",
         "<html lang='zh-CN'><head><meta charset='UTF-8'>",
-        f"<title>{novel.title}</title>",
+        f"<title>{e(novel.title)}</title>",
+        "<meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; style 'unsafe-inline'\">",
         "<style>",
         "body { font-family: 'Georgia', serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; line-height: 1.8; }",
         "h1 { text-align: center; border-bottom: 2px solid #333; padding-bottom: 1rem; }",
@@ -212,64 +233,61 @@ def export_html(novel_id):
         ".synopsis { background: #f5f5f5; padding: 1rem; border-left: 4px solid #333; margin: 1.5rem 0; }",
         ".meta { color: #666; font-size: 0.9em; }",
         "</style></head><body>",
-        f"<h1>{novel.title}</h1>",
+        f"<h1>{e(novel.title)}</h1>",
     ]
     if novel.synopsis:
-        parts.append(f"<div class='synopsis'>{novel.synopsis}</div>")
+        parts.append(f"<div class='synopsis'>{e(novel.synopsis)}</div>")
     if novel.genre:
-        parts.append(f"<p class='meta'>类型：{novel.genre}</p>")
+        parts.append(f"<p class='meta'>类型：{e(novel.genre)}</p>")
 
-    for ch in chapters:
-        content = _get_approved_content(ch)
-        if not content:
-            continue
-        parts.append(f"<h2>第 {ch.chapter_number} 章 {ch.title or ''}</h2>")
+    for ch, content in bodies:
+        parts.append(f"<h2>第 {ch.chapter_number} 章 {e(ch.title or '')}</h2>")
         for para in content.split("\n"):
             para = para.strip()
             if para:
-                parts.append(f"<p>{para}</p>")
+                parts.append(f"<p>{e(para)}</p>")
 
     parts.append("</body></html>")
     text = "\n".join(parts)
     buf = io.BytesIO(text.encode("utf-8"))
     buf.seek(0)
-    filename = f"{novel.title}.html"
     return send_file(buf,
                      mimetype="text/html; charset=utf-8",
-                     as_attachment=True, download_name=filename)
+                     as_attachment=True, download_name=_safe_filename(novel.title, "html"))
 
 
 @export_bp.route("/epub")
 def export_epub(novel_id):
-    """导出 EPUB 格式 (P2-2)。"""
+    """导出 EPUB 格式 (P2-2)。章节 XHTML 内容经 HTML 转义，防止注入。"""
     try:
         from ebooklib import epub
     except ImportError:
         return "ebooklib 未安装，请运行: pip install ebooklib", 500
 
     novel = Novel.query.get_or_404(novel_id)
-    chapters = _get_chapters(novel_id)
+    bodies = _chapter_bodies(_get_chapters(novel_id))
+    if not bodies:
+        return jsonify({"error": "没有可导出的章节内容"}), 400
 
+    e = escape
     book = epub.EpubBook()
     book.set_identifier(f"lingyan-{novel.id}")
     book.set_title(novel.title)
     book.set_language("zh")
     book.add_author("灵砚")
 
-    for ch in chapters:
-        content = _get_approved_content(ch)
-        if not content:
-            continue
-        # 转 HTML 段落
-        html_content = "<h2>" + (ch.title or f"第{ch.chapter_number}章") + "</h2>"
+    for idx, (ch, content) in enumerate(bodies, 1):
+        # 转 HTML 段落（全部转义；ebooklib 对 EpubHtml.content 原样写入不转义）
+        html_content = "<h2>" + e(ch.title or f"第{ch.chapter_number}章") + "</h2>"
         for para in content.split("\n"):
             para = para.strip()
             if para:
-                html_content += f"<p>{para}</p>"
+                html_content += f"<p>{e(para)}</p>"
 
         epub_chapter = epub.EpubHtml(
             title=f"第{ch.chapter_number}章 {ch.title or ''}",
-            file_name=f"chapter_{ch.chapter_number:03d}.xhtml",
+            # 用序号命名避免标题特殊字符/重名问题
+            file_name=f"chapter_{idx:03d}.xhtml",
             lang="zh",
         )
         epub_chapter.content = html_content
@@ -283,7 +301,6 @@ def export_epub(novel_id):
     buf = io.BytesIO()
     epub.write_epub(buf, book)
     buf.seek(0)
-    filename = f"{novel.title}.epub"
     return send_file(buf,
                      mimetype="application/epub+zip",
-                     as_attachment=True, download_name=filename)
+                     as_attachment=True, download_name=_safe_filename(novel.title, "epub"))

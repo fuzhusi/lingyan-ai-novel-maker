@@ -218,12 +218,18 @@ function onProviderTypeChange(sel) {
 function submitAddProvider(e) {
     e.preventDefault();
     const form = e.target;
+    const btn = form.querySelector('button[type="submit"]');
+    if (btn) btn.disabled = true;
     const fd = new FormData(form);
     fetch('/settings/llm/provider/add', {method:'POST', body:fd})
         .then(r => r.json())
         .then(data => {
             if (data.ok) { location.reload(); }
-            else { alert(data.error || '添加失败'); }
+            else { alert(data.error || '添加失败'); if (btn) btn.disabled = false; }
+        })
+        .catch(err => {
+            alert('添加失败: ' + err.message);
+            if (btn) btn.disabled = false;
         });
 }
 
@@ -252,11 +258,12 @@ function fetchModels(pid, btn) {
         .then(r => r.json())
         .then(data => {
             if (data.ok) {
-                // 重新加载模型列表
+                // 重新加载模型列表（后端为每个模型附带实际 enabled 勾选状态）
                 const list = document.querySelector(`.model-list[data-pid="${pid}"]`);
+                const enabledCount = (data.models || []).filter(m => m.enabled).length;
                 let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
                     <span style="font-size:0.8rem;color:var(--text-dim)">
-                        已选 0/${data.total} 个模型（新增 ${data.added} 个）
+                        已选 ${enabledCount}/${data.total} 个模型（新增 ${data.added} 个）
                     </span>
                     <div style="display:flex;gap:0.3rem">
                         <button class="btn btn-sm" style="font-size:0.7rem;padding:0.15rem 0.4rem" onclick="toggleAllModels(${pid}, true)">全选</button>
@@ -265,8 +272,8 @@ function fetchModels(pid, btn) {
                 </div>`;
                 html += '<div class="model-checkboxes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.3rem">';
                 for (const m of data.models) {
-                    html += `<label style="display:flex;align-items:center;gap:0.4rem;padding:0.3rem 0.5rem;border-radius:6px;cursor:pointer;font-size:0.82rem;background:var(--bg)" data-mid="${m.id}">
-                        <input type="checkbox" onchange="toggleModel(${m.id}, this.checked, this.parentElement)">
+                    html += `<label style="display:flex;align-items:center;gap:0.4rem;padding:0.3rem 0.5rem;border-radius:6px;cursor:pointer;font-size:0.82rem;background:${m.enabled ? 'var(--accent-subtle)' : 'var(--bg)'}" data-mid="${m.id}">
+                        <input type="checkbox" ${m.enabled ? 'checked' : ''} onchange="toggleModel(${m.id}, this.checked, this.parentElement)">
                         <span>${escapeHtml(m.display_name || m.model_id)}</span>
                     </label>`;
                 }

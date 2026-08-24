@@ -56,7 +56,8 @@ def save_version(story_id):
 @short_story_bp.route("/<int:story_id>/version/<int:version_id>")
 def get_version(story_id, version_id):
     """Get a specific version's content."""
-    version = ShortStoryVersion.query.get_or_404(version_id)
+    # 归属校验：版本必须属于 URL 指定的短篇，防止跨实体读写
+    version = ShortStoryVersion.query.filter_by(id=version_id, story_id=story_id).first_or_404()
     return jsonify({
         "id": version.id,
         "versionNumber": version.version_number,
@@ -70,7 +71,7 @@ def get_version(story_id, version_id):
 def load_version(story_id, version_id):
     """Load a version as the current content."""
     story = ShortStory.query.get_or_404(story_id)
-    version = ShortStoryVersion.query.get_or_404(version_id)
+    version = ShortStoryVersion.query.filter_by(id=version_id, story_id=story_id).first_or_404()
     story.content = version.content
     db.session.commit()
     return jsonify({"ok": True, "content": version.content})
@@ -79,7 +80,7 @@ def load_version(story_id, version_id):
 @short_story_bp.route("/<int:story_id>/version/<int:version_id>/delete", methods=["POST"])
 def delete_version(story_id, version_id):
     """Delete a version."""
-    version = ShortStoryVersion.query.get_or_404(version_id)
+    version = ShortStoryVersion.query.filter_by(id=version_id, story_id=story_id).first_or_404()
     db.session.delete(version)
     db.session.commit()
     return jsonify({"ok": True})
@@ -88,7 +89,7 @@ def delete_version(story_id, version_id):
 @short_story_bp.route("/<int:story_id>/approve/<int:version_id>", methods=["POST"])
 def approve_version(story_id, version_id):
     """Approve a version."""
-    version = ShortStoryVersion.query.get_or_404(version_id)
+    version = ShortStoryVersion.query.filter_by(id=version_id, story_id=story_id).first_or_404()
     version.approved = True
     db.session.commit()
     return jsonify({"ok": True})

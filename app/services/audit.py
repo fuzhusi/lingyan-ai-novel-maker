@@ -18,6 +18,21 @@ import json
 import concurrent.futures
 from app.services.llm import call_llm_sync, stream_llm_tokens, LLMError
 
+
+def _safe_score(value, default=5):
+    """把 AI 返回的分数强制转为 float。
+
+    模型可能输出 "8"（字符串）、null、true 等非法值——
+    直接参与加权聚合会 TypeError 并炸掉整条审计链路。
+    非法值回退中性分 default。
+    """
+    if isinstance(value, bool) or value is None:
+        return default
+    try:
+        return max(0.0, min(10.0, float(value)))
+    except (TypeError, ValueError):
+        return default
+
 # ---------------------------------------------------------------------------
 # Dimension definitions
 # ---------------------------------------------------------------------------
@@ -360,9 +375,13 @@ def run_full_audit(chapter_content, outline="", chapter_number=0,
             # Handle bool/None/list responses from AI (graceful degradation)
             if not isinstance(dim_result, dict):
                 dim_result = {}
-            score = dim_result.get("score", 5)
+            score = _safe_score(dim_result.get("score", 5))
             issues = dim_result.get("issues", [])
             suggestions = dim_result.get("suggestions", [])
+            if not isinstance(issues, list):
+                issues = []
+            if not isinstance(suggestions, list):
+                suggestions = []
 
             all_dimensions[dim_id] = {
                 "score": score,

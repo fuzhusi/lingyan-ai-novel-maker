@@ -1,5 +1,9 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify
-from app.models import db, Novel, Chapter, ChapterVersion, CriticReview, Character, WorldSetting, OutlineNode, Foreshadowing, ChapterSummary
+from app.models import (
+    db, Novel, Chapter, ChapterVersion, CriticReview, Character, WorldSetting,
+    OutlineNode, Foreshadowing, ChapterSummary,
+    ChapterMemory, CharacterRelation, StoryState, StoryStateSnapshot,
+)
 
 novel_bp = Blueprint("novel", __name__)
 
@@ -90,11 +94,18 @@ def delete_novel(novel_id):
     StoryState.query.filter_by(novel_id=novel_id).delete()
     db.session.delete(novel)
     db.session.commit()
+
+    # 同步清理 FTS 记忆索引（SQLite 无 FK，残留会被跨小说检索命中）
+    from app.services.vector_memory import delete_novel_memory
+    delete_novel_memory(novel_id)
     return redirect(url_for("novel.index"))
 
 
 @novel_bp.route("/novel/delete-all", methods=["POST"])
 def delete_all_novels():
+    # 破坏性操作：要求显式确认参数，防止误触/纯 CSRF 型请求
+    if request.form.get("confirm", "").strip().upper() != "YES":
+        return jsonify({"error": "缺少 confirm=YES 确认参数，已拒绝删除全部小说"}), 400
     novels = Novel.query.all()
     for novel in novels:
         for ch in novel.chapters:
@@ -112,5 +123,8 @@ def delete_all_novels():
         StoryStateSnapshot.query.filter_by(novel_id=novel.id).delete()
         StoryState.query.filter_by(novel_id=novel.id).delete()
         db.session.delete(novel)
+        # 同步清理该小说的 FTS 记忆索引
+        from app.services.vector_memory import delete_novel_memory
+        delete_novel_memory(novel.id)
     db.session.commit()
     return redirect(url_for("novel.index"))

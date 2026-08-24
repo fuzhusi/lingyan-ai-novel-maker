@@ -179,7 +179,19 @@ def clear_agent_settings():
 
 @settings_bp.route("/api/config")
 def api_config():
-    return jsonify(get_model_config())
+    """返回当前生效配置。api_key 做掩码处理，绝不返回明文；
+    同时给出厂商池状态供前端判断是否可生成。"""
+    cfg = get_model_config()
+    masked = dict(cfg)
+    key = cfg.get("api_key") or ""
+    if len(key) > 8:
+        masked["api_key"] = key[:6] + "****"
+    elif key:
+        masked["api_key"] = key[:2] + "****"
+    else:
+        masked["api_key"] = ""
+    masked["has_provider_config"] = get_auto_default_model() is not None
+    return jsonify(masked)
 
 
 @settings_bp.route("/api/novel-model-override", methods=["POST"])

@@ -297,8 +297,9 @@ def _rewrite_by_nodes(story, nodes, done_nodes, critic_feedback, cfg, app, story
         for idx, node in enumerate(nodes):
             if node.get("id") not in done_ids:
                 continue  # 只重写已完成节点，未完成/无内容节点跳过
-            # 流式标记，前端据此更新进度
-            yield f"\n\n===NODE:{node['id']}:{node.get('title', '')}===\n\n"
+            # 流式标记（清洗标题，防止 = / 换行破坏前端解析）
+            from app.routes.short_story.generate import _node_marker
+            yield _node_marker(node)
 
             front = new_nodes[:idx]
             prev_text = "\n\n".join(
@@ -362,7 +363,10 @@ def _rewrite_by_nodes(story, nodes, done_nodes, critic_feedback, cfg, app, story
             if s:
                 s.content = full
                 s.outline_nodes = json.dumps(new_nodes, ensure_ascii=False)
-                s.status = "done"
+                # 存在 pending 缺口时保持可续写状态：
+                # 此前无条件置 done，缺一节的残文会被当作完整作品入库/导出
+                all_done = all(n.get("status") == "done" for n in new_nodes)
+                s.status = "done" if all_done else "concept_ready"
                 _save_rewrite_version(story_id, full)
                 db.session.commit()
 

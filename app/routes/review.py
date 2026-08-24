@@ -43,7 +43,35 @@ def _sse_event(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _extract_json_dict(text):
+    """从 LLM 输出中提取 JSON 对象：剥 ```json 围栏 → json.loads → 校验为 dict。
+
+    全库统一的解析入口（此前 4 处各自实现且口径不一）。
+    Returns:
+        dict 或 None（非对象/解析失败）
+    """
+    if not text:
+        return None
+    t = text.strip()
+    if t.startswith("```"):
+        lines = t.split("\n")
+        inner = [l for l in lines[1:] if not l.strip().startswith("```")]
+        t = "\n".join(inner)
+    try:
+        data = json.loads(t)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def _stream_chat(messages, cfg):
+    """流式调用 LLM。
+
+    Yields:
+        ("token", str)  —— 增量正文
+        ("done", full)  —— 正常结束，携带全文
+        ("error", msg)  —— 出错（结构化信号；绝不把 SSE 错误串当 token 混入正文）
+    """
     collected = []
     try:
         for token in stream_llm_tokens(
@@ -53,12 +81,12 @@ def _stream_chat(messages, cfg):
             temperature=cfg.get("temperature", 0.5), max_tokens=cfg.get("max_tokens", 4096),
         ):
             collected.append(token)
-            yield None, token
-        yield "".join(collected), None
+            yield "token", token
+        yield "done", "".join(collected)
     except LLMError as e:
-        yield None, _sse_event({"error": str(e)})
+        yield "error", str(e)
     except Exception as e:
-        yield None, _sse_event({"error": str(e)})
+        yield "error", str(e)
 
 
 @review_bp.route("/review-stream", methods=["POST"])
@@ -94,15 +122,15 @@ def review_stream():
     cfg = get_effective_config(novel, agent_type="critic")
 
     def generate():
-        full_text, last_chunk = None, None
-        for full_text, token in _stream_chat(messages, cfg):
-            if token:
-                yield _sse_event({"token": token})
-            elif full_text is not None:
-                yield _sse_event({"done": True, "full_text": full_text})
+        for kind, payload in _stream_chat(messages, cfg):
+            if kind == "token":
+                yield _sse_event({"token": payload})
+            elif kind == "done":
+                yield _sse_event({"done": True, "full_text": payload})
                 return
-        if full_text is None:
-            yield _sse_event({"error": "no response", "full_text": ""})
+            elif kind == "error":
+                yield _sse_event({"error": payload})
+                return
 
     return Response(generate(), mimetype="text/event-stream")
 
@@ -113,18 +141,17 @@ def save_review():
     full_response = request.form.get("full_response", "")
     version = ChapterVersion.query.get_or_404(version_id)
 
-    overall_score = None
-    dimensions = []
-    annotations = []
-    overall_comment = ""
-
-    try:
-        data = json.loads(full_response)
+    data = _extract_json_dict(full_response)
+    if data is not None:
         overall_score = data.get("overall_score")
         overall_comment = data.get("overall_comment", "")
         dimensions = data.get("dimensions", [])
         annotations = data.get("annotations", [])
-    except json.JSONDecodeError:
+    else:
+        # 解析失败降级为纯文本评论（含围栏原文），不再 500
+        overall_score = None
+        dimensions = []
+        annotations = []
         overall_comment = full_response
 
     review = CriticReview(
@@ -226,7 +253,7 @@ def approve_version():
             provider_type=memory_cfg.get("provider_type", "deepseek"),
             temperature=memory_cfg.get("temperature", 0.5), max_tokens=memory_cfg.get("max_tokens", 1024),
         )
-        memory_data = json.loads(memory_text) if memory_text else {}
+        memory_data = _extract_json_dict(memory_text) or {}
     except LLMError:
         memory_data = {}
     except Exception:
@@ -235,7 +262,8 @@ def approve_version():
     if memory_data:
         cm = ChapterMemory.query.filter_by(chapter_id=chapter.id).first()
         if cm:
-            cm.summary = memory_data.get("summary", summary_text)
+            # 防空串覆盖：结构化记忆缺 summary 键时保留既有摘要
+            cm.summary = memory_data.get("summary") or cm.summary or summary_text
             cm.key_events_json = json.dumps(memory_data.get("key_events", []), ensure_ascii=False)
             cm.character_changes_json = json.dumps(memory_data.get("character_changes", {}), ensure_ascii=False)
             cm.foreshadow_events_json = json.dumps(memory_data.get("foreshadow_events", []), ensure_ascii=False)
@@ -318,15 +346,15 @@ def rewrite_stream():
     cfg = get_effective_config(chapter.novel, agent_type="rewrite")
 
     def generate():
-        full_text, last_chunk = None, None
-        for full_text, token in _stream_chat(messages, cfg):
-            if token:
-                yield _sse_event({"token": token})
-            elif full_text is not None:
-                yield _sse_event({"done": True, "full_text": full_text})
+        for kind, payload in _stream_chat(messages, cfg):
+            if kind == "token":
+                yield _sse_event({"token": payload})
+            elif kind == "done":
+                yield _sse_event({"done": True, "full_text": payload})
                 return
-        if full_text is None:
-            yield _sse_event({"error": "no response", "full_text": ""})
+            elif kind == "error":
+                yield _sse_event({"error": payload})
+                return
 
     return Response(generate(), mimetype="text/event-stream")
 
@@ -364,7 +392,12 @@ def unified_review_api():
 
 @review_bp.route("/unified-review-stream", methods=["POST"])
 def unified_review_stream_api():
-    """统一评审流式版本（SSE）。"""
+    """统一评审流式版本（SSE）。
+
+    注意：SSE 生成器在请求上下文销毁后才被迭代，内部有 DB 访问，
+    必须显式推回 app context（否则 Flask-SQLAlchemy 抛
+    RuntimeError: Working outside of application context）。
+    """
     from app.services.unified_review import unified_review_stream
 
     novel_id = request.form.get("novel_id", type=int)
@@ -372,8 +405,11 @@ def unified_review_stream_api():
     version_id = request.form.get("version_id", type=int)
     include_rewrite = request.form.get("include_rewrite", "0") == "1"
 
+    app_obj = current_app._get_current_object()
+
     def generate():
-        for sse_data in unified_review_stream(novel_id, chapter_number, version_id, include_rewrite):
-            yield sse_data
+        with app_obj.app_context():
+            for sse_data in unified_review_stream(novel_id, chapter_number, version_id, include_rewrite):
+                yield sse_data
 
     return Response(generate(), mimetype="text/event-stream")

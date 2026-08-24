@@ -84,7 +84,7 @@
                 <div style="display:flex;gap:0.3rem;flex-shrink:0;margin-left:1rem">
                     <button class="btn-sm" onclick="document.getElementById('edit-form-{{ c.id }}').style.display='block'">编辑</button>
                     <form method="POST" action="/novel/{{ novel.id }}/characters/{{ c.id }}/delete"
-                          onsubmit="return confirm('确定删除人物 ' + {{ c.name|tojson }} + '？')">
+                          onsubmit='return confirm("确定删除人物 " + {{ c.name|tojson }} + "？")'>
                         <button type="submit" class="btn-sm btn-danger">删除</button>
                     </form>
                 </div>

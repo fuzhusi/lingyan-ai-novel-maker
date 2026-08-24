@@ -127,6 +127,10 @@ document.getElementById('btn-load-samples').addEventListener('click', function()
                 this.style.background = 'var(--success, #4CAF50)';
                 localStorage.setItem('onboarding_dismissed', '1');
                 setTimeout(() => window.location.href = '/novel/', 1200);
+            } else {
+                this.textContent = '加载失败，重试';
+                this.disabled = false;
+                alert(data.error || '加载失败');
             }
         })
         .catch(e => {

@@ -63,6 +63,13 @@ def create_relation(novel_id):
     if char_a_id == char_b_id:
         return jsonify({"error": "Cannot create relation with self"}), 400
 
+    # 双向校验：两个角色都必须存在且属于本小说。
+    # 此前不校验，可把 A 书角色与 B 书角色连成关系，污染双方上下文注入
+    char_a = Character.query.filter_by(id=char_a_id, novel_id=novel_id).first()
+    char_b = Character.query.filter_by(id=char_b_id, novel_id=novel_id).first()
+    if not char_a or not char_b:
+        return jsonify({"error": "角色不存在或不属于该小说"}), 400
+
     # Check for existing relation
     existing = CharacterRelation.query.filter(
         ((CharacterRelation.character_a_id == char_a_id) & (CharacterRelation.character_b_id == char_b_id)) |
@@ -114,7 +121,14 @@ def update_relation(relation_id):
 
     for dim in ["trust", "affection", "respect", "fear", "dependency"]:
         if dim in data:
-            val = max(0, min(100, int(data[dim])))
+            try:
+                val = max(0, min(100, int(data[dim])))
+            except (TypeError, ValueError):
+                # AI 生成的关系事件可能传浮点串/None，直接 int() 会 500
+                try:
+                    val = max(0, min(100, int(float(data[dim]))))
+                except (TypeError, ValueError):
+                    return jsonify({"error": f"{dim} 必须是数字"}), 400
             setattr(r, dim, val)
 
     if "startChapter" in data:

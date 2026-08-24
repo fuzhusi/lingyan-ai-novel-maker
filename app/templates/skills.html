@@ -147,19 +147,19 @@
                     {% if skill.active %}border-color:var(--accent-dim); box-shadow:0 0 12px var(--accent-glow);{% endif %}">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:0.6rem;">
                 <div style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; flex:1;"
-                     onclick="toggleSkill('{{ skill.key }}', this.closest('.skill-card'))">
+                     onclick='toggleSkill({{ skill.key|tojson }}, this.closest(".skill-card"))'>
                     <span style="font-size:1.1rem;">✦</span>
                     <strong style="color:var(--text-bright); font-size:0.95rem;">{{ skill.name }}</strong>
                 </div>
                 <div style="display:flex; gap:0.4rem; align-items:center;">
                     <div class="skill-toggle" style="width:36px; height:20px; border-radius:10px; position:relative; flex-shrink:0; cursor:pointer;
                          background:{% if skill.active %}var(--accent){% else %}var(--border){% endif %}; transition:background 0.2s;"
-                         onclick="toggleSkill('{{ skill.key }}', this.closest('.skill-card'))">
+                         onclick='toggleSkill({{ skill.key|tojson }}, this.closest(".skill-card"))'>
                         <div style="width:16px; height:16px; border-radius:50%; background:#f0ebe0; position:absolute; top:2px;
                              left:{% if skill.active %}18px{% else %}2px{% endif %}; transition:left 0.2s; box-shadow:var(--shadow-sm);"></div>
                     </div>
                     <button class="btn btn-danger btn-sm" style="padding:0.25rem 0.5rem; font-size:0.75rem;"
-                            onclick="event.stopPropagation(); deleteCustom('{{ skill.key }}', '{{ skill.name }}')">删</button>
+                            onclick='event.stopPropagation(); deleteCustom({{ skill.key|tojson }}, {{ skill.name|tojson }})'>删</button>
                 </div>
             </div>
             <p style="color:var(--text-dim); font-size:0.82rem; line-height:1.6; margin:0;">{{ skill.description }}</p>

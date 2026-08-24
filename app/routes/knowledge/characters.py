@@ -215,7 +215,15 @@ def edit_character(novel_id, char_id):
 
 @knowledge_bp.route("/characters/<int:char_id>/delete", methods=["POST"])
 def delete_character(novel_id, char_id):
-    char = Character.query.get_or_404(char_id)
+    # 归属校验：角色必须属于当前小说
+    char = Character.query.filter_by(id=char_id, novel_id=novel_id).first_or_404()
+    # 级联删除涉及该角色的关系（SQLite 无 FK 级联，残留关系会指向已删角色，
+    # 关系图/上下文注入时渲染成"幽灵角色"）
+    from app.models import CharacterRelation
+    CharacterRelation.query.filter(
+        (CharacterRelation.character_a_id == char.id) |
+        (CharacterRelation.character_b_id == char.id)
+    ).delete(synchronize_session=False)
     db.session.delete(char)
     db.session.commit()
     return redirect(url_for("knowledge.characters_page", novel_id=novel_id))

@@ -1,6 +1,6 @@
 # 灵砚 (LingYan) 文档索引
 
-> 最后更新：2026-08-20
+> 最后更新：2026-08-24
 
 ## 文档总览
 
@@ -11,6 +11,8 @@
 | [技术设计文档](technical-design.md) | `docs/technical-design.md` | 完整技术设计 — 功能模块、Agent 架构、质量控制系统、记忆系统、数据库 DDL、API 接口、开发路线 | ✅ 维护中 |
 | [实现状态与路线图](roadmap.md) | `docs/roadmap.md` | 各版本实现状态 (V1.0→V3.0 已完成)、项目指标、V4.0 未来规划 | ✅ 维护中 |
 | [MCP & CLI 使用指南](mcp-cli-guide.md) | `docs/mcp-cli-guide.md` | 26 个 MCP 工具、18 个 CLI 命令组、自动化脚本示例 | ✅ 维护中 |
+| [代码审查报告](code-review.md) | `docs/code-review.md` | 全面审查 — 120+ 发现（P0/P1/工程化），含复现证据 | 📋 归档 (2026-08) |
+| [修复报告](fix-report.md) | `docs/fix-report.md` | 审查问题的完整修复记录 — 47 文件、四批路线图、验证结果 | ✅ 最新 (2026-08) |
 | [开源调研报告](open-source-survey.md) | `docs/open-source-survey.md` | 45 个开源项目调研、竞品对比、技术趋势、借鉴实现情况 | 📋 归档 (2026-06) |
 | [产品整改计划](improvement-plan.md) | `docs/improvement-plan.md` | V3.0 整改计划 (P0-P3)、时间线、验收标准 — 大部分已完成 | 📋 归档 (2026-07) |
 
@@ -26,6 +28,7 @@
 
 1. [实现状态与路线图](roadmap.md) — 各版本功能完成情况
 2. [产品整改计划](improvement-plan.md) — 历史整改任务及验收标准
+3. [代码审查报告](code-review.md) + [修复报告](fix-report.md) — 2026-08 质量专项的发现与修复
 
 ### 想使用 MCP / CLI
 
