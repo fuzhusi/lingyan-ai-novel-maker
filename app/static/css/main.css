@@ -1201,6 +1201,15 @@ pre.t-content {
     pointer-events: none;
 }
 
+/* WebGL 流光画布 */
+#inkflow {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
 .ink-drop {
     position: absolute;
     border-radius: 50%;

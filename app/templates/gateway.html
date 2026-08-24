@@ -3,8 +3,9 @@
 
 {% block content %}
 <div class="gateway-scene">
-    <!-- Atmospheric background -->
+    <!-- Atmospheric background：WebGL 流光在上，CSS 光斑作为回退垫底 -->
     <div class="gateway-bg">
+        <canvas id="inkflow" aria-hidden="true"></canvas>
         <div class="ink-drop ink-drop-1"></div>
         <div class="ink-drop ink-drop-2"></div>
         <div class="ink-drop ink-drop-3"></div>
@@ -104,6 +105,10 @@
     </div>
 </div>
 
+<script type="importmap">
+{ "imports": { "three": "/static/vendor/three.module.min.js" } }
+</script>
+<script type="module" src="/static/js/inkflow.js"></script>
 <script>
 // 检查是否已显示过引导卡片
 if (localStorage.getItem('onboarding_dismissed') === '1') {
