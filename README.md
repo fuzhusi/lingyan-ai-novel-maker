@@ -43,16 +43,17 @@ Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI /
 # 1. 安装依赖
 uv sync --extra export        # export 含 DOCX/EPUB 导出所需库
 
-# 2. 配置 API Key
-cp .env.example .env          # 填入你的 DEEPSEEK_API_KEY
-
-# 3. 启动
+# 2. 启动
 uv run python run.py          # 打开 http://127.0.0.1:5000（免登录）
+
+# 3. 配置厂商
+#    进入「设置 → 模型配置」添加厂商并勾选模型，即配即用；
+#    配置保存在数据库中，无需任何配置文件
 ```
 
 首次进入点击「一键加载示例数据」即可体验完整流程。
 
-> 也可以不用 .env：启动后到「设置 → 模型配置」页面添加厂商并勾选模型，即配即用。
+> **可选**：想跳过页面配置、直接用单个 DeepSeek key 快速体验的话，`cp .env.example .env` 并填入 key。`.env` 只是最低优先级的兜底配置——应用在没有它时完全正常运行，所有模型配置以「设置」页面的厂商配置为准。
 
 ---
 
@@ -60,12 +61,11 @@ uv run python run.py          # 打开 http://127.0.0.1:5000（免登录）
 
 | 层级 | 方式 | 说明 |
 |------|------|------|
-| 厂商配置 | `/settings/llm` 页面或 `cli.py llm provider-add --preset deepseek` | 内置 11 家预设，填 key 即拉取模型 |
+| 厂商配置 | `/settings/llm` 页面或 `cli.py llm provider-add --preset deepseek` | 内置 11 家预设，填 key 即拉取模型；**推荐方式，存数据库** |
 | Per-Agent | `/settings/` 页面或 `cli.py llm agent-set` | 16 种 Agent 各自指定厂商/模型/温度/Token |
 | 自动默认 | 无需配置 | 未显式配置的 Agent 自动匹配已勾选模型（快速类偏好 flash/lite，深度类偏好 pro/max）|
 | 去 AI 化开关 | Setting 键 `deai_auto = "0"` 关闭 | 默认开启；仅对 AI 来源内容生效 |
-
-环境变量见 [.env.example](.env.example)（含 `LINGYAN_DEBUG` / `LINGYAN_INSECURE_SSL` / `MAX_UPLOAD_MB` 说明）。
+| 环境变量兜底 | `.env`（可选） | 仅快速体验用；另有 `LINGYAN_DEBUG` / `LINGYAN_INSECURE_SSL` / `MAX_UPLOAD_MB` / `DATABASE_PATH` 运行参数 |
 
 ---
 
@@ -109,6 +109,10 @@ uv run pytest            # tests/ 目录，独立临时数据库，不碰开发�
 
 ---
 
-## License
+## 📄 开源协议
 
-MIT
+本项目采用 **[CC BY-NC-SA 4.0](LICENSE)**（署名—非商业性使用—相同方式共享 4.0 国际版）协议开源：
+
+- ✅ **允许**：个人学习、研究、修改与分享（须署名，衍生作品以相同协议开源）
+- ❌ **禁止商用**：不得将本项目或其衍生作品用于任何商业目的（出售、付费服务、商业产品集成等），除非获得作者单独授权
+- 商业合作请通过 GitHub Issues 联系作者

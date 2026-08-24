@@ -3,7 +3,7 @@ name = "lingyan"
 version = "3.0.0"
 description = "灵砚 (LingYan) — AI 小说创作系统，支持长篇和短篇创作，多 Agent 协作，17 维度质量审计"
 # readme = "README.md"
-license = {text = "MIT"}
+license = {text = "CC-BY-NC-SA-4.0"}
 requires-python = ">=3.14"
 dependencies = [
     "flask>=3.1",
