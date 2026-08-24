@@ -490,6 +490,7 @@
                         errorP.style.color = 'var(--danger)';
                         errorP.textContent = '失败: ' + err.message;
                         targetEl.appendChild(errorP);
+                        if (opts.onError) opts.onError(err);
                     }
                 });
             }
@@ -504,6 +505,7 @@
             errorP.style.color = 'var(--danger)';
             errorP.textContent = '失败: ' + err.message;
             targetEl.appendChild(errorP);
+            if (opts.onError) opts.onError(err);
         });
 
         return controller;
@@ -1041,16 +1043,20 @@
             storyActions.innerHTML = `
                 <button id="btn-pause" class="btn-secondary">暂停生成</button>
             `;
+            // 生成中：操作栏悬浮固定，内容再长也够得着
+            storyActions.classList.add('generating');
             document.getElementById('btn-pause').addEventListener('click', function() {
                 if (genController) genController.abort();
             });
 
+            const settleBar = () => storyActions.classList.remove('generating');
             const body = reset ? 'reset=1' : '';
 
             genController = streamToElement(
                 `/short/${storyId}/write-from-concept`, body, contentStream,
                 function(fullText) {
                     genController = null;
+                    settleBar();
                     pausedText = '';
                     contentDisplay.innerText = fullText;
                     contentDisplay.style.display = 'block';
@@ -1077,6 +1083,7 @@
                     },
                     onAbort: function(text) {
                         genController = null;
+                        settleBar();
                         // 截断到最后一个完整节点：丢弃当前未完成节点的部分文本，
                         // 恢复后该节点会从头完整重新生成
                         pausedText = (typeof lastBoundary === 'number' && lastBoundary > 0)
@@ -1093,7 +1100,8 @@
                             triggerWrite(false);
                         });
                         document.getElementById('btn-write').addEventListener('click', resetAndRewrite);
-                    }
+                    },
+                    onError: function() { settleBar(); }
                 }
             );
         }
@@ -1641,6 +1649,20 @@
     gap: 0.5rem;
     flex-wrap: wrap;
     margin-bottom: 1.5rem;
+}
+/* 生成中：操作栏悬浮固定在视口底部，内容再长也够得着暂停 */
+#story-actions.generating {
+    position: sticky;
+    bottom: 12px;
+    z-index: 40;
+    background: rgba(26, 35, 30, 0.92);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    padding: 0.6rem 1rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(237, 232, 219, 0.05);
 }
 .section-label {
     font-size: 0.95rem;
