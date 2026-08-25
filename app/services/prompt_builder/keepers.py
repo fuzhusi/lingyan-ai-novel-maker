@@ -121,6 +121,8 @@ def build_foreshadow_keeper_prompt(chapter_content="", foreshadowing_items=None,
 def build_editor_prompt(chapter_content="", check_results=None, novel_title="",
                         chapter_title="", outline="", db=None):
     """Editor — final polish based on all keeper check results."""
+    from app.services.prompt_builder.context import get_skill_prompt
+
     system_prompt = _load_system_prompt(db, "editor", (
         "你是一位资深小说编辑。根据各项检查结果，对章节进行最终润色。"
         "你的任务是：\n"
@@ -131,7 +133,7 @@ def build_editor_prompt(chapter_content="", check_results=None, novel_title="",
         "只输出修改后的完整章节正文，不要输出其他内容。"
     ))
 
-    # 注入去AI化约束（最高优先级）
+    # 注入去AI化约束（最高优先级）+ 润色向技能（笔法指纹 + 质检模块）
     full_system = DEFAULT_WRITER_CONSTRAINTS + """
 
 【编辑润色特别注意】
@@ -141,7 +143,11 @@ def build_editor_prompt(chapter_content="", check_results=None, novel_title="",
 - 保留对话中的语气词、不完整句、打断重叠——这些是人味
 - 保留段落的不均匀节奏——这是有意的风格选择
 - 如果原文已经很好，不要改动，直接输出原文
-""" + "\n\n" + system_prompt
+"""
+    skill_prompt = get_skill_prompt("polish")
+    if skill_prompt:
+        full_system += "\n\n" + skill_prompt
+    full_system += "\n\n" + system_prompt
 
     blocks = []
     if novel_title:

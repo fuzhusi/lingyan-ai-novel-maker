@@ -440,8 +440,13 @@ def _load_protocol_pack(pack_name, task_type="write"):
 def build_skill_prompt(task_type="write"):
     """Build the combined skill prompt from active skills.
 
-    task_type: write / diagnose / polish / full —— 决定文件型协议加载哪些模块。
-    普通 Writer 调用用 write；质检/诊断调用用 diagnose；润色用 polish。
+    task_type: write / diagnose / polish / outline
+      - write    → 协议包加载 protocol + presets + fingerprints（写作三模块）
+      - diagnose → 协议包仅 evaluation（24分评分门 + 失败模式诊断）
+      - polish   → 协议包 fingerprints + evaluation（润色走笔法指纹 + 质检）
+      - outline  → 跳过协议包（页面级笔法对大纲是噪音），只注入静态技法
+    普通章节生成用 write；按评审改写用 write；Editor 润色用 polish；
+    大纲生成用 outline。
     带协议包字段的技巧优先加载完整文件协议，回退到静态浓缩 prompt。
 
     同一协议包（如三个江南技巧都指向 jiangnan）只整包加载一次，避免重复注入
@@ -449,6 +454,7 @@ def build_skill_prompt(task_type="write"):
     """
     active = get_active_skills()
     all_skills = get_all_skills()
+    skip_packs = (task_type == "outline")
 
     parts = []
     # 先处理文件型协议包：同包只加载一次
@@ -461,6 +467,8 @@ def build_skill_prompt(task_type="write"):
             continue
         pack = skill.get("protocol_pack")
         if pack:
+            if skip_packs:
+                continue
             loaded_packs.setdefault(pack, [])
             pack_skills_order.setdefault(pack, [])
             pack_skills_order[pack].append(skill)

@@ -1,10 +1,28 @@
 """提示词构建工具函数：模板加载、上下文组装。"""
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _section(title, content):
     if not content:
         return ""
     return f"【{title}】\n{content}"
+
+
+def get_skill_prompt(task_type="write"):
+    """获取活跃技能提示词（供所有 prompt builder 共用）。
+
+    失败时记录警告并返回空串——技能注入永远不能阻断生成，
+    但静默吞错会让"生成没用技能"这类问题无从排查。
+    """
+    try:
+        from app.services.skill_system import build_skill_prompt
+        return build_skill_prompt(task_type=task_type)
+    except Exception:
+        logger.warning("build_skill_prompt(%s) failed, skills skipped", task_type,
+                       exc_info=True)
+        return ""
 
 
 def _load_system_prompt(db, template_type, fallback):

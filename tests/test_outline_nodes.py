@@ -118,7 +118,11 @@ class TestFormatConcept:
         # 往返：格式化文本能被 parse_outline_nodes 重新解析（编辑大纲后重解析用）
         roundtrip = parse_outline_nodes(fmt, 10000)
         assert len(roundtrip) == 2
-        assert roundtrip[0]["title"] == "节点一 —— 描述一"
+        # 「标题 —— 描述」两段式：标题与描述分别归位（描述不再丢失）
+        assert roundtrip[0]["title"] == "节点一"
+        assert roundtrip[0]["summary"] == "描述一"
+        assert roundtrip[1]["title"] == "节点二"
+        assert roundtrip[1]["summary"] == "描述二"
 
 
 class TestLoadOutlineNodes:

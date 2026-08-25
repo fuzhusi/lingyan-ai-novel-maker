@@ -145,7 +145,7 @@ app/
 - **Per-Agent 配置：** 16 种 Agent 可在 `/settings/` 显式指定厂商模型（`llm_model_{agent}`，格式 `provider_id:model_id`）及温度/Token
 - **Per-Novel 配置：** 通过 `Novel.model_override` (JSON) 覆盖
 - **优先级：** `Agent 指定厂商模型 > Agent 参数 > 小说覆盖 (model_override) > 自动默认（厂商勾选模型） > Setting 全局键（遗留） > .env`
-- **回退保护：** 厂商被禁用/删除时 Agent 指定的模型自动回退默认；模型勾选(enabled)仅决定参与自动默认池，不拦截显式指定；存在自动默认时忽略裸 `model_name_{agent}`（避免模型名与 key 错配 401）
+- **回退保护：** 厂商被禁用/删除时 Agent 指定的模型自动回退默认；已入库模型的勾选状态同时约束显式指定——取消勾选即视为否决该模型(Per-Agent指定自动回退默认)；未入库的自由填入别名不受勾选影响；存在自动默认时忽略裸 `model_name_{agent}`（避免模型名与 key 错配 401）
 - **多厂商多模型自由填入：** langchain 的 model_name 只是传给 API 的字符串，`llm_model_{agent}` 的 model_id 不要求存在于模型列表（自定义部署/代理别名/Ollama 本地模型均可），厂商存在即生效
 - **推荐配置定位：** DeepSeek flash/pro 的推荐默认与关键词匹配是低成本开发参考，非硬约束 -- 换任意厂商/模型只需 agent-set 或 Web 设置即可
 - **代码示例：**

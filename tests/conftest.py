@@ -16,7 +16,6 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _TMP_DIR = os.path.join(_REPO_ROOT, ".tmp-test")
 os.makedirs(_TMP_DIR, exist_ok=True)
 os.environ["DATABASE_PATH"] = os.path.join(_TMP_DIR, "test.db").replace("\\", "/")
-os.environ["DATABASE_PATH"] = _TMP_DB
 os.environ.setdefault("LINGYAN_DEBUG", "0")
 # 测试环境不读真实 .env，防止误用真实 API key
 os.environ["DEEPSEEK_API_KEY"] = os.environ.get("DEEPSEEK_API_KEY", "test-key-placeholder")

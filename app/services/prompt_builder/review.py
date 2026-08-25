@@ -81,12 +81,14 @@ def build_summary_prompt(chapter_content="", novel_title="", db=None):
 
 def build_rewrite_prompt(original_content="", critic_feedback="", novel_title="",
                          chapter_title="", outline="", user_directive="", db=None):
+    from app.services.prompt_builder.context import get_skill_prompt
+
     system_prompt = _load_system_prompt(db, "rewrite", (
         "你是一位专业的小说作家。根据评审意见修改你的作品，"
         "解决指出的问题，同时保持原文的优点。"
     ))
 
-    # 注入去AI化约束（最高优先级）
+    # 注入去AI化约束（最高优先级）+ 活跃技能（改写同样要遵循技法）
     full_system = DEFAULT_WRITER_CONSTRAINTS + """
 
 【改写特别注意】
@@ -94,7 +96,11 @@ def build_rewrite_prompt(original_content="", critic_feedback="", novel_title=""
 - 这些是有意为之的风格特征，不是错误
 - 只修复评审指出的具体问题，不要"美化"文字
 - 保持原文的人味，不要改得更"流畅优美"
-""" + "\n\n" + system_prompt
+"""
+    skill_prompt = get_skill_prompt("write")
+    if skill_prompt:
+        full_system += "\n\n" + skill_prompt
+    full_system += "\n\n" + system_prompt
 
     blocks = []
     if novel_title:

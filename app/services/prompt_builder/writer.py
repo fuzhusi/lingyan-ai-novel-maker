@@ -1,16 +1,8 @@
 """Writer 类提示词构建：章节生成、大纲生成。"""
 from app.services.prompt_builder.context import (
     _section, _load_system_prompt, _load_constraints, DEFAULT_WRITER_CONSTRAINTS,
+    get_skill_prompt,
 )
-
-
-def _get_skill_prompt():
-    """获取活跃技能的提示词（从 skill_system 导入，避免循环依赖）。"""
-    try:
-        from app.services.skill_system import build_skill_prompt
-        return build_skill_prompt()
-    except Exception:
-        return ""
 
 
 def build_writer_prompt(novel_title="", chapter_title="", outline="", user_directive="",
@@ -29,7 +21,7 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
         constraints = DEFAULT_WRITER_CONSTRAINTS
 
     # 技能提示注入到 system message（而非 memory_context）
-    skill_prompt = _get_skill_prompt()
+    skill_prompt = get_skill_prompt("write")
 
     # 去AI化约束放在 system message 最前面（最高优先级）
     full_system = constraints
@@ -153,6 +145,11 @@ def build_outline_prompt(novel_title="", genre="", synopsis="", world_intro="",
         "4. 与前后文的衔接点"
         "请输出纯文本大纲，不要输出小说正文。"
     ))
+
+    # 大纲也吃节奏类技巧（钩子/张弛），但跳过页面级笔法协议包（正文级技法对大纲是噪音）
+    skill_prompt = get_skill_prompt("outline")
+    if skill_prompt:
+        system_prompt = system_prompt + "\n\n" + skill_prompt
 
     blocks = []
     if novel_title:
