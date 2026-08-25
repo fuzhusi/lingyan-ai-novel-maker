@@ -60,6 +60,20 @@ class TestGateViolations:
         check = next(c for c in rep["checks"] if c["skill"] == "sensory_concrete")
         assert not check["passed"]
 
+    def test_plain_quiet_also_detected(self):
+        """「周围很安静」这类最高频写法也要能抓到。"""
+        rep = run_gate("屋里很安静，只听得见钟摆声。",
+                       active_skills=["sensory_concrete"])
+        check = next(c for c in rep["checks"] if c["skill"] == "sensory_concrete")
+        assert not check["passed"]
+
+    def test_possessive_fragment_style_not_flagged(self):
+        """「他的手。他的刀。他的命。」是合法碎句修辞，不算排比违规。"""
+        text = "他的手。他的刀。他的命。全都留在了那座山上。"
+        rep = run_gate(text, active_skills=["rhythm_breaking"])
+        check = next(c for c in rep["checks"] if c["skill"] == "rhythm_breaking")
+        assert check["passed"]
+
 
 class TestGateAPI:
     def test_gate_endpoint(self, client):

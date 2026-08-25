@@ -1,6 +1,6 @@
 """Review 类提示词构建：评审、摘要、改写。"""
 from app.services.prompt_builder.context import (
-    _section, _load_system_prompt, DEFAULT_WRITER_CONSTRAINTS,
+    _section, _load_system_prompt, DEFAULT_WRITER_CONSTRAINTS, get_skill_prompt,
 )
 
 
@@ -81,8 +81,6 @@ def build_summary_prompt(chapter_content="", novel_title="", db=None):
 
 def build_rewrite_prompt(original_content="", critic_feedback="", novel_title="",
                          chapter_title="", outline="", user_directive="", db=None):
-    from app.services.prompt_builder.context import get_skill_prompt
-
     system_prompt = _load_system_prompt(db, "rewrite", (
         "你是一位专业的小说作家。根据评审意见修改你的作品，"
         "解决指出的问题，同时保持原文的优点。"

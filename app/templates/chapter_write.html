@@ -827,9 +827,9 @@
             const bad = rep.checks.filter(c => !c.passed);
             let h = `<div class="gate-title">⚠ 技巧门禁：${bad.length} 项待改进</div>`;
             bad.forEach(c => {
-                h += `<div class="gate-item"><b>${c.name}</b> · ${c.skill}`;
+                h += `<div class="gate-item"><b>${escapeHtml(c.name)}</b> · ${escapeHtml(c.skill)}`;
                 c.violations.slice(0, 3).forEach(v => {
-                    h += `<div class="gate-ex">${v}</div>`;
+                    h += `<div class="gate-ex">${escapeHtml(v)}</div>`;
                 });
                 h += '</div>';
             });

@@ -1,6 +1,6 @@
 """Keeper 类提示词构建：角色检查、世界观检查、伏笔检查、编辑润色。"""
 from app.services.prompt_builder.context import (
-    _section, _load_system_prompt, DEFAULT_WRITER_CONSTRAINTS,
+    _section, _load_system_prompt, DEFAULT_WRITER_CONSTRAINTS, get_skill_prompt,
 )
 
 
@@ -121,8 +121,6 @@ def build_foreshadow_keeper_prompt(chapter_content="", foreshadowing_items=None,
 def build_editor_prompt(chapter_content="", check_results=None, novel_title="",
                         chapter_title="", outline="", db=None):
     """Editor — final polish based on all keeper check results."""
-    from app.services.prompt_builder.context import get_skill_prompt
-
     system_prompt = _load_system_prompt(db, "editor", (
         "你是一位资深小说编辑。根据各项检查结果，对章节进行最终润色。"
         "你的任务是：\n"

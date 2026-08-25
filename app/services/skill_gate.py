@@ -47,8 +47,11 @@ _TELL_EMOTION_RE = re.compile(
 # 抽象感官词（sensory_concrete / sensory_detail）
 _ABSTRACT_SENSORY_RE = re.compile(
     r"(?:一股|阵)(?:难闻|刺鼻|奇怪|说不清)[的]?(?:气味|味道)"
-    r"|(?:周围|屋里|房间里)(?:十分|非常|格外)?安静"
+    r"|(?:周围|屋里|房间里)(?:十分|非常|格外|很|异常|出奇)?安静"
 )
+
+# 门禁扫描的最大文本长度（防御性上限，超长截断后仍可检查）
+_MAX_SCAN_CHARS = 300_000
 
 
 def _excerpts(text, pattern, limit=5, radius=18):
@@ -66,23 +69,20 @@ def _excerpts(text, pattern, limit=5, radius=18):
 
 
 def _count_dialogue_modifiers(text):
-    hits = []
-    for m in _DIALOGUE_MODIFIER_RE.finditer(text):
-        s = max(0, m.start() - 14)
-        e = min(len(text), m.end() + 14)
-        hits.append(("…" if s > 0 else "") + text[s:e].replace("\n", " ")
-                    + ("…" if e < len(text) else ""))
-        if len(hits) >= 5:
-            break
-    return hits
+    """对话修饰语摘录（复用 _excerpts，半径略小以贴近对白本身）。"""
+    return _excerpts(text, _DIALOGUE_MODIFIER_RE, limit=5, radius=14)
 
 
-def _consecutive_same_opening(text, need=3, window=6):
-    """连续 window 句中 ≥need 句以相同前两字开头（排比倾向）。"""
+def _consecutive_same_opening(text, need=3):
+    """连续 need 句以相同前两字开头（排比倾向）。
+
+    排除领属语开头（他的/她的/云的…）——「他的手。他的刀。他的命。」
+    属于合法的碎句修辞，不算排比违规。
+    """
     sentences = [s.strip() for s in re.split(r"[。！？\n]+", text) if len(s.strip()) >= 4]
     for i in range(len(sentences) - need + 1):
         heads = [sentences[i + k][:2] for k in range(need)]
-        if len(set(heads)) == 1:
+        if len(set(heads)) == 1 and not heads[0].endswith("的"):
             frag = "".join(sentences[i:i + need])[:60]
             return [("…" if i > 0 else "") + frag + "…"]
     return []
@@ -94,6 +94,7 @@ def run_checks(text, active_skills=None):
     Returns:
         {"passed": bool, "checks": [{"skill","name","passed","violations":[...]}]}
     """
+    text = (text or "")[:_MAX_SCAN_CHARS]
     if active_skills is None:
         from app.services.skill_system import get_active_skills
         try:

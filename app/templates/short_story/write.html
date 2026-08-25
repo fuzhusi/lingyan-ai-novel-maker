@@ -674,6 +674,45 @@
     const contentEditor = document.getElementById('content-editor');
     const contentStream = document.getElementById('content-stream');
 
+    // ===== 技巧质量门禁（顶层作用域：策划模式与 careful 模式共用） =====
+    function runSkillGate(text) {
+        let box = document.getElementById('gate-report');
+        if (!box) {
+            box = document.createElement('div');
+            box.id = 'gate-report';
+            box.className = 'gate-report';
+            const anchor = document.getElementById('story-actions');
+            anchor.parentNode.insertBefore(box, anchor.nextSibling);
+        }
+        box.style.display = 'block';
+        box.className = 'gate-report';
+        box.innerHTML = '<span class="gate-pending">技巧门禁检测中…</span>';
+        fetch('/api/skills/gate-check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text })
+        }).then(r => r.json()).then(rep => {
+            if (!rep || rep.error) { box.innerHTML = ''; return; }
+            if (rep.passed) {
+                box.className = 'gate-report pass';
+                box.textContent = '✓ 技巧门禁通过 — 未检出违规写法';
+                return;
+            }
+            const bad = rep.checks.filter(c => !c.passed);
+            let h = `<div class="gate-title">⚠ 技巧门禁：${bad.length} 项待改进</div>`;
+            bad.forEach(c => {
+                h += `<div class="gate-item"><b>${escapeHtml(c.name)}</b> · ${escapeHtml(c.skill)}`;
+                c.violations.slice(0, 3).forEach(v => {
+                    h += `<div class="gate-ex">${escapeHtml(v)}</div>`;
+                });
+                h += '</div>';
+            });
+            h += '<div class="gate-hint">可针对摘录句手动修改，或「重新创作」再试</div>';
+            box.className = 'gate-report fail';
+            box.innerHTML = h;
+        }).catch(() => { box.innerHTML = ''; });
+    }
+
     // ==================== INSPIRATION / SETTING MODE ====================
     if (mode !== 'careful') {
         const conceptDisplay = document.getElementById('concept-display');
@@ -1024,45 +1063,6 @@
             }
         }
 
-        // ===== 技巧质量门禁：生成完成后对全文做确定性校验 =====
-        function runSkillGate(text) {
-            let box = document.getElementById('gate-report');
-            if (!box) {
-                box = document.createElement('div');
-                box.id = 'gate-report';
-                box.className = 'gate-report';
-                const anchor = document.getElementById('story-actions');
-                anchor.parentNode.insertBefore(box, anchor.nextSibling);
-            }
-            box.style.display = 'block';
-            box.className = 'gate-report';
-            box.innerHTML = '<span class="gate-pending">技巧门禁检测中…</span>';
-            fetch('/api/skills/gate-check', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: text })
-            }).then(r => r.json()).then(rep => {
-                if (!rep || rep.error) { box.innerHTML = ''; return; }
-                if (rep.passed) {
-                    box.className = 'gate-report pass';
-                    box.textContent = '✓ 技巧门禁通过 — 未检出违规写法';
-                    return;
-                }
-                const bad = rep.checks.filter(c => !c.passed);
-                let h = `<div class="gate-title">⚠ 技巧门禁：${bad.length} 项待改进</div>`;
-                bad.forEach(c => {
-                    h += `<div class="gate-item"><b>${c.name}</b> · ${c.skill}`;
-                    c.violations.slice(0, 3).forEach(v => {
-                        h += `<div class="gate-ex">${v}</div>`;
-                    });
-                    h += '</div>';
-                });
-                h += '<div class="gate-hint">可针对摘录句手动修改，或「重新创作」再试</div>';
-                box.className = 'gate-report fail';
-                box.innerHTML = h;
-            }).catch(() => { box.innerHTML = ''; });
-        }
-
         function resetAndRewrite() {
             if (nodeTotal > 0 && !confirm('重新创作将清空当前内容并从头生成全部节点，确定吗？')) return;
             pausedText = '';
@@ -1236,6 +1236,7 @@
                 setStatus('已完成');
                 updateCount(fullText);
                 saveVersion(fullText, 'ai');
+                runSkillGate(fullText);
                 enableReviewButton();
                 storyActions.innerHTML = `
                     <button id="btn-generate" class="btn-secondary">重新生成</button>
@@ -1512,6 +1513,7 @@
                 setStatus('已完成');
                 updateCount(fullText);
                 loadVersions();
+                runSkillGate(fullText);
                 enableReviewButton();
             }, {
                 onNode: function(id, title) {
