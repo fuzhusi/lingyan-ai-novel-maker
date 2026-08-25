@@ -31,7 +31,7 @@
 | AI 接口 | DeepSeek V4 API | OpenAI 兼容协议 |
 | HTTP 客户端 | httpx | SSL 容错，SSE streaming |
 | 前端 | Jinja2 + 原生 JS | 响应式 CSS |
-| 样式 | CSS 自定义属性 | "Ink & Shadow" 暗色主题 + 响应式 |
+| 样式 | CSS 自定义属性 | "流光 · 月砚" 暗色主题 + 响应式；Three.js 环境流光（aurora.js / inkflow.js） |
 | 流式传输 | SSE | `text/event-stream` |
 | 认证 | 已禁用 | 单用户模式，`login_required` 为 no-op |
 | MCP | `mcp` Python SDK | stdio 协议 |
@@ -106,8 +106,12 @@ Ai novel system/
     │       ├── new.html
     │       └── write.html (含草稿恢复)
     │
-    └── static/css/
-        └── main.css                # "Ink & Shadow" 主题
+    └── static/
+        ├── css/
+        │   └── main.css            # "流光 · 月砚" 主题（夜幕深空 + 流光青/澜紫/月金）
+        └── js/
+            ├── aurora.js           # 全站环境月夜层（WebGL 满月 + 云纱 + 星子 + 双色流光；网关页自动让位）
+            └── inkflow.js          # 网关沉浸页增强场景（Three.js 大满月 + 桂花雨粒子 + 鼠标扰动）
 ```
 
 ---

@@ -181,7 +181,7 @@
 | AI API | DeepSeek V4 (OpenAI 兼容) |
 | 流式传输 | SSE via `flask.Response` |
 | HTTP 客户端 | httpx (SSL 容错) |
-| CSS | 自定义 "Ink & Shadow" 主题 + 响应式 |
+| CSS | 自定义 "流光 · 月砚" 主题 + 响应式；Three.js 环境流光层 |
 | MCP | `mcp` Python SDK |
 | 认证 | Flask Session (Cookie-based) |
 

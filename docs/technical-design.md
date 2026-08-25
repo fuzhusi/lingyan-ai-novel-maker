@@ -45,7 +45,7 @@
 ┌─────────────────────────────────────────────────────────┐
 │                    客户端层 (Client)                      │
 │              Jinja2 + Vanilla JS + CSS                   │
-│           "Ink & Shadow" 暗色文学主题                     │
+│           "流光 · 月砚" 暗色文学主题（中秋版）             │
 └──────────────────────┬──────────────────────────────────┘
                        │ HTTP / SSE
 ┌──────────────────────▼──────────────────────────────────┐
@@ -711,7 +711,7 @@ CREATE TABLE settings (
 | 流式传输 | SSE (Server-Sent Events) |
 | HTTP 客户端 | httpx |
 | 前端 | Jinja2 + Vanilla JS |
-| 样式 | CSS 自定义属性 ("Ink & Shadow") |
+| 样式 | CSS 自定义属性 ("流光 · 月砚") + Three.js 环境流光 |
 | MCP | mcp Python SDK |
 | CLI | argparse |
 
