@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 灵砚 · 流光 — 网关沉浸场景「月满中天 · 桂香盈砚」（中秋版）
  * 光效分层：
  *   1. 夜幕底色 + 星子呼吸明灭；
@@ -72,14 +72,14 @@ if (canvas) {
           float t = u_time * 0.045;
 
           /* ---- 夜幕底色 ---- */
-          vec3 col = mix(vec3(0.022, 0.036, 0.078), vec3(0.030, 0.049, 0.098), uv.y);
+          vec3 col = mix(vec3(0.051, 0.031, 0.025), vec3(0.063, 0.038, 0.030), uv.y);
 
           /* ---- 星子 ---- */
           vec2 cell = floor(p * 95.0);
           float starSeed = hash(cell);
           float star = step(0.9960, starSeed);
           float tw = 0.5 + 0.5 * sin(u_time * 2.0 + hash(cell + 7.0) * 47.0);
-          col += vec3(0.90, 0.94, 1.00) * star * tw * 0.06;
+          col += vec3(1.00, 0.92, 0.78) * star * tw * 0.06;
 
           /* 鼠标轻搅：局部缓移采样域 */
           vec2 stir = (u_mouse - 0.5) * 0.22;
@@ -99,13 +99,13 @@ if (canvas) {
           /* 桂金余烬：极细一缕，随 r.y 缓慢出没 */
           float ember = pow(max(r.y - 0.58, 0.0) * 2.2, 2.4);
 
-          vec3 cyan   = vec3(0.365, 0.827, 0.945);   /* 流光青 */
-          vec3 moonHi = vec3(0.769, 0.902, 0.973);   /* 月白青 */
+          vec3 cinnabar = vec3(0.937, 0.447, 0.310); /* 朱砂橘 */
+          vec3 moonHi = vec3(0.973, 0.878, 0.694);  /* 月金白 */
           vec3 osm    = vec3(0.949, 0.812, 0.529);   /* 桂子金 */
           vec3 emberC = vec3(0.949, 0.788, 0.475);   /* 霞金   */
 
-          col += cyan   * moon * 0.20;
-          col += moonHi * ridge * (0.16 + 0.38 * q.x) * moon;
+          col += cinnabar * moon * 0.16;
+          col += moonHi * ridge * (0.14 + 0.34 * q.x) * moon;
           col += osm    * ridgeG * (0.11 + 0.20 * q.y);
           col += emberC * ember * 0.34;
 
@@ -198,8 +198,8 @@ if (canvas) {
                  float twk = 0.62 + 0.38 * sin(u_time * (1.4 + 2.2 * seed.z) + seed.x * 91.0);
                  v_alpha = env * twk * (0.26 + 0.58 * seed.y);
                  /* 青 → 暮紫过渡，少数桂金星尘 */
-                 v_color = mix(vec3(0.365, 0.827, 0.945), vec3(0.655, 0.545, 0.980), smoothstep(0.5, 0.95, seed.z));
-                 if (seed.z < 0.14) v_color = vec3(0.984, 0.859, 0.639);`}
+                 v_color = mix(vec3(0.937, 0.478, 0.365), vec3(0.949, 0.788, 0.475), smoothstep(0.5, 0.95, seed.z));
+                 if (seed.z < 0.14) v_color = vec3(0.420, 0.800, 0.640);`}
             gl_Position = vec4(pos.xy, 0.0, 1.0);
             gl_PointSize = ${vertexSizeExpr} * u_dpr;
           }

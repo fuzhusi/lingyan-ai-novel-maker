@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}数据面板 — {{ novel.title }}{% endblock %}
 
 {% block nav %}
@@ -36,11 +36,11 @@
             <div style="font-size:0.82rem;color:var(--text-dim);margin-top:0.25rem">连续创作</div>
         </div>
         <div class="card" style="text-align:center;padding:1.25rem">
-            <div style="font-size:2rem;font-weight:700;color:#06b6d4;font-family:var(--font-mono)">{{ "{:,}".format(week_chars) }}</div>
+            <div style="font-size:2rem;font-weight:700;color:#eec06a;font-family:var(--font-mono)">{{ "{:,}".format(week_chars) }}</div>
             <div style="font-size:0.82rem;color:var(--text-dim);margin-top:0.25rem">本周字数</div>
         </div>
         <div class="card" style="text-align:center;padding:1.25rem">
-            <div style="font-size:2rem;font-weight:700;color:#8b5cf6;font-family:var(--font-mono)">{{ "{:,}".format(avg_chars) }}</div>
+            <div style="font-size:2rem;font-weight:700;color:#ff9a62;font-family:var(--font-mono)">{{ "{:,}".format(avg_chars) }}</div>
             <div style="font-size:0.82rem;color:var(--text-dim);margin-top:0.25rem">平均每章</div>
         </div>
     </div>
@@ -299,7 +299,7 @@
                 if (c.cause) html += `<div style="font-size:0.82rem"><span style="color:var(--accent)">起因：</span>${escapeHtml(c.cause)}</div>`;
                 if (c.event) html += `<div style="font-size:0.82rem"><span style="color:var(--text-bright)">经过：</span>${escapeHtml(c.event)}</div>`;
                 if (c.effect) html += `<div style="font-size:0.82rem"><span style="color:var(--success)">结果：</span>${escapeHtml(c.effect)}</div>`;
-                if (c.decision) html += `<div style="font-size:0.82rem"><span style="color:#8b5cf6">决策：</span>${escapeHtml(c.decision)}</div>`;
+                if (c.decision) html += `<div style="font-size:0.82rem"><span style="color:#ff9a62">决策：</span>${escapeHtml(c.decision)}</div>`;
                 html += `</div>`;
             }
             list.innerHTML = html;

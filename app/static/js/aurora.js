@@ -82,14 +82,14 @@ const el = canvas || document.createElement('canvas');
         float t = u_time * 0.022;
 
         /* ---- 夜幕底色 ---- */
-        vec3 col = mix(vec3(0.024, 0.039, 0.082), vec3(0.031, 0.051, 0.102), uv.y);
+        vec3 col = mix(vec3(0.055, 0.033, 0.027), vec3(0.067, 0.040, 0.032), uv.y);
 
         /* ---- 星子：稀疏、呼吸明灭 ---- */
         vec2 cell = floor(p * 88.0);
         float starSeed = hash(cell);
         float star = step(0.9962, starSeed);
         float tw = 0.5 + 0.5 * sin(u_time * 2.1 + hash(cell + 7.0) * 43.0);
-        col += vec3(0.90, 0.94, 1.00) * star * tw * 0.055;
+        col += vec3(1.00, 0.92, 0.78) * star * tw * 0.055;
 
         /* ---- 双层域扭曲 —— 缓慢的夜空水波 ---- */
         vec2 q = vec2(fbm(p * 1.15 + vec2(0.0, t)),
@@ -102,10 +102,10 @@ const el = canvas || document.createElement('canvas');
         float ridgeA = pow(clamp(1.0 - abs(2.0 * f - 1.0), 0.0, 1.0), 8.0);
         float ridgeB = pow(clamp(1.0 - abs(2.0 * r.x - 1.0), 0.0, 1.0), 10.0);
 
-        vec3 cyan = vec3(0.365, 0.827, 0.945);   /* 流光青 */
+        vec3 cinnabar = vec3(0.937, 0.447, 0.310);  /* 朱砂橘 */
         vec3 osm  = vec3(0.949, 0.812, 0.529);   /* 桂子金 */
 
-        col += cyan * ridgeA * 0.056 * (0.55 + 0.45 * q.y);
+        col += cinnabar * ridgeA * 0.050 * (0.55 + 0.45 * q.y);
         col += osm  * ridgeB * 0.044 * (0.50 + 0.50 * q.x);
 
         /* ---- 满月：右上悬一轮 ---- */
