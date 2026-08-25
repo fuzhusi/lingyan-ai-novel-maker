@@ -145,6 +145,14 @@ def build_editor_prompt(chapter_content="", check_results=None, novel_title="",
     skill_prompt = get_skill_prompt("polish")
     if skill_prompt:
         full_system += "\n\n" + skill_prompt
+    # 文风锚例
+    try:
+        from app.services.style_fingerprint import format_anchor_for_prompt
+        anchor_ctx = format_anchor_for_prompt()
+        if anchor_ctx:
+            full_system += "\n\n" + anchor_ctx
+    except Exception:
+        pass
     full_system += "\n\n" + system_prompt
 
     blocks = []

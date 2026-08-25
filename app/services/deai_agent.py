@@ -83,20 +83,14 @@ def _fix_sentence_rhythm(text):
 # ---------------------------------------------------------------------------
 # Pass 4: Sentence structure fixes (句式结构修复)
 # ---------------------------------------------------------------------------
+# 2026-08 停用比喻简化规则（像X一样→X 等 8 条）：
+# 283 万字对照语料研究（docs/ai-tone-research.md §四）实测人类使用比喻的频率
+# 是 AI 的 2.4 倍，比喻独立成段为 8 倍——删比喻是在抹掉人类写作标志特征。
+# 比喻治理仅保留一处：拟人化理想化喻体（"像一位智慧的导师"）由 ai_metric 检测，
+# 不做自动替换。
 
 def _fix_sentence_structure(text):
-    """Fix common AI sentence structures."""
-    # 「是X的」「有X的」两条通配规则已移除：
-    # 它们会命中"这是他的书/有的是时间/有经验的老师"等完全合法的句子并删字。
-    # AI 腔治理交给禁用词表与审计维度，不做这种高风险通配替换。
-    text = re.sub(r'像(\w{2,6})一样', r'\1', text, count=2)
-    text = re.sub(r'如同(\w{2,6})一般', r'\1', text, count=2)
-    text = re.sub(r'好像(\w{2,6})似的', r'\1', text, count=2)
-    text = re.sub(r'仿佛(\w{2,6})般', r'\1', text, count=2)
-    text = re.sub(r'犹如(\w{2,6})般', r'\1', text, count=2)
-    text = re.sub(r'宛如(\w{2,6})般', r'\1', text, count=2)
-    text = re.sub(r'恰似(\w{2,6})般', r'\1', text, count=2)
-    text = re.sub(r'好比(\w{2,6})般', r'\1', text, count=2)
+    """保留占位以维持五步管线结构；原比喻简化规则已停用。"""
     return text
 
 

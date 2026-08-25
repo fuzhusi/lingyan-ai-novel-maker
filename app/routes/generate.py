@@ -36,6 +36,8 @@ def _stream_to_sse(messages, cfg, word_target=None):
             provider_type=cfg.get("provider_type", "deepseek"),
             temperature=cfg.get("temperature", 0.8),
             max_tokens=max_tokens,
+            frequency_penalty=cfg.get("frequency_penalty"),
+            presence_penalty=cfg.get("presence_penalty"),
         ):
             collected.append(token)
             yield _sse_event({"token": token})
@@ -145,13 +147,33 @@ def generate_stream():
 
         # Style fingerprint
         try:
-            from app.services.style_fingerprint import load_style, format_style_for_prompt
+            from app.services.style_fingerprint import load_style, format_style_for_prompt, format_anchor_for_prompt
             style = load_style()
             if style:
                 style_ctx = format_style_for_prompt(style)
                 if style_ctx:
                     existing = kw.get("memory_context", "")
                     kw["memory_context"] = (existing + "\n\n" + style_ctx).strip()
+            anchor_ctx = format_anchor_for_prompt()
+            if anchor_ctx:
+                existing = kw.get("memory_context", "")
+                kw["memory_context"] = (existing + "\n\n" + anchor_ctx).strip()
+        except Exception:
+            pass
+
+        # 行文指纹修正指令：基于近期章节正文的 AI 痕迹检测（降 AI 率闭环）
+        try:
+            from app.services.ai_metric import build_tone_instructions
+            recent = (Chapter.query
+                      .filter(Chapter.novel_id == novel_id,
+                              Chapter.chapter_number < chapter_number)
+                      .order_by(Chapter.chapter_number.desc())
+                      .limit(2).all())
+            sample_text = "\n\n".join(ch.content or "" for ch in reversed(recent))
+            if len(sample_text.strip()) >= 500:
+                tone_inst = build_tone_instructions(sample_text[-15000:])
+                if tone_inst:
+                    kw["tone_instructions"] = tone_inst
         except Exception:
             pass
 
@@ -224,6 +246,13 @@ def focus_generate_stream():
         f"根据以下场景和角色设定，写出一段聚焦于该角色的小说片段。"
         f"要深入展现该角色的内心世界、性格特征和行为方式。"
     )
+    try:
+        from app.services.style_fingerprint import format_anchor_for_prompt
+        anchor_ctx = format_anchor_for_prompt()
+        if anchor_ctx:
+            system_prompt += "\n\n" + anchor_ctx
+    except Exception:
+        pass
 
     blocks = []
     blocks.append(f"【小说名称】\n{novel.title}")

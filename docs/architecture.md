@@ -31,7 +31,7 @@
 | AI 接口 | DeepSeek V4 API | OpenAI 兼容协议 |
 | HTTP 客户端 | httpx | SSL 容错，SSE streaming |
 | 前端 | Jinja2 + 原生 JS | 响应式 CSS |
-| 样式 | CSS 自定义属性 | "流光 · 月砚" 暗色主题 + 响应式；Three.js 环境流光（aurora.js / inkflow.js） |
+| 样式 | CSS 自定义属性 | "朱金 · 玄漆" 中式主题（夜幕 + 宣纸稿纸面）+ 响应式；Three.js 环境月夜（aurora.js / inkflow.js） |
 | 流式传输 | SSE | `text/event-stream` |
 | 认证 | 已禁用 | 单用户模式，`login_required` 为 no-op |
 | MCP | `mcp` Python SDK | stdio 协议 |
@@ -78,7 +78,7 @@ Ai novel system/
     │   ├── vector_memory.py        # FTS5 向量记忆 (蓝)
     │   ├── deai_agent.py           # 去 AI 化 (120+ 禁用模式)
     │   ├── info_boundary.py        # 信息边界系统
-    │   ├── style_fingerprint.py    # 风格指纹
+    │   ├── style_fingerprint.py    # 风格指纹 + 文风锚例 (原文直插 prompt)
     │   ├── skill_system.py         # Skill 系统 (蓝)
     │   ├── temporal_truth.py       # 时序真理库 (蓝)
     │   ├── text_cleaner.py         # 文本清理
@@ -108,9 +108,9 @@ Ai novel system/
     │
     └── static/
         ├── css/
-        │   └── main.css            # "流光 · 月砚" 主题（夜幕深空 + 流光青/澜紫/月金）
+        │   └── main.css            # "朱金 · 玄漆" 主题（玄漆暖黑夜幕 + 朱砂/泥金；阅读面转宣纸稿纸，令牌影射）
         └── js/
-            ├── aurora.js           # 全站环境月夜层（WebGL 满月 + 云纱 + 星子 + 双色流光；网关页自动让位）
+            ├── aurora.js           # 全站环境月夜层（WebGL 暖玉满月 + 云纱 + 烛光星子 + 朱金双色流光；网关页自动让位）
             └── inkflow.js          # 网关沉浸页增强场景（Three.js 大满月 + 桂花雨粒子 + 鼠标扰动）
 ```
 
@@ -341,7 +341,7 @@ DATABASE_PATH=data.db
 | `vector_memory` | FTS5 语义检索 |
 | `deai_agent` | 120+ 禁用词 + 5 步处理 |
 | `info_boundary` | 角色知识边界追踪 |
-| `style_fingerprint` | 从参考文本提取风格 |
+| `style_fingerprint` | 风格指纹提取 + 文风锚例（原文直插 prompt，全部正文生成链路） |
 | `skill_system` | 7 内置 + 自定义写作技巧 |
 | `temporal_truth` | 时序真理库 |
 | `book_optimizer` | 全书诊断 + 自动修订 |
@@ -361,6 +361,7 @@ DATABASE_PATH=data.db
 | 信息边界 | `Character` 知识追踪 | 防止角色"全知" |
 | 时序真理 | `Setting` JSON 存储 | 角色/关系/世界状态随时间变化 |
 | 风格指纹 | `Setting` JSON 存储 | 提取并应用写作风格 |
+| 文风锚例 | `Setting` 键 `style_anchor_text/_enabled` | 真人原文直插 prompt 风格锚定（长篇+短篇全部正文链路） |
 | Skill 系统 | `Setting` JSON 存储 | 注入写作技巧到 prompt |
 | 角色关系 | `CharacterRelation` | 5 维度量化 |
 | 故事状态 | `StoryState` | 弧阶段追踪 + 冲突 + 伏笔 |

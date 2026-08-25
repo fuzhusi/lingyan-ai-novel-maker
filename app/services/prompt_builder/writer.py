@@ -9,7 +9,8 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
                         characters=None, world_settings=None, summaries=None,
                         foreshadowing_items=None, synopsis="", world_intro="",
                         outline_node_context=None, causal_chain="", memory_context="",
-                        prev_ending="", earlier_summaries="", genre="", db=None):
+                        prev_ending="", earlier_summaries="", genre="", db=None,
+                        tone_instructions=""):
     system_prompt = _load_system_prompt(db, "writer", (
         "你是一位专业的小说作家，擅长用生动的语言和细腻的描写创作引人入胜的故事。"
         "根据提供的创作指引，写出高质量的小说章节内容。严格遵守世界观设定和人物设定，"
@@ -117,6 +118,10 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
         blocks.append(_section("章节标题", chapter_title))
     if outline:
         blocks.append(_section("本章大纲", outline))
+
+    # 行文指纹修正指令（基于近期章节检测，位于特别指示之前、优先级次高）
+    if tone_instructions:
+        blocks.append(_section("行文指纹修正", tone_instructions))
 
     if user_directive:
         blocks.append(_section("特别指示 - 最高优先级", user_directive))

@@ -188,6 +188,11 @@ def _explicit_agent_cfg(agent_type, base, novel_overridden_keys=None):
     tokens_override = get_setting(f"max_tokens_{agent_type}", "")
     if tokens_override:
         cfg["max_tokens"] = _safe_int(tokens_override, base["max_tokens"])
+    # 采样惩罚：仅显式设置时下发（None = 不传该参数，兼容不支持厂商）
+    for key in ("frequency_penalty", "presence_penalty"):
+        val = get_setting(f"{key}_{agent_type}", "")
+        if str(val).strip():
+            cfg[key] = _safe_float(val, 0.0)
     provider_cfg = _resolve_llm_model(get_setting(f"llm_model_{agent_type}", ""))
     if provider_cfg:
         cfg.update(provider_cfg)

@@ -653,14 +653,21 @@ def gate_check():
     """技能质量门禁：对文本做确定性校验，报告活跃技巧的违规情况。
 
     Body: JSON {"text": "..."} 或表单 text 字段。
-    Returns: {"passed": bool, "checks": [{skill, name, passed, violations[]}]}
+    Returns: {"passed": bool, "checks": [{skill, name, passed, violations[]}],
+              "ai_tone": {passed, human_score, checks[], stats{}}}  # 篇章层 AI 痕迹
     """
     data = request.get_json(silent=True) or {}
     text = (data.get("text") or request.form.get("text") or "").strip()
     if not text:
         return jsonify({"error": "text required"}), 400
     from app.services.skill_gate import run_gate
-    return jsonify(run_gate(text))
+    from app.services.ai_metric import analyze_ai_tone
+    rep = run_gate(text)
+    try:
+        rep["ai_tone"] = analyze_ai_tone(text)
+    except Exception:
+        pass
+    return jsonify(rep)
 
 
 @skill_bp.route("/skills/custom", methods=["POST"])

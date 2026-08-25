@@ -52,6 +52,26 @@
         <a href="/api/skills/page" class="btn btn-primary" style="white-space:nowrap;">管理技巧 →</a>
     </div>
 
+    <!-- 文风锚例 (Style Anchor) -->
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.6rem">
+            <h2 style="margin:0">文风锚例</h2>
+            <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.85rem">
+                <input type="checkbox" id="anchor-enabled"> 启用
+            </label>
+        </div>
+        <p style="color:var(--text-dim);font-size:0.85rem;margin-bottom:0.8rem">
+            粘贴一段你喜欢的真人写作风格文本（300-2000 字），AI 会模仿其叙事质感、句式节奏与用词习惯来写作。
+            <br>建议用自己写的文字或喜欢的作者段落作为风格锚点。
+            <strong style="color:var(--accent)">只学文风，不抄内容。</strong>
+        </p>
+        <textarea id="anchor-text" rows="6" placeholder="在此粘贴参考文本……&#10;&#10;示例：&#10;路明非把作业本摊在桌上，发现今天的数学题长得像绕口令。他看了一眼窗外——操场上有人在打球，球弹起来的声音闷闷的，一下一下。&#10;&#10;陈雯雯走过来把他的本子抽走了，看了一眼。&#10;" style="width:100%;font-size:0.85rem;resize:vertical;line-height:1.6"></textarea>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.5rem">
+            <span id="anchor-status" style="font-size:0.78rem;color:var(--text-faint)"></span>
+            <button id="btn-save-anchor" class="btn-primary btn-sm">保存文风参考</button>
+        </div>
+    </div>
+
     <!-- Per-Agent Model Config -->
     <div class="card">
         <h2>按 Agent 类型配置模型</h2>
@@ -110,6 +130,7 @@
                             <th style="text-align:left;padding:0.5rem;color:var(--text-bright)">模型名称</th>
                             <th style="text-align:left;padding:0.5rem;color:var(--text-bright);width:90px">温度</th>
                             <th style="text-align:left;padding:0.5rem;color:var(--text-bright);width:90px">Max Tokens</th>
+                            <th style="text-align:left;padding:0.5rem;color:var(--text-bright);width:130px" title="频率/存在惩罚：抑制重复措辞、鼓励新内容（降AI指纹的采样层手段，留空不启用）">采样惩罚</th>
                             <th style="text-align:center;padding:0.5rem;color:var(--text-bright);width:60px">状态</th>
                         </tr>
                     </thead>
@@ -168,6 +189,24 @@
                                        placeholder="{{ config.max_tokens }}"
                                        min="256" max="65536" step="256"
                                        style="width:100%;font-size:0.8rem;padding:0.3rem">
+                            </td>
+                            <td style="padding:0.5rem">
+                                <div style="display:flex;gap:0.3rem">
+                                    <input type="number"
+                                           name="frequency_penalty_{{ agent_type }}"
+                                           value="{{ agent_configs[agent_type].frequency_penalty }}"
+                                           placeholder="频率惩罚 0"
+                                           min="-2" max="2" step="0.1"
+                                           title="频率惩罚：抑制重复措辞（降AI指纹）"
+                                           style="width:50%;font-size:0.8rem;padding:0.3rem">
+                                    <input type="number"
+                                           name="presence_penalty_{{ agent_type }}"
+                                           value="{{ agent_configs[agent_type].presence_penalty }}"
+                                           placeholder="存在惩罚 0"
+                                           min="-2" max="2" step="0.1"
+                                           title="存在惩罚：鼓励引入新内容"
+                                           style="width:50%;font-size:0.8rem;padding:0.3rem">
+                                </div>
                             </td>
                             <td style="padding:0.5rem;text-align:center">
                                 {% if agent_configs[agent_type].llm_model or agent_configs[agent_type].model_name %}
@@ -365,6 +404,42 @@
                 this.disabled = false;
                 this.textContent = '清除所有自定义（恢复全局）';
             });
+    });
+})();
+</script>
+
+<script>
+(function() {
+    const ta = document.getElementById('anchor-text');
+    const cb = document.getElementById('anchor-enabled');
+    const btn = document.getElementById('btn-save-anchor');
+    const status = document.getElementById('anchor-status');
+
+    fetch('/api/style-anchor').then(r=>r.json()).then(d=>{
+        ta.value = d.text || '';
+        cb.checked = !!d.enabled;
+        if(d.text) status.textContent = d.text.length + ' 字';
+    }).catch(()=>{});
+
+    btn.addEventListener('click', function(){
+        btn.disabled = true; btn.textContent = '保存中…';
+        fetch('/api/style-anchor', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({text: ta.value})
+        }).then(r=>r.json()).then(d=>{
+            status.textContent = '✓ 已保存 ' + d.len + ' 字';
+            // 同步开关状态
+            return fetch('/api/style-anchor/toggle', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({enabled: cb.checked})
+            });
+        }).then(()=>{
+            btn.textContent = '已保存';
+            setTimeout(()=>{ btn.textContent='保存文风参考'; btn.disabled=false; }, 1500);
+        }).catch(e=>{
+            status.textContent = '保存失败: ' + e.message;
+            btn.disabled = false; btn.textContent = '保存文风参考';
+        });
     });
 })();
 </script>

@@ -819,24 +819,50 @@
             body: JSON.stringify({ text: text })
         }).then(r => r.json()).then(rep => {
             if (!rep || rep.error) { box.style.display = 'none'; return; }
-            if (rep.passed) {
+            let h = '';
+            let hasFail = false;
+            if (!rep.passed) {
+                hasFail = true;
+                const bad = rep.checks.filter(c => !c.passed);
+                h += `<div class="gate-title">⚠ 技巧门禁：${bad.length} 项待改进</div>`;
+                bad.forEach(c => {
+                    h += `<div class="gate-item"><b>${escapeHtml(c.name)}</b> · ${escapeHtml(c.skill)}`;
+                    c.violations.slice(0, 3).forEach(v => {
+                        h += `<div class="gate-ex">${escapeHtml(v)}</div>`;
+                    });
+                    h += '</div>';
+                });
+            }
+            h += renderAiTone(rep);
+            if (h) {
+                box.className = 'gate-report ' + (hasFail ? 'fail' : 'pass');
+                box.innerHTML = h + '<div class="gate-hint">可针对摘录句手动修改后保存；重新生成时，以上指纹会自动注入提示词进行纠偏</div>';
+            } else {
                 box.className = 'gate-report pass';
                 box.textContent = '✓ 技巧门禁通过 — 未检出违规写法';
-                return;
             }
-            const bad = rep.checks.filter(c => !c.passed);
-            let h = `<div class="gate-title">⚠ 技巧门禁：${bad.length} 项待改进</div>`;
-            bad.forEach(c => {
-                h += `<div class="gate-item"><b>${escapeHtml(c.name)}</b> · ${escapeHtml(c.skill)}`;
-                c.violations.slice(0, 3).forEach(v => {
-                    h += `<div class="gate-ex">${escapeHtml(v)}</div>`;
-                });
-                h += '</div>';
-            });
-            h += '<div class="gate-hint">可针对摘录句手动修改后保存，或重新生成</div>';
-            box.className = 'gate-report fail';
-            box.innerHTML = h;
         }).catch(() => { box.style.display = 'none'; });
+    }
+
+    // 篇章层 AI 痕迹报告渲染（ai_metric，规则来源 docs/ai-tone-research.md）
+    function renderAiTone(rep) {
+        const t = rep.ai_tone;
+        if (!t || t.human_score == null) return '';
+        let h = `<div class="gate-title">篇章 AI 痕迹 · 人味分 ${t.human_score}/100${t.passed ? ' ✓' : ''}</div>`;
+        (t.checks || []).filter(c => !c.passed).forEach(c => {
+            h += `<div class="gate-item"><b>${escapeHtml(c.name)}</b> · ${c.risk === 'high' ? '<span style="color:var(--danger)">高风险</span>' : '待改进'} · ${escapeHtml(c.detail)}`;
+            (c.excerpts || []).slice(0, 3).forEach(v => {
+                h += `<div class="gate-ex">${escapeHtml(v)}</div>`;
+            });
+            h += '</div>';
+        });
+        const s = t.stats || {};
+        const statLine = [];
+        if (s.sentence_len_cv != null) statLine.push(`句长CV ${s.sentence_len_cv}`);
+        if (s.short_sentence_ratio != null) statLine.push(`短句占比 ${Math.round(s.short_sentence_ratio * 100)}%`);
+        if (s.para_inner_sent_cv_avg != null) statLine.push(`段内句长CV ${s.para_inner_sent_cv_avg}`);
+        if (statLine.length) h += `<div class="gate-hint">统计指标（信息参考）：${escapeHtml(statLine.join(' · '))}</div>`;
+        return h;
     }
 
     async function loadSkills() {

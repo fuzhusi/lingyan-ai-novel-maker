@@ -45,7 +45,7 @@
 ┌─────────────────────────────────────────────────────────┐
 │                    客户端层 (Client)                      │
 │              Jinja2 + Vanilla JS + CSS                   │
-│           "流光 · 月砚" 暗色文学主题（中秋版）             │
+│      "朱金 · 玄漆" 中式主题（夜幕下摊开的稿纸）          │
 └──────────────────────┬──────────────────────────────────┘
                        │ HTTP / SSE
 ┌──────────────────────▼──────────────────────────────────┐
@@ -304,6 +304,19 @@ Writer → [Critic | Character Keeper | Lore Keeper | Foreshadow Keeper] → Edi
 - 情感表达方式
 - 修辞手法
 - 风格示例句
+
+## 5.3.1 文风锚例 (Style Anchor)
+
+真人原文直插 prompt 做风格锚定——一手 token 级质感，强于指纹描述的二手转译：
+
+- **存储**：`Setting` 键 `style_anchor_text`（原文）+ `style_anchor_enabled`（开关 "1"/"0"）
+- **格式化**：`format_anchor_for_prompt()` 按段落边界截断（上限 2000 字符），包装成「模仿叙事质感、只学文风勿抄情节」指令块；未启用/文本 <50 字返回空串
+- **注入范围**（全部正文生成链路）：
+  - 长篇：章节生成、聚焦生成、评审改写（`build_rewrite_prompt`）、Editor 润色（`build_editor_prompt`）
+  - 短篇：逐节点生成（`build_node_prompt`）、旧路径续写/收尾、单节点重写、全文重写、AI 润色、评审逐节点/全文重写、续写、扩写选中、重写选中、分段生成
+- **UI**：设置页「文风锚例」卡（粘贴 + 启用勾选）；短篇写作页工具栏「文风锚定」圆点开关（点亮=注入，熄灭=自由发挥，未设文本时引导跳设置页），两处开关同源
+- **API**：`GET /api/style-anchor`（读）、`POST /api/style-anchor` `{text}`（存）、`POST /api/style-anchor/toggle` `{enabled}`（开关）
+- **测试**：`tests/test_style_anchor.py`（7 个用例：存储/开关/格式化/段落边界截断/API）
 
 ## 5.4 Skill 系统
 
@@ -711,7 +724,7 @@ CREATE TABLE settings (
 | 流式传输 | SSE (Server-Sent Events) |
 | HTTP 客户端 | httpx |
 | 前端 | Jinja2 + Vanilla JS |
-| 样式 | CSS 自定义属性 ("流光 · 月砚") + Three.js 环境流光 |
+| 样式 | CSS 自定义属性 ("朱金 · 玄漆"，夜幕 + 稿纸面) + Three.js 环境月夜 |
 | MCP | mcp Python SDK |
 | CLI | argparse |
 
@@ -750,7 +763,11 @@ CREATE TABLE settings (
 | `/api/novels/<id>/memory/search` | GET | 记忆搜索 |
 | `/api/novels/<id>/truths` | GET/POST | 时间真相 |
 | `/api/style/analyze` | POST | 风格分析 |
+| `/api/style-anchor` | GET | 读取文风锚例（文本+开关状态） |
+| `/api/style-anchor` | POST | 保存文风锚例 `{text}` |
+| `/api/style-anchor/toggle` | POST | 文风锚例开关 `{enabled}` |
 | `/api/skills` | GET | Skill 列表 |
+| `/api/skills/gate-check` | POST | 质量门禁 + AI 痕迹检测 |
 
 ## 11.2 短篇 API
 
@@ -1111,9 +1128,25 @@ function saveDraft() {
 setInterval(saveDraft, DRAFT_INTERVAL);
 ```
 
-- 每 10 秒自动保存到 `localStorage`
+- 每 10 秒保存到 `localStorage`
 - 页面加载检测草稿，提供恢复横幅
 - 成功保存到服务器后清除草稿
+
+### 22. 文风锚例 (Style Anchor)
+
+真人原文直插 prompt 做风格锚定（详见 5.3.1）：
+
+```python
+from app.services.style_fingerprint import format_anchor_for_prompt
+
+anchor_ctx = format_anchor_for_prompt()  # 空串 = 未启用/未设置
+if anchor_ctx:
+    system += "\n\n" + anchor_ctx
+```
+
+- 存储于 `Setting` 键 `style_anchor_text` / `style_anchor_enabled`
+- 注入长篇 + 短篇全部正文生成链路（生成/改写/润色/局部编辑）
+- 设置页粘贴入口 + 短篇写作页圆点开关
 
 ---
 

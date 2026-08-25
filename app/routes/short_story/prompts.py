@@ -222,6 +222,13 @@ def _build_writer_from_concept_prompt(story):
     if genre_inst:
         system += "\n\n" + genre_inst
 
+    # 文风锚例
+    try:
+        from app.services.style_fingerprint import format_anchor_for_prompt
+        system += format_anchor_for_prompt()
+    except Exception:
+        pass
+
     parts = [f"【创作构思】\n{story.concept}"]
     if story.genre:
         parts.append(f"【体裁】\n{story.genre}")
@@ -453,7 +460,7 @@ def build_node_prompt(story, nodes, current_idx, prev_text):
     outline_str = "\n".join(outline_lines)
 
     system = (
-        "你是一位才华横溢的短篇小说作家。你正在**逐节点**创作一篇短篇小说，"
+        "你是一位才华横溢拥有10年番茄写作经验的短篇小说作家。你正在**逐节点**创作一篇短篇小说，"
         "当前只负责写【一个节点】的内容。\n\n"
         "【最高优先级 — 严格遵守】\n"
         "1. 只写当前指定的节点，不要提前写后续节点的情节\n"
@@ -461,6 +468,7 @@ def build_node_prompt(story, nodes, current_idx, prev_text):
         "3. 承接前文（前一个节点结尾处）自然过渡到当前节点\n"
         "4. 当前节点的内容必须完整展开，达到目标字数，不要草草带过\n"
         "5. 直接输出小说正文，不要输出节点编号、标题、说明或构思复述\n\n"
+        "6. 必须遵循约束的写作规则，这是硬性要求。"
         f"【完整剧情大纲 — 严格按此推进】\n{outline_str}\n\n"
         f"【当前节点】\n节点{current['id']}（{current.get('act', '')}）：{current.get('title', '')}\n"
         f"目标字数：约 {current.get('word_count', 1000)} 字\n\n"
@@ -475,6 +483,28 @@ def build_node_prompt(story, nodes, current_idx, prev_text):
     genre_inst = _get_genre_instruction(story.genre)
     if genre_inst:
         system += "\n\n" + genre_inst
+    # 行文指纹修正：基于已完成节点正文的 AI 痕迹检测（逐节点生成的跨段重复是主要病灶）
+    if prev_text and len(prev_text.strip()) >= 500:
+        try:
+            from app.services.ai_metric import build_tone_instructions
+            tone_inst = build_tone_instructions(prev_text[-12000:])
+            if tone_inst:
+                system += "\n\n" + tone_inst
+        except Exception:
+            pass
+    # 风格指纹锚定（与长篇一致）：用户保存过文风参考时注入
+    try:
+        from app.services.style_fingerprint import load_style, format_style_for_prompt, format_anchor_for_prompt
+        style = load_style()
+        if style:
+            style_ctx = format_style_for_prompt(style)
+            if style_ctx:
+                system += "\n\n" + style_ctx
+        anchor_ctx = format_anchor_for_prompt()
+        if anchor_ctx:
+            system += "\n\n" + anchor_ctx
+    except Exception:
+        pass
 
     user_parts = []
     # 注入分阶段策划产出（角色/场景/主题），优先使用策划阶段产出，回退用户输入

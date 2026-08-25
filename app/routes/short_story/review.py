@@ -207,6 +207,14 @@ def rewrite_with_feedback(story_id):
         f"- 不要删减情节，而是完善和扩展\n\n"
         + DEFAULT_WRITER_CONSTRAINTS
     )
+    # 文风锚例注入（全文重写路径）
+    try:
+        from app.services.style_fingerprint import format_anchor_for_prompt
+        anchor_ctx = format_anchor_for_prompt()
+        if anchor_ctx:
+            system += "\n\n" + anchor_ctx
+    except Exception:
+        pass
     messages = [{"role": "system", "content": system}, {"role": "user", "content": (
         f"【评审意见】\n{critic_feedback}\n\n【原文】\n{original}"
     )}]
@@ -219,6 +227,8 @@ def rewrite_with_feedback(story_id):
                 api_key=cfg.get("api_key", ""), base_url=cfg.get("base_url", ""),
                 provider_type=cfg.get("provider_type", "deepseek"),
                 temperature=cfg.get("temperature", 0.8), max_tokens=round_cap,
+                frequency_penalty=cfg.get("frequency_penalty"),
+                presence_penalty=cfg.get("presence_penalty"),
             ):
                 full_text += token
                 yield token
@@ -252,6 +262,8 @@ def rewrite_with_feedback(story_id):
                     provider_type=cfg.get("provider_type", "deepseek"),
                     temperature=cfg.get("temperature", 0.8),
                     max_tokens=min(remaining * 2, round_cap),
+                    frequency_penalty=cfg.get("frequency_penalty"),
+                    presence_penalty=cfg.get("presence_penalty"),
                 ):
                     full_text += token
                     yield token
@@ -321,6 +333,24 @@ def _rewrite_by_nodes(story, nodes, done_nodes, critic_feedback, cfg, app, story
                 f"6. 本节点重写后需约 {target_len} 字，不得少于原文的 80%\n\n"
                 + DEFAULT_WRITER_CONSTRAINTS
             )
+            # 行文指纹修正：基于重写前文本的 AI 痕迹检测（首个节点时前文尚空，用原节点正文）
+            try:
+                from app.services.ai_metric import build_tone_instructions
+                tone_base = prev_text or original_node
+                if len(tone_base.strip()) >= 500:
+                    tone_inst = build_tone_instructions(tone_base[-12000:])
+                    if tone_inst:
+                        system += "\n\n" + tone_inst
+            except Exception:
+                pass
+            # 文风锚例注入（重写时也带着，保持风格一致性）
+            try:
+                from app.services.style_fingerprint import format_anchor_for_prompt
+                anchor_ctx = format_anchor_for_prompt()
+                if anchor_ctx:
+                    system += "\n\n" + anchor_ctx
+            except Exception:
+                pass
             user = (
                 f"【评审意见】\n{critic_feedback[:800]}\n\n"
                 + (f"【前文（上一节点结尾）】\n……{prev_text[-1500:]}\n\n" if prev_text else "")
@@ -339,6 +369,8 @@ def _rewrite_by_nodes(story, nodes, done_nodes, critic_feedback, cfg, app, story
                     api_key=cfg.get("api_key", ""), base_url=cfg.get("base_url", ""),
                     provider_type=cfg.get("provider_type", "deepseek"),
                     temperature=cfg.get("temperature", 0.8), max_tokens=node_tokens,
+                    frequency_penalty=cfg.get("frequency_penalty"),
+                    presence_penalty=cfg.get("presence_penalty"),
                 ):
                     node_text += token
                     yield token

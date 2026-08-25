@@ -17,6 +17,15 @@ from app.routes.short_story.prompts import (
 from app.routes.short_story import short_story_bp
 
 
+def _anchor():
+    """文风锚例上下文；未启用/未保存时返回空串。"""
+    try:
+        from app.services.style_fingerprint import format_anchor_for_prompt
+        return format_anchor_for_prompt()
+    except Exception:
+        return ""
+
+
 # ---------------------------------------------------------------------------
 # 剧情大纲节点解析
 # ---------------------------------------------------------------------------
@@ -178,6 +187,8 @@ def _stream_ai_tokens(cfg, messages, max_tokens):
         provider_type=cfg.get("provider_type", "deepseek"),
         temperature=cfg.get("temperature", 0.8),
         max_tokens=max_tokens,
+        frequency_penalty=cfg.get("frequency_penalty"),
+        presence_penalty=cfg.get("presence_penalty"),
     )
 
 
@@ -192,6 +203,8 @@ def _call_ai_sync_wrapper(messages, cfg):
         provider_type=cfg.get("provider_type", "deepseek"),
         temperature=cfg.get("temperature", 0.8),
         max_tokens=cfg.get("max_tokens", 4096),
+        frequency_penalty=cfg.get("frequency_penalty"),
+        presence_penalty=cfg.get("presence_penalty"),
     )
 
 
@@ -454,6 +467,7 @@ def write_from_concept(story_id):
                     "3. 直接接续前文写下去，不要重复已有内容，不要输出任何说明\n"
                     f"4. 还需要写约 {remaining} 字\n\n"
                     f"【原始构思 — 必须严格遵守】\n{concept}"
+                    + _anchor()
                 )},
                 {"role": "user", "content": (
                     f"【前文内容（最近部分）】\n{all_text[-4000:]}\n\n"
@@ -478,6 +492,7 @@ def write_from_concept(story_id):
                     "请根据原始构思，为故事写一个完整的结尾，收束所有线索。\n\n"
                     f"【原始构思】\n{concept}\n\n"
                     "不要添加构思之外的新情节，专注于收尾。"
+                    + _anchor()
                 )},
                 {"role": "user", "content": (
                     f"【前文内容】\n{all_text[-3000:]}\n\n"
@@ -590,6 +605,7 @@ def continue_story(story_id):
         "2. 情节与原设定保持一致，不得引入突兀的新人物、新势力、新冲突线\n"
         f"3. 续写约 {words} 字，写到一个自然的停顿处即可\n\n"
         + DEFAULT_WRITER_CONSTRAINTS
+        + _anchor()
     )
     user = (
         f"【原设定】\n{concept[:600]}\n\n"
@@ -653,6 +669,7 @@ def expand_selection(story_id):
         f"2. 在原有内容基础上增加约 {add_words} 字\n"
         "3. 输出扩写后的**完整段落**（含原有内容），不要输出任何说明或前后缀\n\n"
         + DEFAULT_WRITER_CONSTRAINTS
+        + _anchor()
     )
     user = (
         (f"【前文（供衔接参考）】\n……{before}\n\n" if before else "")
@@ -693,6 +710,7 @@ def rewrite_selection(story_id):
         "2. 与前后文的情节、人称、时态保持一致\n"
         "3. 只输出重写后的片段，不要输出任何说明\n\n"
         + DEFAULT_WRITER_CONSTRAINTS
+        + _anchor()
     )
     user = (
         (f"【前文（供衔接参考）】\n……{before}\n\n" if before else "")
@@ -774,6 +792,7 @@ def rewrite_story(story_id):
         "你是一位专业的小说编辑。根据用户的要求，修改和完善这篇短篇小说。\n"
         "输出修改后的完整小说正文，不要输出其他说明。"
     )
+    system += _anchor()
     user = (
         f"【修改要求】\n{instruction}\n\n"
         f"【原文】\n{story.content}"
@@ -863,6 +882,8 @@ def generate_section(story_id):
     skill_ctx = build_skill_prompt()
     if skill_ctx:
         system += "\n\n" + skill_ctx
+
+    system += _anchor()
 
     user_parts = [context_str]
     if previous_content:

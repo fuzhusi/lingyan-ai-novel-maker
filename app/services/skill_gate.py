@@ -23,11 +23,10 @@ _DIALOGUE_MODIFIER_RE = re.compile(
     r"|没好气地道|咬着牙道"
 )
 
-# 三连排比（rhythm_breaking）：同一句内三处「有的…」「一是…」等
-_PARALLEL_TRIAD_RE = re.compile(
-    r"(?:有的|一个|一种|仿佛|像是)[^。！？；\n]{1,16}(?:有的|一个|一种|仿佛|像是)"
-    r"[^。！？；\n]{1,16}(?:有的|一种|像是)"
-)
+# 排比检测（rhythm_breaking）：2026-08 调整——句内三连「有的…有的…」不再报违规。
+# 对照语料研究（docs/ai-tone-research.md §四）实测句内同构排比人类比 AI 更高频
+# （R=0.61），扣分方向相反；成立的是跨相邻句的结构同构（同头连开，R=2.0），
+# 由 _consecutive_same_opening 覆盖。
 
 # 模板结构标记（deai_structure）
 _TEMPLATE_STRUCTURE_RE = re.compile(r"(首先|其次|再者|紧接着|最后)[，,、]")
@@ -117,12 +116,10 @@ def run_checks(text, active_skills=None):
     if "dialogue_realism" in active or "dialogue_humanize" in active:
         add("dialogue_realism", "对话修饰语", _count_dialogue_modifiers(text))
 
-    # 排比与匀称节奏
+    # 排比与匀称节奏（仅跨句同构；句内排比不判）
     if "rhythm_breaking" in active:
-        v = _PARALLEL_TRIAD_RE.findall(text)
-        viol = ([f"疑似三连排比：{p}" for p in v[:3]] if v else [])
-        viol += _consecutive_same_opening(text)
-        add("rhythm_breaking", "排比/匀称句式", viol)
+        viol = _consecutive_same_opening(text)
+        add("rhythm_breaking", "跨句同构排比", viol)
 
     # 模板结构标记
     if "deai_structure" in active:

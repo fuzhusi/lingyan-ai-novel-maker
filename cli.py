@@ -1733,10 +1733,16 @@ def cmd_llm(args):
             if agent_type not in AGENT_TYPES:
                 print(f"✗ 未知 Agent: {agent_type}")
                 return
-            if args.temperature is None and args.max_tokens is None:
+            new_params = [args.temperature, args.max_tokens,
+                          getattr(args, "frequency_penalty", None),
+                          getattr(args, "presence_penalty", None)]
+            if all(v is None for v in new_params):
                 # 显示当前参数
                 cfg = get_effective_config(agent_type=agent_type)
-                print(f"【{agent_type}】temperature={cfg.get('temperature')} max_tokens={cfg.get('max_tokens')}")
+                print(f"【{agent_type}】temperature={cfg.get('temperature')} "
+                      f"max_tokens={cfg.get('max_tokens')} "
+                      f"frequency_penalty={cfg.get('frequency_penalty')} "
+                      f"presence_penalty={cfg.get('presence_penalty')}")
                 return
             if args.temperature is not None:
                 try:
@@ -1754,6 +1760,23 @@ def cmd_llm(args):
                     return
                 _save_setting(f"max_tokens_{agent_type}", args.max_tokens)
                 print(f"✓ {agent_type}.max_tokens = {args.max_tokens}")
+            for pkey in ("frequency_penalty", "presence_penalty"):
+                pval = getattr(args, pkey, None)
+                if pval is not None:
+                    if pval.lower() in ("none", "off", ""):
+                        from app.models import Setting as _S
+                        row = _S.query.get(f"{pkey}_{agent_type}")
+                        if row:
+                            db.session.delete(row)
+                        print(f"✓ {agent_type}.{pkey} 已清除")
+                    else:
+                        try:
+                            float(pval)
+                        except ValueError:
+                            print(f"✗ --{pkey} 需为数字")
+                            return
+                        _save_setting(f"{pkey}_{agent_type}", pval)
+                        print(f"✓ {agent_type}.{pkey} = {pval}")
             db.session.commit()
 
         elif action == "effective":
@@ -1761,7 +1784,8 @@ def cmd_llm(args):
             agent_type = args.agent_type
             cfg = get_effective_config(agent_type=agent_type)
             print(f"【{agent_type or '全局'} 实际生效配置】")
-            for k in ["model_name", "provider_type", "base_url", "temperature", "max_tokens"]:
+            for k in ["model_name", "provider_type", "base_url", "temperature", "max_tokens",
+                      "frequency_penalty", "presence_penalty"]:
                 print(f"  {k}: {cfg.get(k)}")
             print(f"  api_key: {_mask_key(cfg.get('api_key',''))}")
             if args.novel:
@@ -2327,6 +2351,10 @@ def main():
     p_llm.add_argument("--llm-model", dest="llm_model", help="厂商模型，格式 provider_id:model_id（agent-set 用）")
     p_llm.add_argument("--temperature", help="温度（agent-param 用）")
     p_llm.add_argument("--max-tokens", dest="max_tokens", help="最大 token（agent-param 用）")
+    p_llm.add_argument("--frequency-penalty", dest="frequency_penalty",
+                       help="频率惩罚 -2~2，抑制重复措辞（agent-param 用；传 none 清除）")
+    p_llm.add_argument("--presence-penalty", dest="presence_penalty",
+                       help="存在惩罚 -2~2，鼓励新内容（agent-param 用；传 none 清除）")
     p_llm.add_argument("--novel", type=int, help="小说 ID（effective 叠加 per-novel 覆盖）")
 
     # ========== 写作技巧 ==========

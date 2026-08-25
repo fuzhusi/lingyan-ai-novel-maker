@@ -197,3 +197,96 @@ def api_list_styles():
         "name": s.key.replace("style_fingerprint_", ""),
         "preview": (s.value or "")[:100],
     } for s in styles])
+
+
+# ---------------------------------------------------------------------------
+# 文风锚例（anchor）—— 原文直插 prompt，保留 token 级节奏质感
+# ---------------------------------------------------------------------------
+
+_ANCHOR_INSTRUCTION = (
+    "模仿以下片段的叙事质感、句式节奏、用词习惯来写作。"
+    "只学习文风，严禁复述或抄袭片段中的具体情节、人物、名词。"
+    "不要在正文中提及这个片段，把它当作你自己的写作风格即可。"
+)
+
+_ANCHOR_MAX_CHARS = 2000  # 约 1000-1500 中文字 + 指令，防 prompt 膨胀
+
+
+def save_anchor(text):
+    """保存文风锚例原文到数据库。"""
+    setting = Setting.query.get("style_anchor_text")
+    if setting:
+        setting.value = text
+    else:
+        setting = Setting(key="style_anchor_text", value=text)
+        db.session.add(setting)
+    db.session.commit()
+
+
+def load_anchor():
+    """加载文风锚例原文，不存在时返回空串。"""
+    setting = Setting.query.get("style_anchor_text")
+    if setting and setting.value:
+        return setting.value.strip()
+    return ""
+
+
+def anchor_enabled():
+    """锚例是否启用。"""
+    setting = Setting.query.get("style_anchor_enabled")
+    return setting is not None and str(setting.value).strip() == "1"
+
+
+def set_anchor_enabled(flag):
+    """设置锚例开关。"""
+    setting = Setting.query.get("style_anchor_enabled")
+    if setting:
+        setting.value = "1" if flag else "0"
+    else:
+        setting = Setting(key="style_anchor_enabled", value="1" if flag else "0")
+        db.session.add(setting)
+    db.session.commit()
+
+
+def format_anchor_for_prompt():
+    """返回可直接注入 prompt 的文风锚例块（含指令+原文），无内容时返回空串。"""
+    if not anchor_enabled():
+        return ""
+    text = load_anchor()
+    if not text or len(text) < 50:
+        return ""
+    # 截断防 prompt 膨胀；按段落边界截断，不要切到半句话
+    if len(text) > _ANCHOR_MAX_CHARS:
+        cut = text[:_ANCHOR_MAX_CHARS]
+        last_para = cut.rfind("\n\n")
+        if last_para > _ANCHOR_MAX_CHARS // 2:
+            cut = cut[:last_para]
+        text = cut + "\n……（节选）"
+    return f"【文风锚例 — 模仿此风格续写，勿抄情节】\n{_ANCHOR_INSTRUCTION}\n\n{text}"
+
+
+@style_bp.route("/style-anchor", methods=["GET"])
+def api_get_anchor():
+    """获取当前文风锚例内容与启用状态。"""
+    return jsonify({
+        "text": load_anchor(),
+        "enabled": anchor_enabled(),
+    })
+
+
+@style_bp.route("/style-anchor", methods=["POST"])
+def api_save_anchor():
+    """保存文风锚例文本（纯文本，JSON body）。"""
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    save_anchor(text)
+    return jsonify({"ok": True, "len": len(text)})
+
+
+@style_bp.route("/style-anchor/toggle", methods=["POST"])
+def api_toggle_anchor():
+    """开关文风锚例（JSON body: {"enabled": true/false}）。"""
+    data = request.get_json(silent=True) or {}
+    flag = bool(data.get("enabled"))
+    set_anchor_enabled(flag)
+    return jsonify({"ok": True, "enabled": flag})

@@ -146,6 +146,8 @@ def get_llm(
     temperature: float = 0.8,
     max_tokens: int = 4096,
     streaming: bool = True,
+    frequency_penalty: float | None = None,
+    presence_penalty: float | None = None,
 ) -> ChatOpenAI:
     """构建 ChatOpenAI 实例。
 
@@ -157,6 +159,8 @@ def get_llm(
         temperature: 温度
         max_tokens: 最大 tokens
         streaming: 是否流式
+        frequency_penalty: 频率惩罚（-2~2，惩罚已出现 token，抑制重复措辞/构式指纹）
+        presence_penalty: 存在惩罚（-2~2，鼓励引入新内容）
     """
     kwargs = {
         "model": model,
@@ -164,6 +168,11 @@ def get_llm(
         "max_tokens": max_tokens,
         "streaming": streaming,
     }
+    # 采样惩罚仅在显式配置时传递（None 不下发，兼容不支持该参数的厂商）
+    if frequency_penalty is not None:
+        kwargs["frequency_penalty"] = frequency_penalty
+    if presence_penalty is not None:
+        kwargs["presence_penalty"] = presence_penalty
 
     if base_url:
         kwargs["base_url"] = base_url.rstrip("/")
@@ -215,6 +224,8 @@ def stream_llm_tokens(
     provider_type: str = "custom",
     temperature: float = 0.8,
     max_tokens: int = 4096,
+    frequency_penalty: float | None = None,
+    presence_penalty: float | None = None,
 ) -> Generator[str, None, None]:
     """流式调用 LLM，逐段 yield 文本片段。
 
@@ -227,6 +238,8 @@ def stream_llm_tokens(
             model=model, api_key=api_key, base_url=base_url,
             provider_type=provider_type, temperature=temperature,
             max_tokens=max_tokens, streaming=True,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
         )
         lc_messages = _messages_to_langchain(messages)
         for chunk in llm.stream(lc_messages):
@@ -266,6 +279,8 @@ def call_llm_sync(
     provider_type: str = "custom",
     temperature: float = 0.8,
     max_tokens: int = 4096,
+    frequency_penalty: float | None = None,
+    presence_penalty: float | None = None,
 ) -> str:
     """非流式调用 LLM，返回完整文本。
 
@@ -277,6 +292,8 @@ def call_llm_sync(
             model=model, api_key=api_key, base_url=base_url,
             provider_type=provider_type, temperature=temperature,
             max_tokens=max_tokens, streaming=False,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
         )
         lc_messages = _messages_to_langchain(messages)
         result = llm.invoke(lc_messages)

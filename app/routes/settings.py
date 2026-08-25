@@ -83,6 +83,8 @@ def settings_page():
             "temperature": get_setting(f"temperature_{agent_type}", ""),
             "max_tokens": get_setting(f"max_tokens_{agent_type}", ""),
             "llm_model": get_setting(f"llm_model_{agent_type}", ""),
+            "frequency_penalty": get_setting(f"frequency_penalty_{agent_type}", ""),
+            "presence_penalty": get_setting(f"presence_penalty_{agent_type}", ""),
         }
     # 获取已勾选的可用模型（按厂商分组）
     from app.config_utils import get_available_models_for_agent
@@ -139,8 +141,8 @@ def save_agent_settings():
                 if existing:
                     db.session.delete(existing)
 
-        # 保存 temperature 和 max_tokens
-        for param in ["temperature", "max_tokens"]:
+        # 保存 temperature / max_tokens / 采样惩罚（frequency_penalty / presence_penalty）
+        for param in ["temperature", "max_tokens", "frequency_penalty", "presence_penalty"]:
             key = f"{param}_{agent_type}"
             val = request.form.get(key, "")
             if val.strip():
@@ -168,7 +170,8 @@ def apply_recommended():
 def clear_agent_settings():
     """清除所有 agent 类型的自定义配置，恢复全局默认。"""
     for agent_type in AGENT_TYPES:
-        for param in ["model_name", "llm_model", "temperature", "max_tokens"]:
+        for param in ["model_name", "llm_model", "temperature", "max_tokens",
+                      "frequency_penalty", "presence_penalty"]:
             key = f"{param}_{agent_type}"
             existing = Setting.query.get(key)
             if existing:

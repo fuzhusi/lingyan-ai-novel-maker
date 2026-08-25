@@ -36,8 +36,15 @@ class TestGateViolations:
         assert not check["passed"]
 
     def test_parallel_triad_detected(self):
-        text = "山上的石头有的像猴子，有的像大象，有的像仙人，姿态万千。"
-        rep = run_gate(text, active_skills=["rhythm_breaking"])
+        # 2026-08 语义调整：句内同构排比实测人类比 AI 更高频（R=0.61），
+        # 不再判违规；跨相邻句的同头连开（R=2.0）才是有效信号
+        text_intra = "山上的石头有的像猴子，有的像大象，有的像仙人，姿态万千。"
+        rep = run_gate(text_intra, active_skills=["rhythm_breaking"])
+        check = next(c for c in rep["checks"] if c["skill"] == "rhythm_breaking")
+        assert check["passed"]
+
+        text_cross = "他们推开了那扇门。他们看见了满地的灰。他们听见了脚步声。"
+        rep = run_gate(text_cross, active_skills=["rhythm_breaking"])
         check = next(c for c in rep["checks"] if c["skill"] == "rhythm_breaking")
         assert not check["passed"]
 
