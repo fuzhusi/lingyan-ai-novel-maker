@@ -5,7 +5,7 @@
 <div class="login-container">
     <div class="login-card">
         <div class="login-header">
-            <div class="login-logo">灵砚</div>
+            <div class="login-logo"><span class="login-seal">砚</span><span>灵砚</span></div>
             <p class="login-subtitle">AI 小说创作系统</p>
         </div>
 
@@ -65,16 +65,32 @@
     border-bottom: 1px solid var(--border, #2a2722);
 }
 .login-logo {
-    font-size: 2.2rem;
-    font-weight: 700;
-    color: var(--accent, #c9a03a);
+    font-family: var(--font-accent, 'Kaiti SC', 'KaiTi', serif);
+    font-weight: 400;
+    font-size: 2.1rem;
     letter-spacing: 0.15em;
     margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45em;
+}
+.login-seal {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.35em; height: 1.35em;
+    background: #9e2f24;
+    color: #f5ead8;
+    border-radius: 4px;
+    letter-spacing: 0;
+    box-shadow: inset 0 0 0 1px rgba(245, 234, 216, 0.5), inset 0 0 8px rgba(50, 8, 6, 0.55);
+    transform: rotate(-3deg);
 }
 .login-subtitle {
     color: var(--text-dim, #8a8578);
     font-size: 0.85rem;
-    font-style: italic;
+    letter-spacing: 0.2em;
 }
 .login-error {
     background: rgba(220, 38, 38, 0.15);

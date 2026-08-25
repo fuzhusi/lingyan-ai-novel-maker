@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}{{ novel.title }} — 章节列表{% endblock %}
 
 {% block nav %}
@@ -91,7 +91,7 @@
     {% else %}
     <p class="empty">还没有章节 &mdash; 可以从 <a href="/novel/{{ novel.id }}/outline">大纲树</a> 一键创建</p>
     {% endif %}
-    <div style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-faint);font-style:italic">
+    <div style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-faint);letter-spacing:0.05em">
         提示：先到 <a href="/novel/{{ novel.id }}/outline">大纲树</a> 规划结构，再创建章节并关联大纲节点，生成时会自动注入分幕指引。
     </div>
 </div>

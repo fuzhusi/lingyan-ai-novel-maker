@@ -23,14 +23,14 @@
                     {% if story.mode == "inspiration" %}
                     <span class="genre-badge" style="background:var(--accent-subtle)">灵感</span>
                     {% elif story.mode == "setting" %}
-                    <span class="genre-badge" style="background:rgba(100,180,100,0.15);color:#8cbb8c">设定</span>
+                    <span class="genre-badge" style="background:rgba(167,139,250,0.14);color:#c9b8fc">设定</span>
                     {% else %}
-                    <span class="genre-badge" style="background:rgba(180,100,180,0.15);color:#bb8cbb">细心</span>
+                    <span class="genre-badge" style="background:rgba(110,168,221,0.14);color:#9cc3ec">细心</span>
                     {% endif %}
                     {% if story.status == "done" %}
-                    <span class="genre-badge" style="background:rgba(100,200,100,0.15);color:#7cbb7c">已完成</span>
+                    <span class="genre-badge" style="background:rgba(69,214,160,0.12);color:#7fe6bd">已完成</span>
                     {% elif story.status == "generating" %}
-                    <span class="genre-badge" style="background:rgba(200,200,100,0.15);color:#bbbb7c">生成中</span>
+                    <span class="genre-badge" style="background:rgba(242,201,121,0.12);color:#f2c979">生成中</span>
                     {% endif %}
                 </div>
                 {% if story.inspiration %}

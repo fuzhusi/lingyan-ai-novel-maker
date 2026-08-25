@@ -141,36 +141,7 @@
 {% endmacro %}
 
 {% block scripts %}
-<style>
-.outline-tree { display:flex;flex-direction:column;gap:0.1rem }
-.outline-node { }
-.outline-node.depth-0 { }
-.outline-node.depth-1 { padding-left:2.5rem }
-.outline-node.depth-2 { padding-left:5rem }
-.outline-node.depth-3 { padding-left:7.5rem }
-.outline-item { display:flex;align-items:center;gap:0.5rem;padding:0.55rem 0.8rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius) }
-.outline-item:hover { border-color:var(--accent-dim) }
-.outline-type { font-size:0.65rem;padding:0.1rem 0.45rem;border-radius:var(--radius-sm);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;white-space:nowrap }
-.type-volume { background:#3d2a5c;color:#b9a0e0 }
-.type-chapter { background:#1d3d2a;color:#80d0a0 }
-.type-scene { background:#1d3040;color:#90b8d0 }
-.outline-title { flex:1;font-weight:600;color:var(--text-bright);font-size:0.9rem }
-.outline-summary { font-size:0.82rem;color:var(--text-dim);padding:0.15rem 2.5rem 0.4rem;line-height:1.5 }
-.outline-actions { display:flex;gap:0.3rem;flex-shrink:0 }
-.outline-legend { display:flex;gap:1.2rem;flex-wrap:wrap;margin-bottom:1rem;font-size:0.8rem;color:var(--text-dim) }
-.legend-item { display:flex;align-items:center;gap:0.35rem }
-.status-tag { font-size:0.7rem;padding:0.08rem 0.45rem;border-radius:var(--radius-sm);font-weight:600 }
-.status-tag.linked { background:#1d3d2a;color:#80d0a0 }
-.status-tag.unlinked { background:var(--surface-alt);color:var(--text-dim) }
-.status-btn-linked { background:#2a4a3a;font-size:0.72rem;padding:0.18rem 0.55rem;text-decoration:none;color:#80d0a0!important;white-space:nowrap;border-radius:var(--radius-sm) }
-.status-btn-linked:hover { background:#3a5a4a }
-.status-btn-create { background:#3a5a2a;font-size:0.72rem;padding:0.18rem 0.55rem;white-space:nowrap;border-radius:var(--radius-sm) }
-.status-btn-create:hover { background:#4a6a3a }
-.outline-linked-info { font-size:0.78rem;color:var(--success);padding:0.1rem 2.5rem 0.25rem }
-.outline-linked-info a { color:var(--success);text-decoration:none }
-.outline-linked-info a:hover { text-decoration:underline }
-.outline-linked-info .meta { color:var(--text-faint);margin-left:0.5rem }
-</style>
+<!-- 大纲树/类型徽章/状态标签样式统一由 main.css「流光」主题提供 -->
 <script>
 document.getElementById('create-toggle').addEventListener('click', function() {
     const form = document.getElementById('create-form');

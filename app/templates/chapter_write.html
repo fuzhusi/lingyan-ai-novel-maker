@@ -22,7 +22,7 @@
             <button id="btn-save-human" class="btn-save-human" disabled>保存人工版本</button>
             <button id="btn-edit" class="btn-edit" disabled>手动编辑</button>
             <span class="sep">|</span>
-            <button id="btn-review" class="btn-review" disabled title="评审+审计+改写 一键完成">🔍 全面评审</button>
+            <button id="btn-review" class="btn-review" disabled title="评审+审计+改写 一键完成">全面评审</button>
             <button id="btn-approve" class="btn-approve" disabled>批准</button>
             <button id="btn-rewrite" class="btn-rewrite" disabled>重写</button>
             <span class="sep">|</span>
@@ -361,7 +361,7 @@
                     <span style="color:var(--accent);font-size:0.82rem;font-weight:600">${escapeHtml(issue.dimension_name || issue.dimension || '')}</span>
                 </div>
                 <div style="color:var(--text-bright);font-size:0.85rem;margin-bottom:0.2rem">${escapeHtml(issue.issue || '')}</div>
-                ${issue.suggestion ? `<div style="color:var(--text-dim);font-size:0.78rem">💡 ${escapeHtml(issue.suggestion)}</div>` : ''}
+                ${issue.suggestion ? `<div style="color:var(--text-dim);font-size:0.78rem">建议：${escapeHtml(issue.suggestion)}</div>` : ''}
             </div>`;
         }
         if ((report.issues || []).length > 8) {
@@ -374,7 +374,7 @@
             const rewriteContent = report.rewrite.rewritten_content;
             $('review-annotations').innerHTML += `
                 <details style="margin-top:0.8rem">
-                    <summary style="cursor:pointer;color:var(--accent);font-weight:600">✨ AI 自动改写（点击展开）</summary>
+                    <summary style="cursor:pointer;color:var(--accent);font-weight:600">AI 自动改写（点击展开）</summary>
                     <pre style="background:var(--bg);padding:0.8rem;border-radius:6px;margin-top:0.5rem;max-height:300px;overflow-y:auto;font-size:0.85rem;line-height:1.6;white-space:pre-wrap">${escapeHtml(rewriteContent)}</pre>
                     <button id="btn-apply-rewrite" class="btn-primary btn-sm" style="margin-top:0.4rem">采纳此版本</button>
                 </details>
@@ -638,7 +638,7 @@
             errorBox.style.display = 'block';
         }
 
-        generating = false; btnReview.innerHTML = '🔍 全面评审'; btnReview.disabled = false;
+        generating = false; btnReview.innerHTML = '全面评审'; btnReview.disabled = false;
     };
 
     // === Approve ===
@@ -710,7 +710,7 @@
     // unified diff 着色渲染：+绿 -红 @@/文件头灰 上下文行暗
     function renderDiffText(diffText) {
         if (!diffText) { $('diff-output').innerHTML = '<span style="color:var(--text-dim)">(无差异)</span>'; return; }
-        const html = diffText.split('\n').map(function(line) {
+        const html = diffText.split('n').map(function(line) {
             const esc = escapeHtml(line);
             if (line.startsWith('+++') || line.startsWith('---')) {
                 return '<span style="color:var(--accent);font-weight:600">' + esc + '</span>';
@@ -722,10 +722,10 @@
                 return '<span style="color:var(--success)">' + esc + '</span>';
             }
             if (line.startsWith('-')) {
-                return '<span style="color:#e05260">' + esc + '</span>';
+                return '<span style="color:var(--danger)">' + esc + '</span>';
             }
             return '<span style="color:var(--text-faint)">' + esc + '</span>';
-        }).join('\n');
+        }).join('n');
         $('diff-output').innerHTML = html;
     }
 
@@ -756,7 +756,7 @@
             const { done, value } = await reader.read();
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
+            const lines = buffer.split('n');
             buffer = lines.pop() || '';
             for (const line of lines) {
                 if (line.startsWith('data: ')) {
@@ -867,7 +867,7 @@
                 const items = groups[cat];
                 const isProtocol = cat === '作者文风协议';
                 html += `<div class="meta-block" style="margin-bottom:0.6rem">` +
-                    `<div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:0.3rem">${isProtocol ? '🖋 ' : ''}${escapeHtml(cat)}（${items.length}）</div>`;
+                    `<div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:0.3rem">${escapeHtml(cat)}（${items.length}）</div>`;
                 items.forEach(s => {
                     const authorTag = s.author ? `<span style="color:var(--accent-dim);font-size:0.78rem"> ${escapeHtml(s.author)}</span>` : '';
                     const protocolTag = s.protocol_pack ? '<span style="font-size:0.68rem;padding:0.05rem 0.35rem;border-radius:6px;background:var(--accent-ghost);color:var(--accent-dim);border:1px solid var(--accent-dim);margin-left:0.3rem">完整协议</span>' : '';

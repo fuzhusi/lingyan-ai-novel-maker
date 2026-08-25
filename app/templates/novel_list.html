@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}长篇创作 — 灵砚{% endblock %}
 
 {% block content %}
@@ -55,7 +55,7 @@
     {% if novel_data %}
     <div class="section-header">
         <h2>我的小说 <span class="count-badge">{{ novel_data|length }}</span></h2>
-        <form method="POST" action="/novel/delete-all" onsubmit="return confirm('⚠️ 这将永久删除所有小说及其全部数据，不可恢复！\n\n请输入 DELETE 确认：');" style="display:flex;align-items:center;gap:0.5rem">
+        <form method="POST" action="/novel/delete-all" onsubmit="return confirm('警告：这将永久删除所有小说及其全部数据，不可恢复！\n\n请输入 DELETE 确认：');" style="display:flex;align-items:center;gap:0.5rem">
             <input type="hidden" name="confirm" value="YES">
             <input type="text" id="delete-confirm" placeholder="输入 DELETE 确认" style="width:180px" autocomplete="off">
             <button type="submit" id="btn-delete-all" class="btn-danger" disabled>删除全部</button>

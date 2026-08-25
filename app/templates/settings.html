@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}系统设置 — 灵砚{% endblock %}
 
 {% block nav %}
@@ -19,7 +19,7 @@
         </p>
         <div style="margin-bottom:1rem;padding:0.8rem 1rem;background:var(--accent-subtle);border-radius:8px;display:flex;justify-content:space-between;align-items:center">
             <div>
-                <strong>🏢 多厂商模型管理</strong>
+                <strong>多厂商模型管理</strong>
                 <span style="font-size:0.82rem;color:var(--text-dim);margin-left:0.5rem">配置 API 厂商、拉取模型列表、按厂商分配模型给角色</span>
             </div>
             <a href="/settings/llm" class="btn btn-primary btn-sm">进入配置 →</a>
@@ -63,13 +63,13 @@
         <!-- 新手引导 (P2-4) -->
         <details style="margin-bottom:1rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.75rem 1rem">
             <summary style="cursor:pointer;color:var(--accent);font-weight:600;font-size:0.88rem">
-                💡 不知道如何配置？点此查看说明
+                提示：不知道如何配置？点此查看说明
             </summary>
             <div style="margin-top:0.8rem;font-size:0.85rem;line-height:1.7;color:var(--text)">
                 <p style="margin-bottom:0.6rem"><strong>推荐分组：</strong></p>
                 <ul style="padding-left:1.5rem;margin-bottom:0.8rem">
-                    <li><strong>⚡ 快速生成类（V4 Flash）</strong>：writer、outline、summary、short_story - 任务简单，速度优先</li>
-                    <li><strong>🎯 深度分析类（V4 Pro）</strong>：critic、rewrite、editor、audit、character_check 等 - 需要细致分析</li>
+                    <li><strong>快速生成类（V4 Flash）</strong>：writer、outline、summary、short_story - 任务简单，速度优先</li>
+                    <li><strong>深度分析类（V4 Pro）</strong>：critic、rewrite、editor、audit、character_check 等 - 需要细致分析</li>
                 </ul>
                 <p style="margin-bottom:0.4rem"><strong>使用建议：</strong></p>
                 <ul style="padding-left:1.5rem">
@@ -92,8 +92,8 @@
         <form method="POST" action="/settings/save-agent" id="agent-form">
             <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;margin-bottom:0.8rem">
                 {% for group_id, group_name, group_desc in [
-                    ("fast", "⚡ 快速生成类", "推荐 V4 Flash - 速度快、成本低"),
-                    ("deep", "🎯 深度分析类", "推荐 V4 Pro - 质量高、深度强")
+                    ("fast", "快速生成类", "推荐 V4 Flash - 速度快、成本低"),
+                    ("deep", "深度分析类", "推荐 V4 Pro - 质量高、深度强")
                 ] %}
                 <div style="padding:0.5rem 0.8rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:0.82rem;color:var(--text-dim)">
                     <strong style="color:var(--text-bright)">{{ group_name }}</strong> — {{ group_desc }}
@@ -140,7 +140,7 @@
                                     {% endfor %}
                                 </datalist>
                                 <div style="font-size:0.72rem;color:var(--text-faint);margin-top:0.2rem">
-                                    💡 可从下拉选择，也可手输 厂商ID:模型名（自定义部署/别名直传 API）
+                                    提示：可从下拉选择，也可手输 厂商ID:模型名（自定义部署/别名直传 API）
                                 </div>
                                 {% else %}
                                 <input type="text"
@@ -149,7 +149,7 @@
                                        placeholder="使用全局: {{ config.model_name }}"
                                        style="width:100%;font-family:var(--font-mono);font-size:0.8rem;padding:0.3rem">
                                 <div style="font-size:0.72rem;color:var(--text-faint);margin-top:0.2rem">
-                                    💡 前往 <a href="/settings/llm" style="color:var(--accent)">厂商配置</a> 添加厂商并勾选模型
+                                    提示：前往 <a href="/settings/llm" style="color:var(--accent)">厂商配置</a> 添加厂商并勾选模型
                                 </div>
                                 {% endif %}
                             </td>
@@ -171,9 +171,9 @@
                             </td>
                             <td style="padding:0.5rem;text-align:center">
                                 {% if agent_configs[agent_type].llm_model or agent_configs[agent_type].model_name %}
-                                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#4CAF50" title="已自定义"></span>
+                                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#45d6a0;box-shadow:0 0 8px rgba(69,214,160,0.5)" title="已自定义"></span>
                                 {% elif auto_models[agent_type] %}
-                                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#2196F3" title="自动: {{ auto_models[agent_type] }}"></span>
+                                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#5dd3f1;box-shadow:0 0 8px rgba(93,211,241,0.5)" title="自动: {{ auto_models[agent_type] }}"></span>
                                 {% else %}
                                 <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--text-faint)" title="使用全局配置"></span>
                                 {% endif %}

@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}模型配置 — 灵砚{% endblock %}
 
 {% block content %}
@@ -8,7 +8,7 @@
     </div>
 
     <div class="section-header">
-        <h2>🏢 模型厂商配置</h2>
+        <h2>模型厂商配置</h2>
         <button class="btn-primary" onclick="showAddProvider()" style="padding:0.6rem 1.5rem;border-radius:8px">+ 添加厂商</button>
     </div>
 
@@ -76,9 +76,7 @@
         <div class="provider-card" data-pid="{{ p.id }}" style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin-bottom:1rem">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem">
                 <div style="display:flex;align-items:center;gap:0.8rem">
-                    <span style="font-size:1.2rem">
-                        {% if p.provider_type == 'deepseek' %}🔵{% elif p.provider_type == 'openai' %}🟢{% elif p.provider_type == 'ollama' %}🟠{% elif p.provider_type == 'moonshot' %}🌙{% elif p.provider_type == 'zhipu' %}🧠{% elif p.provider_type == 'qwen' %}🟣{% elif p.provider_type == 'siliconflow' %}⚡{% elif p.provider_type == 'volcengine' %}🌋{% elif p.provider_type == 'openrouter' %}🔀{% elif p.provider_type == 'groq' %}🚀{% else %}⚪{% endif %}
-                    </span>
+                    <span class="provider-dot" style="background:{% if p.provider_type == 'deepseek' %}#5dd3f1{% elif p.provider_type == 'openai' %}#45d6a0{% elif p.provider_type == 'ollama' %}#f2c979{% elif p.provider_type == 'moonshot' %}#9cc3ec{% elif p.provider_type == 'zhipu' %}#6ea8dd{% elif p.provider_type == 'qwen' %}#c9b8fc{% elif p.provider_type == 'siliconflow' %}#7fe6bd{% elif p.provider_type == 'volcengine' %}#f87c9b{% elif p.provider_type == 'openrouter' %}#ef9db8{% elif p.provider_type == 'groq' %}#a5e8fa{% else %}var(--text-faint){% endif %}"></span>
                     <strong style="font-size:1.1rem">{{ p.name }}</strong>
                     <span style="font-size:0.75rem;color:var(--text-faint)">{{ p.provider_type }}</span>
                 </div>
@@ -103,8 +101,8 @@
             </div>
 
             <div style="display:flex;gap:0.5rem;margin-bottom:0.8rem">
-                <button class="btn btn-sm btn-secondary" onclick="testProvider({{ p.id }}, this)">🔌 测试连接</button>
-                <button class="btn btn-sm btn-primary" onclick="fetchModels({{ p.id }}, this)">📥 拉取模型</button>
+                <button class="btn btn-sm btn-secondary" onclick="testProvider({{ p.id }}, this)">测试连接</button>
+                <button class="btn btn-sm btn-primary" onclick="fetchModels({{ p.id }}, this)">拉取模型</button>
                 <span class="test-result" style="font-size:0.78rem;align-self:center"></span>
             </div>
 
@@ -141,7 +139,12 @@
 
     {% if not providers %}
     <div class="empty-state" style="padding:3rem">
-        <div class="empty-icon">🏢</div>
+        <div class="empty-icon" style="color:var(--accent);opacity:0.75">
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                <rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/>
+                <line x1="6" y1="6.5" x2="6.01" y2="6.5"/><line x1="6" y1="17.5" x2="6.01" y2="17.5"/>
+            </svg>
+        </div>
         <p class="empty-title">还没有配置厂商</p>
         <p class="empty-desc">点击「添加厂商」开始配置 API 厂商</p>
     </div>
@@ -247,7 +250,7 @@ function testProvider(pid, btn) {
             }
         })
         .catch(e => { result.innerHTML = `<span style="color:var(--danger)">✗ ${escapeHtml(e.message)}</span>`; })
-        .finally(() => { btn.disabled = false; btn.textContent = '🔌 测试连接'; });
+        .finally(() => { btn.disabled = false; btn.textContent = '测试连接'; });
 }
 
 function fetchModels(pid, btn) {
@@ -285,7 +288,7 @@ function fetchModels(pid, btn) {
             }
         })
         .catch(e => { result.innerHTML = `<span style="color:var(--danger)">✗ 拉取失败：${escapeHtml(e.message)}</span>`; })
-        .finally(() => { btn.disabled = false; btn.textContent = '📥 拉取模型'; });
+        .finally(() => { btn.disabled = false; btn.textContent = '拉取模型'; });
 }
 
 function toggleModel(mid, enabled, label) {

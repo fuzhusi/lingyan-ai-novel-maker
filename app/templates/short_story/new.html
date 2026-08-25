@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}新建短篇 — 灵砚{% endblock %}
 
 {% block content %}
@@ -93,10 +93,10 @@
             <label>故事结构</label>
             <select name="structure_template" id="structure-template">
                 <option value="">自动（AI 自由发挥）</option>
-                <option value="three_act">📐 三段式 — 铺垫→冲突→解决（通用）</option>
-                <option value="twist">🔄 反转式 — 表象→伏笔→反转→真相（悬疑/推理）</option>
-                <option value="emotional_arc">💫 情感弧 — 日常→触动→改变→余韵（治愈/文艺）</option>
-                <option value="escalating">⚔️ 冲突递进 — 小冲突→升级→高潮→抉择（动作/冒险）</option>
+                <option value="three_act">三段式 — 铺垫→冲突→解决（通用）</option>
+                <option value="twist">反转式 — 表象→伏笔→反转→真相（悬疑/推理）</option>
+                <option value="emotional_arc">情感弧 — 日常→触动→改变→余韵（治愈/文艺）</option>
+                <option value="escalating">冲突递进 — 小冲突→升级→高潮→抉择（动作/冒险）</option>
             </select>
         </div>
 
@@ -199,7 +199,7 @@
 .mode-card.active {
     opacity: 1;
     border-color: var(--accent);
-    box-shadow: 0 0 20px rgba(201, 160, 58, 0.15);
+    box-shadow: 0 0 22px rgba(93, 211, 241, 0.16), 0 0 44px rgba(167, 139, 250, 0.08);
 }
 </style>
 {% endblock %}

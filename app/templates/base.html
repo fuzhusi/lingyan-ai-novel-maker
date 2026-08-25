@@ -3,19 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#060a15">
     <title>{% block title %}AI 小说创作系统{% endblock %}</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='favicon.png') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" media="print" onload="this.media='all'">
-    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"></noscript>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=ZCOOL+XiaoWei&family=Noto+Serif+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=ZCOOL+XiaoWei&family=Noto+Serif+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"></noscript>
+    <script type="importmap">
+    { "imports": { "three": "/static/vendor/three.module.min.js" } }
+    </script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
     {% block head %}{% endblock %}
 </head>
 <body>
+    <!-- 大气层：CSS 极光斑垫底 + WebGL 环境流光（aurora.js 挂载） -->
+    <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
     <header class="topbar">
-        <a href="/" class="logo">&#x2735; 灵砚</a>
+        <a href="/" class="logo"><span class="seal">砚</span><span>灵砚</span></a>
         <nav>
             {% block nav %}{% endblock %}
         </nav>
@@ -32,21 +38,22 @@
 
     <!-- 移动端菜单 -->
     <div class="mobile-menu" id="mobile-menu">
-        <a href="/novel/">📚 长篇</a>
-        <a href="/short/">✏ 短篇</a>
-        <a href="/plagiarize/">🔗 借鉴</a>
-        <a href="/settings/">⚙ 设置</a>
-        <a href="/api/skills/page">✦ 技巧</a>
-        <a href="/prompt-templates/">📝 模板</a>
+        <a href="/novel/">长篇</a>
+        <a href="/short/">短篇</a>
+        <a href="/plagiarize/">借鉴</a>
+        <a href="/settings/">设置</a>
+        <a href="/api/skills/page">技巧</a>
+        <a href="/prompt-templates/">模板</a>
     </div>
 
     <main class="main-content">
         {% block content %}{% endblock %}
     </main>
-    <footer style="text-align:center;padding:2rem;color:var(--text-faint);font-size:0.78rem;font-style:italic">
+    <footer style="text-align:center;padding:2rem;color:var(--text-faint);font-size:0.78rem;letter-spacing:0.28em">
         &mdash; 笔落惊风雨，墨染见天机 &mdash;
     </footer>
     {% block scripts %}{% endblock %}
+<script type="module" src="/static/js/aurora.js"></script>
 <script>
 // 移动端菜单切换
 (function() {
@@ -78,6 +85,26 @@
         if (hit) a.classList.add('active');
     });
 })();
+
+// 流光聚光 — 指针位置写入 CSS 变量，卡片悬停时一汪柔光跟随光标
+(function() {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (!window.matchMedia('(hover: hover)').matches) return;
+    var selector = '.card, .novel-card, .chapter-card, .card-item, .outline-item, .sidebar-card, .mode-card';
+    var raf = 0, ev = null;
+    document.addEventListener('pointermove', function(e) {
+        ev = e;
+        if (raf) return;
+        raf = requestAnimationFrame(function() {
+            raf = 0;
+            var el = ev.target && ev.target.closest ? ev.target.closest(selector) : null;
+            if (!el) return;
+            var rect = el.getBoundingClientRect();
+            el.style.setProperty('--mx', (ev.clientX - rect.left) + 'px');
+            el.style.setProperty('--my', (ev.clientY - rect.top) + 'px');
+        });
+    }, { passive: true });
+})();
 </script>
 <style>
 /* 移动端响应式 (P2-3) */
@@ -102,12 +129,14 @@
         position: fixed;
         top: 50px;
         right: 0;
-        background: var(--bg-elevated, #121110);
-        border: 1px solid var(--border);
-        border-radius: 8px;
+        background: rgba(10, 16, 31, 0.96);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border: 1px solid var(--border-light);
+        border-radius: 10px;
         padding: 0.5rem 0;
         min-width: 180px;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        box-shadow: 0 12px 36px rgba(2, 6, 18, 0.65), 0 0 24px rgba(93, 211, 241, 0.06);
         z-index: 100;
     }
     .mobile-menu.open { display: block; }
@@ -117,8 +146,12 @@
         color: var(--text);
         text-decoration: none;
         font-size: 0.92rem;
+        transition: background 0.2s ease, color 0.2s ease;
     }
-    .mobile-menu a:hover { background: var(--surface-hover); }
+    .mobile-menu a:hover {
+        background: linear-gradient(90deg, rgba(93, 211, 241, 0.12), transparent);
+        color: var(--text-bright);
+    }
     .main-content { padding: 1rem !important; }
     .container { padding: 0 !important; }
     /* 仪表盘统计卡片在小屏幕上 2 列布局 */

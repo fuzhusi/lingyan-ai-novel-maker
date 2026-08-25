@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}{{ story.title }} — 短篇创作{% endblock %}
 
 {% block content %}
@@ -47,10 +47,10 @@
             <div class="setting-item">
                 <span class="setting-label">结构</span>
                 <span class="setting-value">
-                    {% if story.structure_template == "three_act" %}📐 三段式
-                    {% elif story.structure_template == "twist" %}🔄 反转式
-                    {% elif story.structure_template == "emotional_arc" %}💫 情感弧
-                    {% elif story.structure_template == "escalating" %}⚔️ 冲突递进
+                    {% if story.structure_template == "three_act" %}三段式
+                    {% elif story.structure_template == "twist" %}反转式
+                    {% elif story.structure_template == "emotional_arc" %}情感弧
+                    {% elif story.structure_template == "escalating" %}冲突递进
                     {% else %}{{ story.structure_template }}{% endif %}
                 </span>
             </div>
@@ -1682,7 +1682,7 @@
 }
 .concept-placeholder {
     color: var(--text-faint);
-    font-style: italic;
+    letter-spacing: 0.06em;
     text-align: center;
     padding: 2rem;
 }
@@ -1697,14 +1697,14 @@
     position: sticky;
     bottom: 12px;
     z-index: 40;
-    background: rgba(26, 35, 30, 0.92);
+    background: rgba(10, 16, 31, 0.92);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     border: 1px solid var(--border-light);
     border-radius: 10px;
     padding: 0.6rem 1rem;
     margin-bottom: 1rem;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(237, 232, 219, 0.05);
+    box-shadow: 0 8px 28px rgba(2, 6, 18, 0.5), inset 0 1px 0 rgba(165, 232, 250, 0.06);
 }
 .section-label {
     font-size: 0.95rem;
@@ -1764,15 +1764,16 @@
 }
 .node-progress-track {
     height: 6px;
-    background: rgba(201, 160, 58, 0.15);
+    background: rgba(93, 211, 241, 0.12);
     border-radius: 3px;
     overflow: hidden;
     margin-bottom: 0.6rem;
 }
 .node-progress-fill {
     height: 100%;
-    background: var(--accent);
+    background: linear-gradient(90deg, #2b8fb8, #c2953a);
     border-radius: 3px;
+    box-shadow: 0 0 10px rgba(242, 201, 121, 0.4);
     transition: width 0.4s ease;
 }
 .node-chips {
@@ -1784,7 +1785,7 @@
     font-size: 0.72rem;
     padding: 0.2rem 0.55rem;
     border-radius: 12px;
-    background: rgba(201, 160, 58, 0.08);
+    background: var(--accent-ghost);
     border: 1px solid var(--accent-dim);
     color: var(--text-dim);
     white-space: nowrap;
@@ -1793,9 +1794,9 @@
     text-overflow: ellipsis;
 }
 .node-chip.done {
-    background: rgba(76, 175, 80, 0.12);
-    border-color: rgba(76, 175, 80, 0.4);
-    color: #4caf50;
+    background: rgba(69, 214, 160, 0.12);
+    border-color: rgba(69, 214, 160, 0.4);
+    color: #7fe6bd;
 }
 .node-chip.current {
     background: var(--accent);

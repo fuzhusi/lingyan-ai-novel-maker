@@ -115,7 +115,11 @@ app/
 │   └── short_story_templates.py # 短篇结构模板
 │
 ├── templates/           # 17 个 Jinja2 模板 (含 login.html + short_story/)
-└── static/css/main.css  # Ink & Shadow 暗色主题
+└── static/              # 静态资源
+    ├── css/main.css     # 流光 · 月砚 主题·中秋版（夜幕深空 + 天青/桂金/霞流光，满月悬空）
+    └── js/
+        ├── aurora.js    # 全站环境月夜层（WebGL 满月+云纱+星子+双色流光；网关页自动让位）
+        └── inkflow.js   # 网关沉浸页增强场景（Three.js 大满月+桂花雨粒子+鼠标扰动）
 ```
 
 ## 数据库模型 (21 个)
