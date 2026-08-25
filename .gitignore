@@ -34,6 +34,7 @@ instance/
 
 # ===== 测试 / 覆盖率 =====
 .pytest_cache/
+pytest-cache-files-*/
 .coverage
 .coverage.*
 htmlcov/
