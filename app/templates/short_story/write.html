@@ -1024,6 +1024,45 @@
             }
         }
 
+        // ===== 技巧质量门禁：生成完成后对全文做确定性校验 =====
+        function runSkillGate(text) {
+            let box = document.getElementById('gate-report');
+            if (!box) {
+                box = document.createElement('div');
+                box.id = 'gate-report';
+                box.className = 'gate-report';
+                const anchor = document.getElementById('story-actions');
+                anchor.parentNode.insertBefore(box, anchor.nextSibling);
+            }
+            box.style.display = 'block';
+            box.className = 'gate-report';
+            box.innerHTML = '<span class="gate-pending">技巧门禁检测中…</span>';
+            fetch('/api/skills/gate-check', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text })
+            }).then(r => r.json()).then(rep => {
+                if (!rep || rep.error) { box.innerHTML = ''; return; }
+                if (rep.passed) {
+                    box.className = 'gate-report pass';
+                    box.textContent = '✓ 技巧门禁通过 — 未检出违规写法';
+                    return;
+                }
+                const bad = rep.checks.filter(c => !c.passed);
+                let h = `<div class="gate-title">⚠ 技巧门禁：${bad.length} 项待改进</div>`;
+                bad.forEach(c => {
+                    h += `<div class="gate-item"><b>${c.name}</b> · ${c.skill}`;
+                    c.violations.slice(0, 3).forEach(v => {
+                        h += `<div class="gate-ex">${v}</div>`;
+                    });
+                    h += '</div>';
+                });
+                h += '<div class="gate-hint">可针对摘录句手动修改，或「重新创作」再试</div>';
+                box.className = 'gate-report fail';
+                box.innerHTML = h;
+            }).catch(() => { box.innerHTML = ''; });
+        }
+
         function resetAndRewrite() {
             if (nodeTotal > 0 && !confirm('重新创作将清空当前内容并从头生成全部节点，确定吗？')) return;
             pausedText = '';
@@ -1071,6 +1110,7 @@
                         <button id="btn-edit" class="btn-secondary">编辑全文</button>
                     `;
                     bindStoryActions();
+                    runSkillGate(fullText);
                     // 启用评审/润色按钮、隐藏草稿横幅（首次创作完成时按钮还是 disabled 状态）
                     enableReviewButton();
                 },
@@ -1697,6 +1737,8 @@
     font-weight: bold;
 }
 @keyframes blink { 50% { opacity: 0; } }
+
+/* ===== 技巧质量门禁报告（样式在 main.css 全局定义） ===== */
 
 /* ===== 剧情节点进度条 ===== */
 .node-progress {

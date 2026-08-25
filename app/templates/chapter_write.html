@@ -38,6 +38,8 @@
             <div id="streaming-indicator" class="streaming-indicator" style="display:none">正在生成&hellip;</div>
         </div>
 
+        <div id="gate-report" class="gate-report" style="display:none"></div>
+
         <div class="chapter-meta">
             {% if outline_context %}
             <details open>
@@ -590,6 +592,7 @@
                 outputArea.scrollTop = outputArea.scrollHeight;
             });
             fullText = outputArea.value;
+            if (fullText.trim()) runSkillGate(fullText);
         } catch(e) {
             errorBox.textContent = '内容生成失败: ' + e.message;
             errorBox.style.display = 'block';
@@ -678,6 +681,7 @@
                 outputArea.scrollTop = outputArea.scrollHeight;
             });
             fullText = outputArea.value;
+            if (fullText.trim()) runSkillGate(fullText);
         } catch(e) {
             errorBox.textContent = '重写失败: ' + e.message;
             errorBox.style.display = 'block';
@@ -802,6 +806,39 @@
     }
 
     // --- 已载入技巧（生成时注入 Writer 的活跃技巧） ---
+    // --- 技巧质量门禁：生成完成后对全文做确定性校验 ---
+    function runSkillGate(text) {
+        const box = $('gate-report');
+        if (!box) return;
+        box.style.display = 'block';
+        box.className = 'gate-report';
+        box.innerHTML = '<span class="gate-pending">技巧门禁检测中…</span>';
+        fetch('/api/skills/gate-check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text })
+        }).then(r => r.json()).then(rep => {
+            if (!rep || rep.error) { box.style.display = 'none'; return; }
+            if (rep.passed) {
+                box.className = 'gate-report pass';
+                box.textContent = '✓ 技巧门禁通过 — 未检出违规写法';
+                return;
+            }
+            const bad = rep.checks.filter(c => !c.passed);
+            let h = `<div class="gate-title">⚠ 技巧门禁：${bad.length} 项待改进</div>`;
+            bad.forEach(c => {
+                h += `<div class="gate-item"><b>${c.name}</b> · ${c.skill}`;
+                c.violations.slice(0, 3).forEach(v => {
+                    h += `<div class="gate-ex">${v}</div>`;
+                });
+                h += '</div>';
+            });
+            h += '<div class="gate-hint">可针对摘录句手动修改后保存，或重新生成</div>';
+            box.className = 'gate-report fail';
+            box.innerHTML = h;
+        }).catch(() => { box.style.display = 'none'; });
+    }
+
     async function loadSkills() {
         try {
             const resp = await fetch('/api/skills');

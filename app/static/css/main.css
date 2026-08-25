@@ -1469,8 +1469,7 @@ pre.t-content {
 .portal-hint {
     font-size: 0.75rem;
     color: var(--text-faint);
-    font-style: italic;
-}
+    font-style: italic;}
 
 .gateway-footer {
     margin-top: 3rem;
@@ -1558,3 +1557,41 @@ pre.t-content {
     }
     .topbar .logo { animation: none; }
 }
+
+/* ===== 技巧质量门禁报告（长篇写作页 + 短篇创作页共用） ===== */
+.gate-report {
+    margin: -0.4rem 0 1.2rem;
+    padding: 0.7rem 1rem;
+    border-radius: var(--radius);
+    font-size: 0.85rem;
+    line-height: 1.7;
+}
+.gate-report.pass {
+    background: rgba(113, 160, 118, 0.08);
+    color: #9fc7a3;
+    border: 1px solid rgba(113, 160, 118, 0.3);
+}
+.gate-report.fail {
+    background: rgba(212, 162, 78, 0.07);
+    border: 1px solid rgba(212, 162, 78, 0.35);
+}
+.gate-title {
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+    color: var(--text-bright);
+}
+.gate-item { margin-top: 0.35rem; }
+.gate-item b {
+    color: var(--accent-light);
+    font-weight: 600;
+}
+.gate-ex {
+    color: var(--text-dim);
+    padding-left: 1em;
+}
+.gate-hint {
+    margin-top: 0.45rem;
+    color: var(--text-faint);
+    font-size: 0.78rem;
+}
+.gate-pending { color: var(--text-faint); }
