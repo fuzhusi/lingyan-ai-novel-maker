@@ -75,8 +75,8 @@
     --radius-lg: 10px;
 
     /* 阴影与辉光 */
-    --shadow-sm:    0 1px 2px rgba(2, 6, 18, 0.5);
-    --shadow-card:  0 2px 10px rgba(2, 6, 18, 0.45);
+    --shadow-sm:    0 1px 2px rgba(74, 58, 34, 0.5);
+    --shadow-card:  0 2px 10px rgba(74, 58, 34, 0.45);
     --shadow-glow:  0 0 22px var(--accent-glow);
 
     /* 过渡 */
@@ -208,7 +208,7 @@ a:hover { color: var(--accent); text-shadow: 0 0 12px var(--accent-glow); }
     backdrop-filter: blur(14px) saturate(1.25);
     -webkit-backdrop-filter: blur(14px) saturate(1.25);
     border-bottom: 1px solid var(--border);
-    box-shadow: inset 0 -1px 0 rgba(239, 116, 84, 0.05), 0 4px 28px rgba(2, 6, 18, 0.35);
+    box-shadow: inset 0 -1px 0 rgba(239, 116, 84, 0.05), 0 4px 28px rgba(74, 58, 34, 0.35);
 }
 
 .topbar .logo {
@@ -315,7 +315,7 @@ a:hover { color: var(--accent); text-shadow: 0 0 12px var(--accent-glow); }
         -webkit-backdrop-filter: blur(16px) saturate(1.2);
         border-bottom: none;
         border-right: 1px solid var(--border);
-        box-shadow: inset -1px 0 0 rgba(239, 116, 84, 0.05), 8px 0 32px rgba(2, 6, 18, 0.35);
+        box-shadow: inset -1px 0 0 rgba(239, 116, 84, 0.05), 8px 0 32px rgba(74, 58, 34, 0.35);
         overflow-y: auto;
         z-index: 60;
     }
@@ -400,20 +400,20 @@ a:hover { color: var(--accent); text-shadow: 0 0 12px var(--accent-glow); }
 /* --- Cards ------------------------------------------------- */
 .card {
     position: relative;
-    background: linear-gradient(175deg, rgba(44, 27, 21, 0.55) 0%, rgba(30, 19, 15, 0.72) 100%);
+    background: linear-gradient(175deg, rgba(252, 248, 238, 0.96) 0%, rgba(243, 235, 218, 0.97) 100%);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     padding: 1.75rem;
     box-shadow:
         inset 0 1px 0 rgba(255, 224, 188, 0.05),
-        0 2px 12px rgba(2, 6, 18, 0.35);
+        0 2px 12px rgba(74, 58, 34, 0.35);
     transition: border-color 0.3s var(--ease), box-shadow 0.3s var(--ease);
 }
 .card:hover {
     border-color: var(--border-light);
     box-shadow:
         inset 0 1px 0 rgba(255, 224, 188, 0.07),
-        0 4px 20px rgba(2, 6, 18, 0.45),
+        0 4px 20px rgba(74, 58, 34, 0.45),
         0 0 24px rgba(239, 116, 84, 0.04);
 }
 
@@ -708,7 +708,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
 
 .novel-card {
     position: relative;
-    background: linear-gradient(170deg, rgba(44, 27, 21, 0.5) 0%, rgba(30, 19, 15, 0.7) 100%);
+    background: linear-gradient(170deg, rgba(252, 248, 238, 0.95) 0%, rgba(243, 235, 218, 0.97) 100%);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     padding: 1.5rem;
@@ -736,7 +736,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
     transform: translateY(-3px);
     box-shadow:
         inset 0 1px 0 rgba(255, 224, 188, 0.07),
-        0 10px 28px rgba(2, 6, 18, 0.5),
+        0 10px 28px rgba(74, 58, 34, 0.5),
         0 0 28px rgba(239, 116, 84, 0.08),
         0 0 48px rgba(242, 201, 121, 0.06);
 }
@@ -851,7 +851,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
     justify-content: space-between;
     align-items: center;
     padding: 1rem 1.25rem;
-    background: linear-gradient(170deg, rgba(44, 27, 21, 0.42) 0%, rgba(30, 19, 15, 0.62) 100%);
+    background: linear-gradient(170deg, rgba(252, 248, 238, 0.94) 0%, rgba(243, 235, 218, 0.96) 100%);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     transition: border-color 0.25s var(--ease), box-shadow 0.25s var(--ease);
@@ -887,7 +887,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
     flex-direction: column;
     gap: 0.3rem;
     padding: 1.1rem;
-    background: linear-gradient(170deg, rgba(44, 27, 21, 0.42) 0%, rgba(30, 19, 15, 0.62) 100%);
+    background: linear-gradient(170deg, rgba(252, 248, 238, 0.94) 0%, rgba(243, 235, 218, 0.96) 100%);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     text-decoration: none;
@@ -898,7 +898,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
 .chapter-card:hover {
     border-color: var(--accent-dim);
     transform: translateY(-2px);
-    box-shadow: 0 6px 18px rgba(2, 6, 18, 0.45), 0 0 20px rgba(239, 116, 84, 0.07);
+    box-shadow: 0 6px 18px rgba(74, 58, 34, 0.45), 0 0 20px rgba(239, 116, 84, 0.07);
 }
 
 .ch-num {
@@ -956,7 +956,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
     position: sticky;
     top: 60px;
     z-index: 10;
-    box-shadow: 0 6px 24px rgba(2, 6, 18, 0.45), inset 0 1px 0 rgba(255, 224, 188, 0.07);
+    box-shadow: 0 6px 24px rgba(74, 58, 34, 0.45), inset 0 1px 0 rgba(255, 224, 188, 0.07);
 }
 
 .toolbar .sep {
@@ -1106,12 +1106,12 @@ button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
 .btn-rewrite { font-weight: 600; }
 
 .review-panel {
-    background: linear-gradient(150deg, rgba(44, 27, 21, 0.55) 0%, rgba(30, 19, 15, 0.8) 100%);
+    background: linear-gradient(150deg, rgba(252, 248, 238, 0.96) 0%, rgba(243, 235, 218, 0.8) 100%);
     border: 1px solid var(--border-light);
     border-radius: var(--radius-lg);
     padding: 1.5rem;
     margin-bottom: 1rem;
-    box-shadow: 0 4px 20px rgba(2, 6, 18, 0.4), inset 0 1px 0 rgba(255, 224, 188, 0.05);
+    box-shadow: 0 4px 20px rgba(74, 58, 34, 0.4), inset 0 1px 0 rgba(255, 224, 188, 0.05);
 }
 .review-panel h3 {
     margin-top: 0;
@@ -1131,7 +1131,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
 
 .review-comment {
     padding: 0.85rem 1rem;
-    background: rgba(18, 12, 10, 0.55);
+    background: rgba(252, 248, 238, 0.92);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     margin: 0.6rem 0;
@@ -1165,7 +1165,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
 
 .anno-item {
     padding: 0.7rem 0.85rem;
-    background: rgba(18, 12, 10, 0.55);
+    background: rgba(252, 248, 238, 0.92);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     margin: 0.4rem 0;
@@ -1206,7 +1206,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
 }
 
 .diff-output {
-    background: rgba(18, 12, 10, 0.65);
+    background: rgba(252, 248, 238, 0.92);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 1rem 1.25rem;
@@ -1293,7 +1293,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
     align-items: center;
     gap: 0.5rem;
     padding: 0.55rem 0.8rem;
-    background: linear-gradient(170deg, rgba(44, 27, 21, 0.4) 0%, rgba(30, 19, 15, 0.58) 100%);
+    background: linear-gradient(170deg, rgba(252, 248, 238, 0.94) 0%, rgba(243, 235, 218, 0.96) 100%);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     transition: border-color 0.25s var(--ease), box-shadow 0.25s var(--ease);
@@ -1391,7 +1391,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
 }
 
 pre.t-content {
-    background: rgba(18, 12, 10, 0.65);
+    background: var(--bg);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 0.85rem 1rem;
@@ -1411,7 +1411,7 @@ pre.t-content {
     flex-shrink: 0;
     border-radius: 50%;
     box-shadow:
-        inset 0 -2px 4px rgba(2, 6, 18, 0.35),
+        inset 0 -2px 4px rgba(74, 58, 34, 0.35),
         0 0 8px rgba(239, 116, 84, 0.25),
         inset 0 0 0 1px rgba(245, 244, 250, 0.22);
 }
@@ -1506,7 +1506,7 @@ pre.t-content {
 .gateway-card:hover {
     border-color: var(--accent-dim);
     transform: translateY(-4px);
-    box-shadow: 0 16px 48px rgba(2, 6, 18, 0.5), 0 0 32px rgba(239, 116, 84, 0.10);
+    box-shadow: 0 16px 48px rgba(74, 58, 34, 0.5), 0 0 32px rgba(239, 116, 84, 0.10);
 }
 .gateway-icon {
     font-size: 3rem;
@@ -1764,7 +1764,7 @@ pre.t-content {
 .portal-card:hover {
     border-color: var(--accent-dim);
     transform: translateY(-4px);
-    box-shadow: 0 22px 64px rgba(2, 6, 18, 0.55), 0 0 36px rgba(239, 116, 84, 0.10), 0 0 64px rgba(242, 201, 121, 0.08);
+    box-shadow: 0 22px 64px rgba(74, 58, 34, 0.55), 0 0 36px rgba(239, 116, 84, 0.10), 0 0 64px rgba(242, 201, 121, 0.08);
 }
 .portal-card:hover::before { transform: scaleX(1); }
 
@@ -1837,7 +1837,7 @@ pre.t-content {
     border: 1px solid var(--border-gold);
     border-radius: 14px;
     padding: 0.35rem;
-    box-shadow: 0 12px 40px rgba(2, 6, 18, 0.5), 0 0 28px rgba(239, 116, 84, 0.07);
+    box-shadow: 0 12px 40px rgba(74, 58, 34, 0.5), 0 0 28px rgba(239, 116, 84, 0.07);
     animation: fade-in 1.5s 0.9s both;
 }
 .onboarding-content {
@@ -1930,7 +1930,7 @@ pre.t-content {
 .feature-item:hover {
     border-color: var(--border-gold);
     transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(2, 6, 18, 0.45), 0 0 20px rgba(239, 116, 84, 0.06);
+    box-shadow: 0 8px 24px rgba(74, 58, 34, 0.45), 0 0 20px rgba(239, 116, 84, 0.06);
 }
 .feature-icon {
     display: inline-flex;
@@ -1963,6 +1963,93 @@ pre.t-content {
 }
 
 /* --- Utility ---------------------------------------------- */
+
+/* ============================================================
+   稿纸面 —— 夜幕保留，阅读面转宣纸
+   令牌影射：容器内所有 var(--text*/--bg*/--surface*) 自动解析为纸上深调
+   ============================================================ */
+.card,
+.novel-card,
+.chapter-card,
+.card-item,
+.outline-item,
+.sidebar-card,
+.mode-card,
+.skill-card,
+.review-comment,
+.gate-report,
+.output-area,
+#add-provider-modal > div {
+    /* 纸上墨色 */
+    --text:        #33291d;
+    --text-bright: #241c11;
+    --text-dim:    #6f6455;
+    --text-faint:  #97896f;
+    /* 纸上面色 */
+    --bg:           #f7f1e3;
+    --bg-elevated:  #fcf8ee;
+    --surface:      #f0e7d3;
+    --surface-hover:#e7dbc1;
+    --surface-alt:  #f3ebd8;
+    --bg-card:      #fcf8ee;
+    --border:       #ddd1b6;
+    --border-light: #c6b691;
+    --border-gold:  rgba(184, 134, 46, 0.38);
+    /* 朱金在纸上加深 */
+    --accent:       #c03d2e;
+    --accent-light: #b5432e;
+    --accent-dim:   #93321f;
+    --accent-ghost: rgba(192, 61, 46, 0.08);
+    --accent-subtle:rgba(192, 61, 46, 0.10);
+    --gold:         #a1741f;
+    --rose:         #b85c72;
+    --success:      #2e8b64;
+    --warning:      #a1741f;
+    --danger:       #b03a55;
+    --azure:        #46688c;
+    --azure-light:  #3f6080;
+    color: var(--text);
+}
+
+/* 纸上选区：金晕 + 墨字 */
+.card ::selection,
+.novel-card ::selection,
+.chapter-card ::selection,
+.card-item ::selection,
+.outline-item ::selection,
+.mode-card ::selection,
+.skill-card ::selection,
+.review-comment ::selection,
+.output-area::selection {
+    background: rgba(217, 167, 67, 0.40);
+    color: #33291d;
+}
+
+/* 纸上表单控件 */
+.card input,
+.card select,
+.card textarea {
+    background: #fcf8ee;
+    border-color: #d9cdb0;
+    color: #33291d;
+}
+.card input:focus,
+.card select:focus,
+.card textarea:focus {
+    border-color: var(--accent-dim);
+    box-shadow: 0 0 0 3px rgba(192, 61, 46, 0.10), 0 0 14px rgba(192, 61, 46, 0.12);
+}
+.card input::placeholder,
+.card textarea::placeholder { color: #a2957d; }
+
+/* 纸上语义徽标（原为暗底亮字，转深字浅底） */
+.status-tag.linked {
+    background: rgba(46, 139, 100, 0.12);
+    color: #2e8b64;
+    border-color: rgba(46, 139, 100, 0.30);
+}
+.gate-report.pass { color: #2e8b64; }
+.gate-report.fail { color: #b03a55; }
 
 /* Scrollbar — 幽蓝轨道 + 流光拖块 */
 ::-webkit-scrollbar { width: 9px; height: 9px; }
@@ -1999,10 +2086,10 @@ pre.t-content {
             to bottom,
             transparent,
             transparent calc(2.1em - 1px),
-            rgba(190, 158, 122, 0.09) calc(2.1em - 1px),
-            rgba(190, 158, 122, 0.09) 2.1em
+            rgba(166, 138, 103, 0.16) calc(2.1em - 1px),
+            rgba(166, 138, 103, 0.16) 2.1em
         ),
-        linear-gradient(180deg, #20140e 0%, rgba(8, 13, 26, 0.96) 100%);
+        linear-gradient(180deg, #fdfaf3 0%, rgba(246, 239, 221, 0.96) 100%);
     border: 1px solid var(--border-light);
     border-radius: var(--radius-lg);
     color: var(--text-bright);
@@ -2012,7 +2099,7 @@ pre.t-content {
     resize: vertical;
     transition: border-color 0.3s var(--ease), box-shadow 0.3s var(--ease);
     box-shadow:
-        0 6px 28px rgba(2, 6, 18, 0.45),
+        0 6px 28px rgba(74, 58, 34, 0.45),
         inset 0 0 0 1px var(--border),
         inset 0 0 0 5px var(--bg-elevated),
         inset 0 0 0 6px rgba(216, 168, 100, 0.20),
@@ -2022,7 +2109,7 @@ pre.t-content {
     border-color: var(--accent-dim);
     outline: none;
     box-shadow:
-        0 6px 28px rgba(2, 6, 18, 0.45),
+        0 6px 28px rgba(74, 58, 34, 0.45),
         inset 0 0 0 1px rgba(239, 116, 84, 0.35),
         inset 0 0 0 5px var(--bg-elevated),
         inset 0 0 0 6px rgba(239, 116, 84, 0.22),
@@ -2079,8 +2166,8 @@ pre.t-content {
 }
 .gate-report.pass {
     background: var(--success-bg);
-    color: #8fe8c4;
-    border: 1px solid rgba(69, 214, 160, 0.3);
+    color: #2e8b64;
+    border: 1px solid rgba(46, 139, 100, 0.32);
 }
 .gate-report.fail {
     background: var(--warning-bg);
