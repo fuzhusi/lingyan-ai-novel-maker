@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block title %}盲审实验室 — {{ story.title }}{% endblock %}
+
+{% block nav %}
+<a href="/short/">← 短篇列表</a>
+<span class="sep">|</span>
+<a href="/short/{{ story.id }}/write">{{ story.title }}</a>
+<span class="sep">|</span>
+<span>双编辑盲审实验室</span>
+{% endblock %}
+
+{% block content %}
+<div class="cruel-wrap">
+    <header class="cruel-head">
+        <h1 class="cruel-title">盲审实验室</h1>
+        <p class="cruel-sub">两位恶毒编辑 · 只看正文 · 不看大纲设定 · 不留情面</p>
+    </header>
+
+    <section class="cruel-meta">
+        <div><b>{{ story.title }}</b></div>
+        <div>正文 {{ word_count }} 字
+            {% if not has_content %}
+            <span class="cruel-empty">（还没有正文，先去写作页生成或保存）</span>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="cruel-rules">
+        <p><b>实验规则：</b>两位编辑各自独立盲审——他们拿不到你的人物档案、剧情大纲、
+        主题基调，只拿到正文全文。市场毒舌编辑「毙稿机·阎浮」只关心读者会不会往下翻；
+        文学刻薄审稿人「白骨」专杀假情绪、假细节、套话与 AI 腔。
+        每条批评都必须引用原文。本页面为独立实验功能，不影响任何现有评审流程。</p>
+    </section>
+
+    <div class="cruel-actions">
+        <button id="btn-run" class="btn-primary" {% if not has_content %}disabled{% endif %}>
+            ⚔ 召唤两位编辑开审
+        </button>
+        <button id="btn-copy" class="btn-secondary" style="display:none">📋 复制完整审评单</button>
+        <span id="cruel-status" class="cruel-status"></span>
+    </div>
+
+    <div id="cruel-panels" class="cruel-panels">
+        {% for ed in [
+            {'key': 'yafu', 'name': '毙稿机 · 阎浮', 'tag': '市场毒舌责编', 'cls': 'ed-a'},
+            {'key': 'baigu', 'name': '白骨 · 文学审稿', 'tag': '文学刻薄审稿人', 'cls': 'ed-b'},
+        ] %}
+        <article class="editor-card {{ ed.cls }}" data-editor="{{ ed.key }}">
+            <header class="editor-head">
+                <span class="editor-name">{{ ed.name }}</span>
+                <span class="editor-tag">{{ ed.tag }}</span>
+                <span class="editor-state" data-state>待命</span>
+            </header>
+            <pre class="editor-review" data-review>（尚未开审）</pre>
+        </article>
+        {% endfor %}
+    </div>
+
+    <p class="cruel-note">
+        审评结果仅缓存在浏览器本地（按短篇隔离），不会写入数据库。
+        复制的「审评单」可直接粘贴给 Writer 作为修改指令源。
+    </p>
+</div>
+
+<style>
+.cruel-wrap { max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+.cruel-head { text-align: center; margin-bottom: 1.2rem; }
+.cruel-title {
+    font-family: var(--font-accent);
+    font-size: 2.2rem;
+    color: var(--text-bright);
+    letter-spacing: 0.12em;
+}
+.cruel-sub { color: var(--text-dim); margin-top: 0.3rem; font-size: 0.9rem; letter-spacing: 0.08em; }
+
+.cruel-meta {
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 0.7rem 1.1rem; margin-bottom: 0.8rem;
+    color: var(--text);
+}
+.cruel-empty { color: var(--danger); }
+
+.cruel-rules {
+    background: var(--accent-ghost); border: 1px solid var(--accent-dim);
+    border-radius: var(--radius-lg); padding: 0.8rem 1.1rem; margin-bottom: 1rem;
+}
+.cruel-rules p { color: var(--text-dim); line-height: 1.8; margin: 0; font-size: 0.88rem; }
+.cruel-rules b { color: var(--accent-light); }
+
+.cruel-actions { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 1.2rem; flex-wrap: wrap; }
+.cruel-status { color: var(--text-faint); font-size: 0.85rem; }
+
+.cruel-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 900px) { .cruel-panels { grid-template-columns: 1fr; } }
+
+.editor-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); overflow: hidden;
+    display: flex; flex-direction: column; min-height: 300px;
+}
+.editor-card.ed-a { border-top: 3px solid var(--accent); }
+.editor-card.ed-b { border-top: 3px solid var(--gold); }
+.editor-card.running .editor-state { color: var(--warning); }
+.editor-card.done .editor-state { color: var(--success); }
+
+.editor-head {
+    display: flex; align-items: baseline; gap: 0.6rem;
+    padding: 0.7rem 1rem; border-bottom: 1px solid var(--border);
+}
+.editor-name { font-family: var(--font-accent); font-size: 1.15rem; color: var(--text-bright); }
+.ed-a .editor-name { color: var(--accent-light); }
+.ed-b .editor-name { color: var(--gold); }
+.editor-tag { font-size: 0.75rem; color: var(--text-faint); }
+.editor-state { margin-left: auto; font-size: 0.78rem; color: var(--text-faint); }
+
+.editor-review {
+    flex: 1; margin: 0; padding: 0.9rem 1.1rem;
+    white-space: pre-wrap; word-break: break-word;
+    font-family: var(--font-body); font-size: 0.9rem; line-height: 1.85;
+    color: var(--text);
+}
+
+.cruel-note { margin-top: 1.2rem; color: var(--text-faint); font-size: 0.8rem; text-align: center; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const storyId = {{ story.id }};
+    const cacheKey = 'cruel-review-' + storyId;
+    const btnRun = document.getElementById('btn-run');
+    const btnCopy = document.getElementById('btn-copy');
+    const statusEl = document.getElementById('cruel-status');
+    const panels = {
+        yafu: document.querySelector('.editor-card[data-editor="yafu"]'),
+        baigu: document.querySelector('.editor-card[data-editor="baigu"]')
+    };
+    let lastResult = null;
+
+    function escapeHtml(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function renderResult(rep) {
+        lastResult = rep;
+        rep.editors.forEach(function(ed) {
+            const card = panels[ed.key];
+            if (!card) return;
+            card.classList.remove('running');
+            card.classList.add('done');
+            card.querySelector('[data-state]').textContent = '已交稿';
+            card.querySelector('[data-review]').innerHTML = escapeHtml(ed.review || '（空）');
+        });
+        statusEl.textContent = '两位编辑用时 ' + rep.elapsed + 's';
+        btnCopy.style.display = '';
+        try { localStorage.setItem(cacheKey, JSON.stringify(rep)); } catch (e) {}
+    }
+
+    function buildSheet(rep) {
+        const lines = ['# 盲审评单 — ' + (rep.story_title || ''),
+                       '',
+                       '> 双恶毒编辑盲审 · 仅依据正文 · ' + new Date().toLocaleString(), ''];
+        rep.editors.forEach(function(ed) {
+            lines.push('## ' + ed.name, '', ed.review, '');
+        });
+        return lines.join('\n');
+    }
+
+    btnRun.addEventListener('click', function() {
+        if (btnRun.disabled) return;
+        btnRun.disabled = true;
+        btnCopy.style.display = 'none';
+        statusEl.textContent = '两位编辑正在读稿…（约需一到两分钟）';
+        Object.values(panels).forEach(function(card) {
+            card.classList.add('running');
+            card.classList.remove('done');
+            card.querySelector('[data-state]').textContent = '读稿中…';
+            card.querySelector('[data-review]').innerHTML =
+                '<span style="color:var(--text-faint)">正逐字过稿，挑每一个让人想划走的瞬间…</span>';
+        });
+
+        fetch('/short/' + storyId + '/cruel/run', { method: 'POST' })
+            .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, body: j }; }); })
+            .then(function(res) {
+                btnRun.disabled = false;
+                if (!res.ok || res.body.error) {
+                    statusEl.textContent = res.body.error || ('HTTP ' + res.status);
+                    Object.values(panels).forEach(function(card) {
+                        card.classList.remove('running');
+                        card.querySelector('[data-state]').textContent = '失手了';
+                        card.querySelector('[data-review]').innerHTML =
+                            '<span style="color:var(--danger)">' + escapeHtml(res.body.error || '调用失败') + '</span>';
+                    });
+                    return;
+                }
+                renderResult(res.body);
+            })
+            .catch(function(e) {
+                btnRun.disabled = false;
+                statusEl.textContent = '请求失败: ' + e.message;
+            });
+    });
+
+    btnCopy.addEventListener('click', function() {
+        if (!lastResult) return;
+        const text = buildSheet(lastResult);
+        (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+            .then(function() {
+                btnCopy.textContent = '✓ 已复制审评单';
+                setTimeout(function() { btnCopy.textContent = '📋 复制完整审评单'; }, 1600);
+            })
+            .catch(function() {
+                // 剪贴板不可用（非安全上下文等）：降级为选中文本提示
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                try { document.execCommand('copy'); btnCopy.textContent = '✓ 已复制'; }
+                catch (e2) { btnCopy.textContent = '复制失败，请手动选择'; }
+                document.body.removeChild(ta);
+                setTimeout(function() { btnCopy.textContent = '📋 复制完整审评单'; }, 1600);
+            });
+    });
+
+    // 恢复上次结果
+    try {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) renderResult(JSON.parse(cached));
+    } catch (e) {}
+})();
+</script>
+{% endblock %}
