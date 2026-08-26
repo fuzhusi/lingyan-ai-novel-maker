@@ -194,6 +194,9 @@ def save_plan(story_id):
 def delete_story(story_id):
     """删除短篇"""
     story = ShortStory.query.get_or_404(story_id)
+    # 级联清理盲审记录（SQLite 默认不强制 FK，ID 被复用时会串旧稿审评）
+    from app.models import BlindReview
+    BlindReview.query.filter_by(kind="story", story_id=story_id).delete()
     db.session.delete(story)
     db.session.commit()
     return redirect(url_for("short_story.story_list"))

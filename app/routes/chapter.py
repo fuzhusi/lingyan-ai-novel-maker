@@ -162,8 +162,9 @@ def delete_version(novel_id, chapter_number, version_id):
                        Chapter.chapter_number == chapter_number)
                .first_or_404())
     # Delete associated reviews first
-    from app.models import CriticReview
+    from app.models import CriticReview, BlindReview
     CriticReview.query.filter_by(version_id=version.id).delete()
+    BlindReview.query.filter_by(kind="chapter", version_id=version.id).delete()
     db.session.delete(version)
     db.session.commit()
     return jsonify({"ok": True})
@@ -173,9 +174,10 @@ def delete_version(novel_id, chapter_number, version_id):
 def delete_chapter(novel_id, chapter_number):
     chapter = Chapter.query.filter_by(novel_id=novel_id, chapter_number=chapter_number).first_or_404()
     # Delete associated reviews, versions, summary, memory
-    from app.models import CriticReview, ChapterSummary, ChapterMemory
+    from app.models import CriticReview, ChapterSummary, ChapterMemory, BlindReview
     for v in chapter.versions:
         CriticReview.query.filter_by(version_id=v.id).delete()
+        BlindReview.query.filter_by(kind="chapter", version_id=v.id).delete()
     ChapterVersion.query.filter_by(chapter_id=chapter.id).delete()
     ChapterSummary.query.filter_by(chapter_id=chapter.id).delete()
     ChapterMemory.query.filter_by(chapter_id=chapter.id).delete()
