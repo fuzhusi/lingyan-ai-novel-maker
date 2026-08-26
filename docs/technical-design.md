@@ -161,7 +161,7 @@
 - 根据评审重写：多轮逐节点二次生成（评审意见+前文+节点原内容孤立重写每节点）
 - 局部编辑：续写 / 扩写选中 / 重写选中（编辑模式内流式变换）
 
-短篇也支持版本管理、评审（含 17 维度审计集成）、导出。
+短篇也支持版本管理、双盲审集成评审、导出。
 
 ## 3.4 人物关系系统
 
@@ -817,7 +817,7 @@ CREATE TABLE settings (
 | `/short/<id>/rewrite-selection` | POST | 重写选中 (SSE) |
 | `/short/<id>/rewrite` | POST | AI 润色全文 (SSE) |
 | **评审 + 重写** | | |
-| `/short/<id>/review` | POST | 评审（含 17 维度审计） |
+| `/short/<id>/review` | POST | critic 结构化评审 |
 | `/short/<id>/review/get` | GET | 获取评审结果 |
 | `/short/<id>/review/feedback` | POST | 保存用户评审意见 |
 | `/short/<id>/rewrite-with-feedback` | POST | 根据评审重写：逐节点二次生成 (SSE) |
@@ -990,7 +990,7 @@ python cli.py sys backup [--output PATH]
 ## V2.0 (已完成)
 
 - 多 Agent 流水线
-- 17 维度审计
+- 17 维度审计（V3.5 起由双盲审取代）
 - 去 AI 化
 - 因果链引擎
 - 向量记忆
