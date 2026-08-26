@@ -34,7 +34,7 @@ Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI /
 - 📤 五格式导出（TXT / DOCX / Markdown / HTML / EPUB），HTML 导出全转义 + CSP
 - 🔗 借鉴改写：风格模仿 / 情节骨架移植 / 三档洗稿
 - 🧠 提示词模板库 + 13 个内置写作技巧（Skill），生成后自动跑「技巧门禁」确定性验收
-- 🖥️ MCP Server（26 工具）+ CLI（18 命令组）
+- 🖥️ MCP Server（26 工具）+ CLI（19 命令组）
 - 📱 移动端响应式布局
 
 ### 🌙 界面主题：朱金 · 玄漆 ——「夜幕下摊开的稿纸」

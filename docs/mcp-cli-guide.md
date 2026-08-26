@@ -511,6 +511,32 @@ python cli.py sys backup
 python cli.py sys backup --output /path/to/backup.db
 ```
 
+### 4.16 双盲审 (blind)
+
+阎浮（市场毒舌）× 白骨（文学刻薄）对正文做零上下文盲审，各给「追读 / 弃稿」判决；
+结果落库 `blind_reviews` 表，与 Web 盲审工作台（`/blind/`）共用记录。
+
+```bash
+# 盲审短篇 / 章节（缺省最新版，可 --version 指定历史版本）
+python cli.py blind run --story 1
+python cli.py blind run --novel 1 --number 2 [--version 3]
+
+# 盲审自由文本文件（UTF-8）
+python cli.py blind run --file 稿子.txt
+
+# 查看对象最近一次盲审记录
+python cli.py blind latest --story 1
+python cli.py blind latest --novel 1 --number 2
+
+# 把最近一次盲审意见返还 Writer 生成第二稿（写入 md 文件，不改库内正文）
+python cli.py blind rewrite --story 1
+python cli.py blind rewrite --story 1 --only baigu      # 只采纳白骨意见（可 yafu/baigu 组合）
+python cli.py blind rewrite --story 1 --out 二稿.md
+```
+
+说明：`run` 与 `rewrite` 需要已配置可用模型（深度分析类走 critic/rewrite 配置）；
+`rewrite` 仅支持短篇/章节目标——自由文本的循环重写请在 Web 工作台人工勾选意见进行。
+
 ---
 
 ## 五、自动化脚本示例

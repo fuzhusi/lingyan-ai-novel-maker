@@ -252,7 +252,7 @@ app/
 - **小说/章节/角色/世界观/伏笔/大纲/短篇** 全 CRUD
 - **质量审计：** `quick_audit`, `get_knowledge_context`
 
-### CLI (18 个命令组，免登录)
+### CLI (19 个命令组，免登录)
 ```bash
 python cli.py whoami                 # 查看当前用户（恒为默认管理员）
 
@@ -335,7 +335,12 @@ python cli.py skill preview --task-type write           # 预览实际注入Writ
 python cli.py constraint show --agent writer [--genre X] [--full]  # 预览装配结果与预算占用
 python cli.py constraint status                         # 词库启停状态+本进程最近装配
 python cli.py constraint toggle                         # 切换启停（停用时生成走兜底常量）
-python cli.py audit run --novel 1 --number 1  # AI 痕迹审计
+python cli.py audit run --novel 1 --number 1  # AI 痕迹审计（词法统计，零 LLM）
+python cli.py blind run --story 1             # 双盲审短篇（阎浮×白骨，结果落库）
+python cli.py blind run --novel 1 --number 2 [--version 3]  # 盲审章节（缺省最新版）
+python cli.py blind run --file 稿子.txt        # 盲审自由文本
+python cli.py blind latest --story 1          # 查看该对象最近一次盲审记录
+python cli.py blind rewrite --story 1 [--only baigu] [--out 二稿.md]  # 意见返还 Writer 出第二稿
 python cli.py optimize diagnose --novel 1     # 全书诊断
 python cli.py optimize deai --novel 1 --number 2 [--save]  # 章节去AI化（--save 存新版本）
 python cli.py sys info                # 系统统计

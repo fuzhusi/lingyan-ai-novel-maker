@@ -12,6 +12,7 @@
     短篇: short list/create/content
     模板: template list/create/delete
     审计: audit run
+    盲审: blind run/latest/rewrite
     设置: setting list/set/get
     技巧: skill list/active/toggle/enable/disable/info/preview/create/delete
     约束: constraint show/status/toggle
@@ -1406,6 +1407,132 @@ def cmd_audit(args):
 
 
 # ---------------------------------------------------------------------------
+# 盲审（双盲审两角色审评）
+# ---------------------------------------------------------------------------
+
+def _blind_print(editors):
+    """打印各位编辑的判决与审评全文。"""
+    for e in editors:
+        v = e.get("verdict") or ""
+        mark = "🟢 追读" if v == "追读" else ("🔴 弃稿" if v == "弃稿" else "⚪ 未判")
+        print(f"\n■ {e.get('name', '编辑')}　{mark}")
+        print("─" * 48)
+        for ln in (e.get("review") or "").strip().splitlines():
+            print(("  " + ln) if ln else "")
+
+
+def cmd_blind(args):
+    with app.app_context():
+        from app.services.llm import LLMError
+        from app.services.blind_review import (run_dual_review, run_rewrite,
+                                               save_blind_review,
+                                               get_latest_blind_review,
+                                               resolve_content)
+
+        # ---- latest：按对象查最近一条记录，无需正文 ----
+        if args.action == "latest":
+            rec = (get_latest_blind_review(story_id=args.story) if args.story
+                   else get_latest_blind_review(version_id=args.version) if args.version
+                   else get_latest_blind_review(kind="text"))
+            if not rec:
+                print("✗ 没有找到盲审记录")
+                return
+            print(f"【最近盲审】{rec['title'] or '(未命名)'} · {rec['word_count']} 字"
+                  f" · {rec['created_at']} · 耗时 {rec['elapsed']}s")
+            _blind_print(rec["editors"])
+            return
+
+        # ---- run / rewrite：先定位审阅对象 ----
+        kind = title = text = r = None
+        meta = {}
+        if args.story:
+            from app.models import ShortStory
+            kind = "story"
+            s = ShortStory.query.get(args.story)
+            title = s.title if s else f"短篇#{args.story}"
+            text, r = resolve_content("story", story_id=args.story)
+        elif args.novel:
+            kind = "chapter"
+            text, r = resolve_content("chapter", novel_id=args.novel,
+                                      chapter_number=args.number or 0,
+                                      version_id=args.version)
+            title = f"第{args.number}章"
+        elif args.file:
+            kind = "text"
+            try:
+                with open(args.file, encoding="utf-8") as fh:
+                    raw = fh.read()
+            except OSError as e:
+                print(f"✗ 无法读取文件：{e}")
+                return
+            import os
+            title = os.path.basename(args.file)
+            text, r = resolve_content("text", content=raw)
+        else:
+            print("✗ 请用 --story <ID> / --novel <ID> --number <N> [--version <VID>] / "
+                  "--file <txt路径> 指定审阅对象")
+            return
+        if text is None:
+            print(f"✗ {r}")
+            return
+        meta = r if isinstance(r, dict) else {}
+        word_count = len(text)
+
+        if args.action == "run":
+            try:
+                result = run_dual_review(text)
+            except LLMError as e:
+                print(f"✗ AI 调用失败：{e}")
+                return
+            row_id = save_blind_review(kind, result, word_count,
+                                       story_id=meta.get("story_id"),
+                                       version_id=meta.get("version_id"),
+                                       title=title or "")
+            archived = "已存档，Web 盲审工作台可回看" if row_id else "⚠ 存档失败，仅本次展示"
+            hits = sum(1 for e_ in result["editors"] if e_.get("verdict") == "追读")
+            print(f"\n【双盲审完成】{title} · {word_count} 字 · 耗时 {result['elapsed']}s")
+            print(f"判决汇总：追读 {hits}/{len(result['editors'])} · 结果{archived}")
+            _blind_print(result["editors"])
+            return
+
+        # ---- rewrite：把该对象最近一次盲审意见返还 Writer ----
+        if kind == "text":
+            print("✗ 自由文本的重写循环请在 Web「盲审工作台」进行（需人工勾选意见）")
+            return
+        rec = (get_latest_blind_review(story_id=args.story) if kind == "story"
+               else get_latest_blind_review(version_id=meta.get("version_id")))
+        if not rec:
+            print("✗ 该对象还没有盲审记录——先执行 python cli.py blind run ...")
+            return
+        editors = rec["editors"]
+        if args.only:
+            picked = [e for e in editors if e.get("key") in set(args.only)]
+            if not picked:
+                keys = "/".join(e.get("key", "?") for e in editors)
+                print(f"✗ --only 未匹配到任何编辑（可用：{keys}）")
+                return
+            editors = picked
+        try:
+            result = run_rewrite(text, editors,
+                                 writer_agent="rewrite" if kind == "chapter" else "short_story")
+        except LLMError as e:
+            print(f"✗ AI 调用失败：{e}")
+            return
+        default_name = f"blind_rewrite_{kind}_{meta.get('story_id') or meta.get('version_id')}.md"
+        out_path = args.out or default_name
+        try:
+            with open(out_path, "w", encoding="utf-8") as fh:
+                fh.write(result["content"])
+        except OSError as e:
+            print(f"✗ 第二稿生成成功但写入文件失败：{e}")
+            return
+        print(f"\n【第二稿已生成】采纳 {len(editors)} 位编辑意见 · "
+              f"{result['rounds']} 轮 · 耗时 {result['elapsed']}s")
+        print(f"  字数 {word_count} → {len(result['content'])}")
+        print(f"  已写入 {out_path}（不改动库内正文，满意后自行粘贴保存为新版本）")
+
+
+# ---------------------------------------------------------------------------
 # 设置管理
 # ---------------------------------------------------------------------------
 
@@ -2369,11 +2496,23 @@ def main():
     p_tmpl.add_argument("--constraints", help="写作约束")
 
     # ========== 审计 ==========
-    p_audit = subparsers.add_parser("audit", help="质量审计")
+    p_audit = subparsers.add_parser("audit", help="质量审计（AI 痕迹词法统计，零 LLM）")
     p_audit.add_argument("action", choices=["run"], help="操作类型")
     p_audit.add_argument("--novel", type=int, required=True, help="小说 ID")
     p_audit.add_argument("--number", type=int, required=True, help="章节号")
     p_audit.add_argument("--detailed", action="store_true", help="详细模式")
+
+    # ========== 盲审 ==========
+    p_blind = subparsers.add_parser("blind", help="双盲审（阎浮×白骨两角色零上下文盲审）")
+    p_blind.add_argument("action", choices=["run", "latest", "rewrite"], help="操作类型")
+    p_blind.add_argument("--story", type=int, help="短篇 ID")
+    p_blind.add_argument("--novel", type=int, help="小说 ID（配合 --number）")
+    p_blind.add_argument("--number", type=int, help="章节号")
+    p_blind.add_argument("--version", type=int, help="章节版本 ID（缺省取最新版）")
+    p_blind.add_argument("--file", help="自由文本文件路径（UTF-8，仅 run）")
+    p_blind.add_argument("--only", choices=["yafu", "baigu"], action="append",
+                         help="rewrite 只采纳指定编辑意见（可重复）")
+    p_blind.add_argument("--out", help="rewrite 第二稿输出文件（缺省 blind_rewrite_*.md）")
 
     # ========== 设置 ==========
     p_set = subparsers.add_parser("setting", help="系统设置")
@@ -2470,6 +2609,7 @@ def main():
         "short": cmd_short,
         "template": cmd_template,
         "audit": cmd_audit,
+        "blind": cmd_blind,
         "setting": cmd_setting,
         "llm": cmd_llm,
         "skill": cmd_skill,
