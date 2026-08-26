@@ -297,6 +297,12 @@
             <div id="local-edit-panel" class="short-content" style="display:none;margin-top:0.5rem;min-height:60px;font-size:0.85rem;white-space:pre-wrap"></div>
 
             <div class="concept-actions" id="story-actions">
+                {% set ns_done = outline_nodes|selectattr('status', 'equalto', 'done')|list if outline_nodes else [] %}
+                {% set ns_pending = outline_nodes|rejectattr('status', 'equalto', 'done')|list if outline_nodes else [] %}
+                {% if ns_done and ns_pending %}
+                {# 断点续跑：服务端直出，不依赖前端 fetch 探测的任何一环 #}
+                <button id="btn-resume" class="btn-primary">继续生成（第 {{ ns_pending[0].id }}/{{ outline_nodes|length }} 节点起）</button>
+                {% endif %}
                 {% if story.content %}
                 <button id="btn-write" class="btn-secondary">重新创作</button>
                 <button id="btn-edit" class="btn-secondary">编辑全文</button>
@@ -1080,6 +1086,12 @@
         function bindStoryActions() {
             const btnWrite = document.getElementById('btn-write');
             const btnEdit = document.getElementById('btn-edit');
+
+            // 断点续跑：服务端直出的恢复按钮（有 done+pending 节点时渲染）
+            const btnResumeSrv = document.getElementById('btn-resume');
+            if (btnResumeSrv) btnResumeSrv.addEventListener('click', function() {
+                triggerWrite(false);
+            });
 
             if (btnWrite) btnWrite.addEventListener('click', resetAndRewrite);
 
