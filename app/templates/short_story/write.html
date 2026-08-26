@@ -974,6 +974,24 @@
         }
 
         function triggerWrite(reset) {
+            // 断点续跑且有服务端全文、但本会话没有已流出的残片
+            // （刷新后直点继续按钮的典型场景）：先把现有全文取来作流式
+            // 底稿。否则显示区被切到空流——历史正文从视图上“消失”，
+            // 完成回调还会把只含新节点的截断文本误存为新版本。
+            if (!reset && !pausedText && nodeTotal > 0) {
+                fetch(`/short/${storyId}/nodes`)
+                    .then(r => r.json())
+                    .then(data => {
+                        pausedText = (data && data.content) || '';
+                        _startWriteStream(reset);
+                    })
+                    .catch(() => _startWriteStream(reset));
+                return;
+            }
+            _startWriteStream(reset);
+        }
+
+        function _startWriteStream(reset) {
             contentDisplay.style.display = 'none';
             contentEditor.style.display = 'none';
             contentStream.style.display = 'block';
