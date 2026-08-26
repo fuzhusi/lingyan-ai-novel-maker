@@ -17,7 +17,6 @@ from app.routes.short_story import generate  # noqa: F401, E402
 from app.routes.short_story import review     # noqa: F401, E402
 from app.routes.short_story import versioning # noqa: F401, E402
 from app.routes.short_story import export     # noqa: F401, E402
-from app.routes.short_story import cruel_review  # noqa: F401, E402
 
 
 # ---------------------------------------------------------------------------

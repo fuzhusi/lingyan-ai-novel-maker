@@ -251,7 +251,7 @@ Writer → [Critic | Character Keeper | Lore Keeper | Foreshadow Keeper] → Edi
 | 尖酸嘴 · 阎浮 | 市场毒舌：钩子、灌水、跳段、AI 痕迹 | 追读 / 弃稿 |
 | 白骨 · 文学审稿 | 文学刻薄：假情绪、假细节、套话腔、AI 腔 | 追读 / 弃稿 |
 
-- 引擎 `app/services/blind_review.py`；工作台 `/blind/`；短篇深度循环 `/short/{id}/cruel`
+- 引擎 `app/services/blind_review.py`；工作台 `/blind/`（网关首页特性卡进入）；长/短篇写作页内嵌盲审入口
 - API：`POST /api/blind-review/run`（kind=story/chapter/text）、`POST /api/blind-review/rewrite`（include_editors 可选过滤）、`GET /api/blind-review/latest`
 - 持久化：独立 `blind_reviews` 表；综合评分沿用 critic 链路保证历史可比
 

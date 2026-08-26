@@ -28,8 +28,9 @@
         <nav class="topbar-nav">
             <a href="/novel/">长篇</a>
             <a href="/short/">短篇</a>
-            <a href="/blind/">盲审</a>
+            <span class="nav-sep" aria-hidden="true"></span>
             <a href="/plagiarize/">借鉴</a>
+            <span class="nav-sep" aria-hidden="true"></span>
             <a href="/settings/">设置</a>
             <a href="/api/skills/page">技巧</a>
             <a href="/prompt-templates/">模板</a>
@@ -41,7 +42,6 @@
     <div class="mobile-menu" id="mobile-menu">
         <a href="/novel/">长篇</a>
         <a href="/short/">短篇</a>
-        <a href="/blind/">盲审</a>
         <a href="/plagiarize/">借鉴</a>
         <a href="/settings/">设置</a>
         <a href="/api/skills/page">技巧</a>
@@ -116,6 +116,7 @@
     .topbar-nav { display: none; }
     .mobile-menu-btn { display: inline-flex; align-items: center; margin-left: auto; }
     .topbar-nav { gap: 0.5rem; }
+    .nav-sep { width: 1px; height: 14px; background: var(--border); align-self: center; opacity: .7; }
     .topbar-nav a, .user-link, .login-link, .user-name { display: none; }
     .mobile-menu-btn {
         background: transparent;

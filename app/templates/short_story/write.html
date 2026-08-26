@@ -1445,8 +1445,8 @@
                 const data = await resp.json();
                 if (!resp.ok || data.error) throw new Error(data.error || resp.status);
                 blindReports.innerHTML = renderBlindEditors(data.editors);
-                reviewComment.textContent =
-                    `${data.word_count} 字 · 耗时 ${data.elapsed}s · 结果已存档（盲审工作台可回看）`;
+                reviewComment.innerHTML =
+                    `${data.word_count} 字 · 耗时 ${data.elapsed}s · 已存档，<a href="/blind/" style="color:var(--accent)">盲审工作台</a>可回看`;
             } catch(e) {
                 blindReports.innerHTML = '';
                 reviewComment.textContent = '盲审失败: ' + e.message;

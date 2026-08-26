@@ -216,7 +216,7 @@ app/
 - **判决**：每位编辑只给二值判决——追读 / 弃稿（不造数字分，诚实呈现）
 - **闭环**：审评可返还 Writer 生成第二稿 → 对第二稿再审 → 循环打磨；重写前可勾选采纳哪位编辑的意见
 - **职责边界**：盲审只管文笔与市场层；角色一致性/伏笔逻辑由 Keepers 流水线负责
-- **入口**：全局导航「盲审」工作台 `/blind/`（任选短篇/章节/自由文本）＋ 长篇写作页「双盲审」按钮 ＋ 短篇写作页评审卡 ＋ 短篇盲审实验室 `/short/{id}/cruel`
+- **入口（归属写作上下文，不占顶级导航）**：网关首页「双盲审」特性卡 → 盲审工作台 `/blind/`（任选短篇/章节/自由文本）；长篇写作页「双盲审」按钮；短篇写作页侧边栏评审卡；两处写作页的存档提示均可点回工作台
 - **API**：`POST /api/blind-review/run`（kind=story/chapter/text）、`POST /api/blind-review/rewrite`（include_editors 可选过滤）、`GET /api/blind-review/latest`
 - **持久化**：独立 `BlindReview` 表（init_db 自动建表），kind+story_id/version_id+editors_json+verdict 判决
 - **全面评审（unified_review）**：critic 结构化评分（历史可比）+ 双盲审文本报告并排呈现；综合分沿用 critic 链路
@@ -240,7 +240,7 @@ app/
 - **断点恢复**：每完成一个节点持久化 `outline_nodes`（含 `content`）；暂停后从第一个 pending点续写
 - **局部编辑**：续写（`continue_story`）、扩写选中（`expand_selection`）、重写选中（`rewrite_selection`）— 纯流式变换，前端替换选区
 - **一致性保障**：手动保存与节点拼接不一致时自动清除节点正文（禁用单节点重写，防止覆盖编辑）
-- **评审集成**：短篇写作页评审卡直接跑双盲审（两位编辑并行）；结果持久化到独立 `BlindReview` 表，页面加载经 `/api/blind-review/latest` 恢复展示；深度循环用盲审实验室页
+- **评审集成**：短篇写作页评审卡直接跑双盲审（两位编辑并行）；结果持久化到独立 `BlindReview` 表，页面加载经 `/api/blind-review/latest` 恢复展示；深度循环用盲审工作台（可勾选采纳哪位编辑的意见）
 - **前端**：3 阶段渐进卡片（角色→大纲→主题）+ 节点进度条 + `===NODE:id:title===` 流式标记 + 暂停/继续 + 编辑模式
 - **列表页**：显示节点进度、体裁、更新时间、智能按钮（继续/查看/打开）
 - 细心模式（careful）不变：旧单轮直接生成路径

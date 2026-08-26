@@ -945,7 +945,7 @@
             const data = await resp.json();
             if (!resp.ok || data.error) throw new Error(data.error || ('HTTP ' + resp.status));
             $('audit-grade').textContent = `耗时 ${data.elapsed}s`;
-            $('audit-summary').textContent = `${data.title || ''} · ${data.word_count} 字 · 结果已存档，可在「盲审」工作台回看`;
+            $('audit-summary').innerHTML = `${data.title || ''} · ${data.word_count} 字 · 结果已存档，<a href="/blind/" style="color:var(--accent)">盲审工作台</a>可回看`;
             $('blind-editors').innerHTML = renderBlindEditors(data.editors);
         } catch(e) {
             $('audit-summary').textContent = '盲审失败: ' + e.message;

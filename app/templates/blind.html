@@ -1,10 +1,17 @@
 {% extends "base.html" %}
 
-{% block title %}双盲审工作台 — 灵砚{% endblock %}
+{% block title %}盲审工作台 — 灵砚{% endblock %}
+
+{% block nav %}
+<span style="font-size:0.85rem;color:var(--text-dim)">
+    <a href="/" style="color:var(--accent);text-decoration:none">首页</a>
+    <span style="opacity:.5;margin:0 0.2rem">›</span>盲审工作台
+</span>
+{% endblock %}
 
 {% block content %}
 <div style="max-width:1100px;margin:0 auto;padding:1.5rem 1rem">
-    <h1 style="margin-bottom:0.3rem">双盲审工作台</h1>
+    <h1 style="margin-bottom:0.3rem">盲审工作台</h1>
     <p style="color:var(--text-dim);font-size:0.88rem;margin-bottom:1.2rem">
         两位恶毒编辑对正文做零上下文盲审——阎浮管读者追不追读，白骨管文字真不真。
         每条批评必须引用原文；审评可返还 Writer 生成第二稿，循环打磨。
@@ -20,14 +27,21 @@
         </div>
 
         <div id="pane-story">
+            {% if stories %}
             <select id="story-select" style="width:100%;padding:0.45rem;margin-bottom:0.6rem">
                 {% for s in stories %}
                 <option value="{{ s.id }}">{{ s.title }}（{{ (s.content or '')|length }} 字）</option>
                 {% endfor %}
             </select>
+            {% else %}
+            <div style="font-size:0.8rem;color:var(--text-faint);margin-bottom:0.6rem">
+                还没有短篇——先去 <a href="/short/" style="color:var(--accent)">创作一篇</a>
+            </div>
+            {% endif %}
         </div>
 
         <div id="pane-chapter" style="display:none">
+            {% if chapter_options %}
             <select id="chapter-select" style="width:100%;padding:0.45rem;margin-bottom:0.6rem">
                 {% for c in chapter_options %}
                 <option value="{{ c.novel_id }},{{ c.chapter_number }}">
@@ -35,6 +49,11 @@
                 </option>
                 {% endfor %}
             </select>
+            {% else %}
+            <div style="font-size:0.8rem;color:var(--text-faint);margin-bottom:0.6rem">
+                暂无章节——先去 <a href="/novel/" style="color:var(--accent)">长篇写作页</a> 生成章节正文
+            </div>
+            {% endif %}
         </div>
 
         <div id="pane-text" style="display:none">
