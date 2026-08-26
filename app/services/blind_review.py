@@ -248,12 +248,28 @@ def save_blind_review(kind, result, word_count, story_id=None,
         return None
 
 
-def get_latest_blind_review(kind=None, story_id=None, version_id=None):
-    """取最近一条盲审记录（按对象过滤或全局）。返回 dict 或 None。"""
+def get_latest_blind_review(kind=None, story_id=None, version_id=None,
+                            story_version_id=None):
+    """取最近一条盲审记录（按对象过滤或全局）。返回 dict 或 None。
+
+    story_id + story_version_id：短篇按版本快照严格限定（版本2 不再看
+    到版本1 的记录）；只传 story_id 则为该短篇全局最近一条。
+    version_id（无 story_id）：长篇章节版本维度。
+    """
     from app.models import BlindReview
     q = BlindReview.query
     if story_id is not None:
         q = q.filter_by(kind="story", story_id=story_id)
+        if story_version_id is not None:
+            q = q.filter_by(version_id=story_version_id)
+        else:
+            # 与当前正文匹配的快照自动解析；解析不出（从未存过版本）
+            # 才退回全量最近一条，保持无版本数据的可用性
+            from app.models import ShortStory
+            s = ShortStory.query.get(story_id)
+            vid = resolve_story_version_id(s) if s else None
+            if vid is not None:
+                q = q.filter_by(version_id=vid)
     elif version_id is not None:
         q = q.filter_by(kind="chapter", version_id=version_id)
     elif kind:
@@ -272,11 +288,30 @@ def get_latest_blind_review(kind=None, story_id=None, version_id=None):
     }
 
 
+def resolve_story_version_id(story):
+    """解析短篇「当前正文」所属的版本快照 id（无 schema 依赖，按内容匹配）。
+
+    精确匹配 story.content 的版本优先；未保存的手动改动匹配不到时
+    回退最新快照（同一血统的最优近似）。没有任何快照返回 None。
+    """
+    from app.models import ShortStoryVersion
+    versions = (ShortStoryVersion.query.filter_by(story_id=story.id)
+                .order_by(ShortStoryVersion.id.desc()).all())
+    if not versions:
+        return None
+    cur = (story.content or "").strip()
+    for v in versions:
+        if (v.content or "").strip() == cur:
+            return v.id
+    return versions[0].id
+
+
 def resolve_content(kind, story_id=None, novel_id=None, chapter_number=None,
                     version_id=None, content=None):
     """按 kind 解析待审正文。返回 (text, meta) 或 (None, error_msg)。
 
-    meta: {"story_id":...} 或 {"version_id":...}，供持久化使用。
+    meta: {"story_id":..., "version_id":...} 或 {"version_id":...}，
+    供持久化使用——短篇同样绑定版本快照，避免 v2 看到 v1 的审评。
     """
     text = (content or "").strip()
     if kind == "story":
@@ -288,7 +323,9 @@ def resolve_content(kind, story_id=None, novel_id=None, chapter_number=None,
             text = (story.content or "").strip()
         if not text:
             return None, "该短篇还没有正文，先去写作页生成或保存内容"
-        return text, {"story_id": story.id}
+        # 显式传入的 story_version_id 优先（工作台指定历史版本场景）
+        return text, {"story_id": story.id,
+                      "version_id": resolve_story_version_id(story)}
 
     if kind == "chapter":
         from app.models import Chapter, ChapterVersion
