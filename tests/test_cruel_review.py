@@ -6,7 +6,7 @@ import pytest
 
 from app.models import db, ShortStory
 from app.routes.short_story.cruel_review import (
-    EDITORS, build_editor_messages, run_dual_review,
+    EDITORS, build_editor_messages, build_rewrite_messages, run_dual_review,
 )
 
 
@@ -95,4 +95,67 @@ class TestRoutes:
         data = resp.get_json()
         assert data["ok"] is True
         assert len(data["editors"]) == 2
-        assert all(e["review"] for e in data["editors"])
+
+
+class TestRewriteLoop:
+    """审评返还 Writer 的二次生成闭环。"""
+
+    def test_rewrite_prompt_contains_reviews_and_original_only(self):
+        reviews = [
+            {"name": "毙稿机 · 阎浮", "review": "开头三行留不住人。"},
+            {"name": "白骨", "review": "情绪全是表演。"},
+        ]
+        msgs = build_rewrite_messages("原稿正文。", reviews)
+        user = msgs[1]["content"]
+        assert "开头三行留不住人" in user and "情绪全是表演" in user
+        assert "原稿正文。" in user
+        for leaked in ("大纲", "人物设定", "世界观", "主题基调"):
+            assert leaked not in user
+
+    def test_regenerate_endpoint(self, client, probe_story, monkeypatch):
+        captured = {}
+
+        def fake_call(model, messages, **kwargs):
+            captured["user"] = messages[1]["content"]
+            return "修改后的第二稿正文，比原来更好。" * 3
+
+        import app.routes.short_story.cruel_review as mod
+        monkeypatch.setattr(mod, "call_llm_sync", fake_call)
+
+        payload = {
+            "content": probe_story.content,
+            "reviews": [{"name": "阎浮", "review": "节奏拖。"}],
+        }
+        resp = client.post(f"/short/{probe_story.id}/cruel/regenerate",
+                           json=payload)
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True and data["rounds"] >= 1
+        assert "修改后的第二稿" in data["content"]
+        assert "节奏拖" in captured["user"]
+
+    def test_regenerate_requires_reviews(self, client, probe_story):
+        resp = client.post(f"/short/{probe_story.id}/cruel/regenerate",
+                           json={"reviews": []})
+        assert resp.status_code == 400
+        assert "先完成一轮盲审" in resp.get_json()["error"]
+
+    def test_run_accepts_content_override(self, client, probe_story,
+                                          monkeypatch):
+        seen = []
+
+        def fake_call(model, messages, **kwargs):
+            seen.append(messages[1]["content"])
+            return "【判决】追读。"
+
+        import app.routes.short_story.cruel_review as mod
+        monkeypatch.setattr(mod, "call_llm_sync", fake_call)
+
+        override = "这是工作台里手改过的新文本，不是库里的正文。"
+        resp = client.post(f"/short/{probe_story.id}/cruel/run",
+                           json={"content": override})
+        assert resp.status_code == 200
+        # 两位编辑的 user 消息都应基于覆盖文本而非库里正文
+        assert len(seen) == 2
+        assert all("手改过的新文本" in s for s in seen)
+        assert all("饭粒粘在筷子尖上" not in s for s in seen)

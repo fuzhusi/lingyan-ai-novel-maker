@@ -13,12 +13,12 @@
 <div class="cruel-wrap">
     <header class="cruel-head">
         <h1 class="cruel-title">盲审实验室</h1>
-        <p class="cruel-sub">两位恶毒编辑 · 只看正文 · 不看大纲设定 · 不留情面</p>
+        <p class="cruel-sub">两位恶毒编辑 · 只看正文 · 报告返还 Writer 二次生成 · 循环打磨</p>
     </header>
 
     <section class="cruel-meta">
         <div><b>{{ story.title }}</b></div>
-        <div>正文 {{ word_count }} 字
+        <div>原稿 {{ word_count }} 字
             {% if not has_content %}
             <span class="cruel-empty">（还没有正文，先去写作页生成或保存）</span>
             {% endif %}
@@ -26,16 +26,17 @@
     </section>
 
     <section class="cruel-rules">
-        <p><b>实验规则：</b>两位编辑各自独立盲审——他们拿不到你的人物档案、剧情大纲、
-        主题基调，只拿到正文全文。市场毒舌编辑「毙稿机·阎浮」只关心读者会不会往下翻；
-        文学刻薄审稿人「白骨」专杀假情绪、假细节、套话与 AI 腔。
-        每条批评都必须引用原文。本页面为独立实验功能，不影响任何现有评审流程。</p>
+        <p><b>实验规则：</b>本页只存在这两位编辑，不接入任何现有评审模块。
+        他们盲审——拿不到人物档案、剧情大纲、主题基调，只拿到正文全文；
+        每条批评必须引用原文。审评完成后可一键把报告返还给 Writer 生成第二稿，
+        再对新稿再审一轮，如此循环。结果仅缓存在浏览器本地。</p>
     </section>
 
     <div class="cruel-actions">
         <button id="btn-run" class="btn-primary" {% if not has_content %}disabled{% endif %}>
             ⚔ 召唤两位编辑开审
         </button>
+        <button id="btn-rewrite" class="btn-primary" disabled>✍ 审评返还 Writer · 二次生成</button>
         <button id="btn-copy" class="btn-secondary" style="display:none">📋 复制完整审评单</button>
         <span id="cruel-status" class="cruel-status"></span>
     </div>
@@ -56,10 +57,31 @@
         {% endfor %}
     </div>
 
-    <p class="cruel-note">
-        审评结果仅缓存在浏览器本地（按短篇隔离），不会写入数据库。
-        复制的「审评单」可直接粘贴给 Writer 作为修改指令源。
-    </p>
+    <!-- ===== 作者工作台：原稿 × 新稿 对照 ===== -->
+    <section class="workbench">
+        <header class="wb-head">
+            <span class="wb-title">作者工作台</span>
+            <span id="wb-stat" class="wb-stat"></span>
+        </header>
+        <div class="wb-grid">
+            <div class="wb-col">
+                <div class="wb-label">当前稿（审稿对象，可编辑）</div>
+                <textarea id="tb-current" class="tb-editor" spellcheck="false"></textarea>
+            </div>
+            <div class="wb-col">
+                <div class="wb-label wb-label-new">Writer 第二稿
+                    <span id="new-diff" class="new-diff"></span></div>
+                <textarea id="tb-new" class="tb-editor tb-new" spellcheck="false"
+                    placeholder="二次生成的稿件会出现在这里；也可直接在此手改，再点「对新稿再审一轮」"></textarea>
+            </div>
+        </div>
+        <div class="wb-actions">
+            <button id="btn-recheck" class="btn-secondary">🔁 对左侧文本再审一轮</button>
+            <button id="btn-save" class="btn-secondary" disabled>💾 把第二稿存为新版本</button>
+            <button id="btn-copy-new" class="btn-secondary" style="display:none">📋 复制第二稿</button>
+            <span class="wb-hint">存版本走既有 save-version 接口（source=ai，自动去AI化并置为当前正文）</span>
+        </div>
+    </section>
 </div>
 
 <style>
@@ -91,13 +113,13 @@
 .cruel-actions { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 1.2rem; flex-wrap: wrap; }
 .cruel-status { color: var(--text-faint); font-size: 0.85rem; }
 
-.cruel-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.cruel-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.4rem; }
 @media (max-width: 900px) { .cruel-panels { grid-template-columns: 1fr; } }
 
 .editor-card {
     background: var(--bg-card); border: 1px solid var(--border);
     border-radius: var(--radius-lg); overflow: hidden;
-    display: flex; flex-direction: column; min-height: 300px;
+    display: flex; flex-direction: column; min-height: 280px;
 }
 .editor-card.ed-a { border-top: 3px solid var(--accent); }
 .editor-card.ed-b { border-top: 3px solid var(--gold); }
@@ -121,6 +143,31 @@
     color: var(--text);
 }
 
+/* ===== 工作台 ===== */
+.workbench {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 1rem 1.1rem 1.2rem;
+}
+.wb-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 0.8rem; }
+.wb-title { font-family: var(--font-accent); font-size: 1.2rem; color: var(--text-bright); letter-spacing: 0.08em; }
+.wb-stat { font-size: 0.8rem; color: var(--text-faint); }
+.wb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 900px) { .wb-grid { grid-template-columns: 1fr; } }
+.wb-label { font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.35rem; }
+.wb-label-new { color: var(--gold); }
+.new-diff { margin-left: 0.6rem; color: var(--success); font-size: 0.75rem; }
+.tb-editor {
+    width: 100%; min-height: 320px; resize: vertical;
+    background: rgba(18, 12, 10, 0.55); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 0.9rem 1rem; font-family: var(--font-body);
+    font-size: 0.92rem; line-height: 1.9;
+}
+.tb-editor:focus { outline: none; border-color: var(--border-gold); box-shadow: var(--shadow-glow); }
+.tb-new[readonly] { opacity: 0.92; }
+.wb-actions { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; margin-top: 0.9rem; }
+.wb-hint { color: var(--text-faint); font-size: 0.75rem; }
+
 .cruel-note { margin-top: 1.2rem; color: var(--text-faint); font-size: 0.8rem; text-align: center; }
 </style>
 {% endblock %}
@@ -129,107 +176,254 @@
 <script>
 (function() {
     const storyId = {{ story.id }};
+    const ORIGINAL = {{ (story.content or '')|tojson }};
     const cacheKey = 'cruel-review-' + storyId;
+
     const btnRun = document.getElementById('btn-run');
+    const btnRewrite = document.getElementById('btn-rewrite');
+    const btnRecheck = document.getElementById('btn-recheck');
+    const btnSave = document.getElementById('btn-save');
     const btnCopy = document.getElementById('btn-copy');
+    const btnCopyNew = document.getElementById('btn-copy-new');
     const statusEl = document.getElementById('cruel-status');
+    const tbCurrent = document.getElementById('tb-current');
+    const tbNew = document.getElementById('tb-new');
+    const statEl = document.getElementById('wb-stat');
+    const diffEl = document.getElementById('new-diff');
+
     const panels = {
         yafu: document.querySelector('.editor-card[data-editor="yafu"]'),
         baigu: document.querySelector('.editor-card[data-editor="baigu"]')
     };
-    let lastResult = null;
+
+    // 状态：currentText=左侧文本（审稿对象）；reviews=针对 currentText 的审评；
+    // hasReviews 后才能重写；重写始终以「审评所对应的那一版」为原稿。
+    let currentText = ORIGINAL;
+    let reviews = null;
 
     function escapeHtml(s) {
         return String(s == null ? '' : s)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
+    function words(s) { return (s || '').length; }
 
-    function renderResult(rep) {
-        lastResult = rep;
+    function syncWorkbench() {
+        if (document.activeElement !== tbCurrent) tbCurrent.value = currentText;
+        statEl.textContent = '当前稿 ' + words(currentText) + ' 字';
+    }
+    function currentEditorText() {
+        return document.activeElement === tbCurrent ? tbCurrent.value : currentText;
+    }
+
+    function setPanelState(key, stateText, bodyHtml, running) {
+        const card = panels[key];
+        card.classList.toggle('running', !!running);
+        card.classList.toggle('done', !running && stateText === '已交稿');
+        card.querySelector('[data-state]').textContent = stateText;
+        card.querySelector('[data-review]').innerHTML = bodyHtml;
+    }
+
+    function renderReviews(rep) {
         rep.editors.forEach(function(ed) {
-            const card = panels[ed.key];
-            if (!card) return;
-            card.classList.remove('running');
-            card.classList.add('done');
-            card.querySelector('[data-state]').textContent = '已交稿';
-            card.querySelector('[data-review]').innerHTML = escapeHtml(ed.review || '（空）');
+            setPanelState(ed.key, '已交稿',
+                escapeHtml(ed.review || '（空）'), false);
         });
         statusEl.textContent = '两位编辑用时 ' + rep.elapsed + 's';
         btnCopy.style.display = '';
-        try { localStorage.setItem(cacheKey, JSON.stringify(rep)); } catch (e) {}
+        btnRewrite.disabled = false;
     }
 
     function buildSheet(rep) {
-        const lines = ['# 盲审评单 — ' + (rep.story_title || ''),
-                       '',
+        const lines = ['# 盲审评单 — ' + (rep.story_title || ''), '',
                        '> 双恶毒编辑盲审 · 仅依据正文 · ' + new Date().toLocaleString(), ''];
-        rep.editors.forEach(function(ed) {
-            lines.push('## ' + ed.name, '', ed.review, '');
-        });
+        rep.editors.forEach(function(ed) { lines.push('## ' + ed.name, '', ed.review, ''); });
         return lines.join('\n');
     }
 
-    btnRun.addEventListener('click', function() {
-        if (btnRun.disabled) return;
-        btnRun.disabled = true;
-        btnCopy.style.display = 'none';
+    function persist() {
+        try {
+            localStorage.setItem(cacheKey, JSON.stringify({
+                original: ORIGINAL,
+                currentText: currentText,
+                draft: tbNew.value,
+                reviews: reviews
+            }));
+        } catch (e) {}
+    }
+    function restore() {
+        try {
+            const raw = localStorage.getItem(cacheKey);
+            if (!raw) return false;
+            const st = JSON.parse(raw);
+            if (!st || st.original !== ORIGINAL) return false;  // 正文已变则弃缓存
+            currentText = st.currentText || ORIGINAL;
+            tbNew.value = st.draft || '';
+            updateDiff();
+            if (st.reviews && st.reviews.editors) {
+                reviews = st.reviews;
+                renderReviews(st.reviews);
+            }
+            return true;
+        } catch (e) { return false; }
+    }
+
+    function updateDiff() {
+        const n = words(tbNew.value), o = words(currentText);
+        if (!n) { diffEl.textContent = ''; btnSave.disabled = true; return; }
+        const pct = o ? Math.round((n - o) / o * 100) : 100;
+        diffEl.textContent = n + ' 字（' + (pct >= 0 ? '+' : '') + pct + '% vs 当前稿）';
+        btnSave.disabled = false;
+        btnCopyNew.style.display = '';
+    }
+
+    /* ---- 开审（可带覆盖文本：对工作台左侧当前内容审） ---- */
+    btnRun.addEventListener('click', function() { doReview(); });
+    btnRecheck.addEventListener('click', function() {
+        const txt = currentEditorText().trim();
+        if (!txt) { statusEl.textContent = '左侧没有可审的文本'; return; }
+        currentText = txt;
+        doReview(txt);
+    });
+
+    function doReview(contentOverride) {
+        btnRun.disabled = true; btnRecheck.disabled = true; btnRewrite.disabled = true;
         statusEl.textContent = '两位编辑正在读稿…（约需一到两分钟）';
-        Object.values(panels).forEach(function(card) {
-            card.classList.add('running');
-            card.classList.remove('done');
-            card.querySelector('[data-state]').textContent = '读稿中…';
-            card.querySelector('[data-review]').innerHTML =
-                '<span style="color:var(--text-faint)">正逐字过稿，挑每一个让人想划走的瞬间…</span>';
+        Object.keys(panels).forEach(function(k) {
+            setPanelState(k, '读稿中…',
+                '<span style="color:var(--text-faint)">正逐字过稿，挑每一个让人想划走的瞬间…</span>', true);
         });
 
-        fetch('/short/' + storyId + '/cruel/run', { method: 'POST' })
-            .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, body: j }; }); })
-            .then(function(res) {
-                btnRun.disabled = false;
-                if (!res.ok || res.body.error) {
-                    statusEl.textContent = res.body.error || ('HTTP ' + res.status);
-                    Object.values(panels).forEach(function(card) {
-                        card.classList.remove('running');
-                        card.querySelector('[data-state]').textContent = '失手了';
-                        card.querySelector('[data-review]').innerHTML =
-                            '<span style="color:var(--danger)">' + escapeHtml(res.body.error || '调用失败') + '</span>';
-                    });
-                    return;
+        fetch('/short/' + storyId + '/cruel/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(contentOverride ? { content: contentOverride } : {})
+        })
+        .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, body: j }; }); })
+        .then(function(res) {
+            btnRun.disabled = false; btnRecheck.disabled = false;
+            if (!res.ok || res.body.error) {
+                statusEl.textContent = res.body.error || ('HTTP ' + res.status);
+                Object.keys(panels).forEach(function(k) {
+                    setPanelState(k, '失手了',
+                        '<span style="color:var(--danger)">' +
+                        escapeHtml(res.body.error || '调用失败') + '</span>', false);
+                });
+                return;
+            }
+            reviews = res.body;
+            // 记录本轮审评所针对的文本——重写时以此版为原稿（支持循环迭代）
+            reviews.reviewed_text = contentOverride || currentEditorText();
+            renderReviews(res.body);
+            persist();
+        })
+        .catch(function(e) {
+            btnRun.disabled = false; btnRecheck.disabled = false;
+            statusEl.textContent = '请求失败: ' + e.message;
+        });
+    }
+
+    /* ---- 审评返还 Writer：二次生成 ---- */
+    btnRewrite.addEventListener('click', function() {
+        if (!reviews || !reviews.editors || !reviews.editors.length) {
+            statusEl.textContent = '请先完成一轮盲审'; return;
+        }
+        const target = (reviews.reviewed_text != null ? reviews.reviewed_text : currentEditorText()).trim();
+        if (!target) { statusEl.textContent = '没有可重写的原稿'; return; }
+
+        btnRewrite.disabled = true;
+        statusEl.textContent = 'Writer 正在按两份审评改写第二稿…';
+        tbNew.value = '';
+        tbNew.placeholder = '第二稿生成中…';
+
+        fetch('/short/' + storyId + '/cruel/regenerate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content: target,
+                reviews: reviews.editors.map(function(e) {
+                    return { name: e.name, review: e.review };
+                })
+            })
+        })
+        .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, body: j }; }); })
+        .then(function(res) {
+            if (!res.ok || res.body.error) {
+                btnRewrite.disabled = false;
+                tbNew.placeholder = '生成失败：' + (res.body.error || res.status);
+                statusEl.textContent = res.body.error || ('HTTP ' + res.status);
+                return;
+            }
+            tbNew.value = res.body.content;
+            tbNew.placeholder = '';
+            updateDiff();
+            statusEl.textContent = '第二稿完成（' + res.body.rounds + ' 轮，用时 '
+                                 + res.body.elapsed + 's）。可「对新稿再审一轮」继续循环。';
+            btnRewrite.disabled = false;
+            persist();
+        })
+        .catch(function(e) {
+            btnRewrite.disabled = false;
+            tbNew.placeholder = '';
+            statusEl.textContent = '请求失败: ' + e.message;
+        });
+    });
+
+    /* ---- 存版本：复用既有 save-version（source=ai 自动去AI化+置为当前正文） ---- */
+    btnSave.addEventListener('click', function() {
+        const text = tbNew.value.trim();
+        if (!text) return;
+        if (!confirm('把第二稿存为新版本？将自动去AI化并替换当前正文。')) return;
+        btnSave.disabled = true;
+        const fd = new URLSearchParams();
+        fd.append('content', text);
+        fd.append('source', 'ai');
+        fetch('/short/' + storyId + '/save-version', { method: 'POST', body: fd })
+            .then(function(r) { return r.json(); })
+            .then(function(j) {
+                btnSave.disabled = false;
+                if (j.ok) {
+                    statusEl.textContent = '已存为 V' + j.versionNumber + ' 并更新当前正文';
+                    currentText = text;
+                    syncWorkbench();
+                } else {
+                    statusEl.textContent = j.error || '保存失败';
                 }
-                renderResult(res.body);
             })
-            .catch(function(e) {
-                btnRun.disabled = false;
-                statusEl.textContent = '请求失败: ' + e.message;
-            });
+            .catch(function(e) { btnSave.disabled = false; statusEl.textContent = '保存失败: ' + e.message; });
     });
 
-    btnCopy.addEventListener('click', function() {
-        if (!lastResult) return;
-        const text = buildSheet(lastResult);
+    /* ---- 复制 ---- */
+    function copyText(text, btn, doneLabel) {
         (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
-            .then(function() {
-                btnCopy.textContent = '✓ 已复制审评单';
-                setTimeout(function() { btnCopy.textContent = '📋 复制完整审评单'; }, 1600);
-            })
+            .then(function() { flash(btn, doneLabel); })
             .catch(function() {
-                // 剪贴板不可用（非安全上下文等）：降级为选中文本提示
                 const ta = document.createElement('textarea');
-                ta.value = text;
-                document.body.appendChild(ta);
-                ta.select();
-                try { document.execCommand('copy'); btnCopy.textContent = '✓ 已复制'; }
-                catch (e2) { btnCopy.textContent = '复制失败，请手动选择'; }
+                ta.value = text; document.body.appendChild(ta); ta.select();
+                try { document.execCommand('copy'); flash(btn, doneLabel); }
+                catch (e2) { flash(btn, '复制失败，请手动选择'); }
                 document.body.removeChild(ta);
-                setTimeout(function() { btnCopy.textContent = '📋 复制完整审评单'; }, 1600);
             });
+    }
+    function flash(btn, label) {
+        const old = btn.textContent;
+        btn.textContent = label;
+        setTimeout(function() { btn.textContent = old; }, 1600);
+    }
+    btnCopy.addEventListener('click', function() {
+        if (reviews) copyText(buildSheet(reviews), btnCopy, '✓ 已复制审评单');
+    });
+    btnCopyNew.addEventListener('click', function() {
+        if (tbNew.value.trim()) copyText(tbNew.value, btnCopyNew, '✓ 已复制第二稿');
     });
 
-    // 恢复上次结果
-    try {
-        const cached = localStorage.getItem(cacheKey);
-        if (cached) renderResult(JSON.parse(cached));
-    } catch (e) {}
+    tbNew.addEventListener('input', updateDiff);
+
+    /* ---- 初始化 ---- */
+    syncWorkbench();
+    if (!restore()) {
+        // 无缓存：预填原稿，方便直接改完再送审
+        tbCurrent.value = ORIGINAL;
+    }
 })();
 </script>
 {% endblock %}
