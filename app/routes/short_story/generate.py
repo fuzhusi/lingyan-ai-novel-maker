@@ -251,6 +251,11 @@ def expand_inspiration(story_id):
 
     messages = _build_expander_prompt(story)
     cfg = get_model_config(agent_type="short_story")
+    # 大纲是一次性 JSON 产出，节点多时（如 2 万字 ≈ 19 节点）默认 max_tokens
+    # 会被撑爆截断成残缺 JSON，前端就只能显示一坨裸 JSON。这里给足输出空间。
+    cfg = dict(cfg)
+    cfg["max_tokens"] = max(cfg.get("max_tokens", 4096), 8192)
+    cfg["temperature"] = 0.7  # 大纲策划要稳定，不必沿用写作的 0.9
 
     try:
         raw = _call_ai_sync_wrapper(messages, cfg)
@@ -265,10 +270,14 @@ def expand_inspiration(story_id):
         story.outline_nodes = json.dumps(nodes, ensure_ascii=False)
         story.status = "concept_ready"
     else:
-        # 兜底：JSON 解析失败 → 存原文 + 正则解析旧格式节点
-        story.concept = raw or ""
+        # 兜底：JSON 解析失败（通常是输出被 max_tokens 截断成残缺 JSON）
+        # 不把裸 JSON 当构思存——那对用户毫无意义；给明确提示引导重试
         fallback = parse_outline_nodes(raw or "", story.word_target)
         story.outline_nodes = json.dumps(fallback, ensure_ascii=False) if fallback else "[]"
+        story.concept = (
+            "⚠️ 大纲生成不完整（AI 输出被截断），未能解析出有效节点。\n"
+            "请点「重新生成大纲」再试一次；若反复出现，可在设置里换用更大上下文的模型。"
+        ) if not fallback else _format_concept("（部分节点）", fallback)
         story.status = "concept_ready"
 
     # 大纲已重置为全新 pending 节点：旧全文与新节点失配，必须清空。
