@@ -1027,19 +1027,52 @@
                         });
                         document.getElementById('btn-write').addEventListener('click', resetAndRewrite);
                     },
-                    onError: function() { settleBar(); }
+                    onError: function(err, displayText) {
+                        // 网络中断（区别于主动暂停的 AbortError）：同样给出
+                        // 续跑入口——残片截断到最后一个完整节点，pending 节点
+                        // 由服务端持久化，继续生成会从断点自动接续。
+                        settleBar();
+                        if (typeof displayText === 'string') {
+                            pausedText = (typeof lastBoundary === 'number' && lastBoundary > 0)
+                                ? displayText.slice(0, lastBoundary) : displayText;
+                        }
+                        lastBoundary = 0;
+                        setStatus('网络中断 — 可继续生成或重新创作');
+                        refreshNodeStatus();
+                        storyActions.innerHTML = `
+                            <button id="btn-resume" class="btn-primary">继续生成</button>
+                            <button id="btn-write" class="btn-secondary">重新创作</button>
+                        `;
+                        document.getElementById('btn-resume').addEventListener('click', function() {
+                            triggerWrite(false);
+                        });
+                        document.getElementById('btn-write').addEventListener('click', resetAndRewrite);
+                    }
                 }
             );
         }
 
         function refreshNodeStatus() {
-            // 从服务端获取最新节点状态（暂停后已完成节点已持久化）
+            // 从服务端获取最新节点状态（暂停后已完成节点已持久化）；
+            // 同时兜底：存在待完成节点且当前未在生成 → 始终提供「继续生成」
+            // 入口。修复真实事故——断网卡死 status 后刷新页面只剩破坏性的
+            // 「重新创作」，17 个已完成节点差点被迫清空。
             fetch(`/short/${storyId}/nodes`)
                 .then(r => r.json())
                 .then(data => {
                     if (data && data.nodes) {
                         const doneCount = data.nodes.filter(n => n.status === 'done').length;
                         renderNodeProgress(doneCount);
+                        const hasPending = data.nodes.some(n => n.status !== 'done');
+                        const editing = !!document.getElementById('btn-save');
+                        if (hasPending && !genController && !editing &&
+                            !document.getElementById('btn-resume')) {
+                            storyActions.insertAdjacentHTML('afterbegin',
+                                '<button id="btn-resume" class="btn-primary">继续生成</button>');
+                            document.getElementById('btn-resume').addEventListener('click', function() {
+                                triggerWrite(false);
+                            });
+                        }
                     }
                 }).catch(() => {});
         }
@@ -1100,6 +1133,9 @@
         // Initial binding
         bindConceptActions();
         bindStoryActions();
+        // 页面加载即探测断点：有 pending 节点立刻亮出「继续生成」，
+        // 不等用户手点（配合服务端状态保险丝，断网/宕机后 F5 即可续跑）
+        refreshNodeStatus();
 
     // ==================== SETTING / CAREFUL MODE ====================
     } else {

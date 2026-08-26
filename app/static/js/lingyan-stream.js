@@ -96,7 +96,8 @@
                             p.style.color = 'var(--danger)';
                             p.textContent = '失败: ' + err.message;
                             targetEl.appendChild(p);
-                            if (opts.onError) opts.onError(err);
+                            // 第二参携带已流出文本：页面据此截断到完整节点并给出续跑入口
+                            if (opts.onError) opts.onError(err, displayText);
                         }
                     });
                 }
@@ -111,7 +112,7 @@
                 p.style.color = 'var(--danger)';
                 p.textContent = '失败: ' + err.message;
                 targetEl.appendChild(p);
-                if (opts.onError) opts.onError(err);
+                if (opts.onError) opts.onError(err, displayText);
             });
 
             return controller;

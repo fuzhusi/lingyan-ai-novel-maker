@@ -1,5 +1,6 @@
 """短篇 AI 生成路由：灵感发散、创作、直接生成、润色、分段生成。"""
 import json
+import time
 import re
 from flask import request, Response, jsonify, current_app
 from app.models import db, ShortStory
@@ -386,6 +387,25 @@ def write_from_concept(story_id):
         return _stream_ai_tokens(cfg, messages, max_tokens)
 
     def generate():
+        # 状态保险丝：无论正常收尾、中途异常、还是客户端断开（断网时
+        # Werkzeug 在 yield 点抛 GeneratorExit，BaseException 绕过所有
+        # 内层 except），都保证 status 不停留 "generating"——否则刷新后
+        # 页面永远显示生成中、用户失去续跑入口（真实事故）。
+        try:
+            yield from _generate_all()
+        finally:
+            with app.app_context():
+                s = db.session.get(ShortStory, story_id)
+                if s and s.status == "generating":
+                    nl = load_outline_nodes(s)
+                    if nl:
+                        s.status = ("done" if all(n.get("status") == "done" for n in nl)
+                                    else "concept_ready")
+                    else:
+                        s.status = "done" if (s.content or "").strip() else "concept_ready"
+                    db.session.commit()
+
+    def _generate_all():
         # 有节点 → 逐节点多轮生成
         with app.app_context():
             s = db.session.get(ShortStory, story_id)
@@ -410,18 +430,30 @@ def write_from_concept(story_id):
                 if sep:
                     yield sep
                 node_text = ""
-                try:
-                    with app.app_context():
-                        s = db.session.get(ShortStory, story_id)
-                        messages = build_node_prompt(s, node_list, idx, all_text)
-                    # word_count 可能为 None/浮点串（旧数据/AI 输出），float() 容错
-                    node_tokens = min(int(float(node.get("word_count") or 1200)) * 2, 12000)
-                    for token in _stream_ai_tokens(cfg, messages, node_tokens):
-                        node_text += token
-                        yield token
-                except Exception as e:
-                    yield f"\n[节点{node['id']}生成失败: {e}]"
+                with app.app_context():
+                    s = db.session.get(ShortStory, story_id)
+                    messages = build_node_prompt(s, node_list, idx, all_text)
+                # word_count 可能为 None/浮点串（旧数据/AI 输出），float() 容错
+                node_tokens = min(int(float(node.get("word_count") or 1200)) * 2, 12000)
+                # 韧性预案：单节点调用失败（网络抖动/上游瞬断）自动重试，
+                # 指数退避 1s/2s；重试从头写该节点——已流出的残片由前端
+                # 续跑按钮逻辑截断。真断连时 GeneratorExit 不属 Exception，
+                # 直接穿透并由外层保险丝复位状态，不会对死连接空转。
+                MAX_TRIES = 3
+                for attempt in range(1, MAX_TRIES + 1):
                     node_text = ""
+                    try:
+                        for token in _stream_ai_tokens(cfg, messages, node_tokens):
+                            node_text += token
+                            yield token
+                        break  # 本轮成功
+                    except Exception as e:
+                        if attempt < MAX_TRIES:
+                            wait = 2 ** (attempt - 1)
+                            yield f"\n[节点{node['id']} 中断（{e}），{wait}s 后自动重试 ({attempt}/{MAX_TRIES - 1})…]\n"
+                            time.sleep(wait)
+                        else:
+                            yield f"\n[节点{node['id']} 重试{MAX_TRIES - 1}次仍失败: {e}]\n"
 
                 if not node_text.strip():
                     continue  # 本节点失败保持 pending，暂停/重试时续写
