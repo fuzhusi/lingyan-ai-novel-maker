@@ -245,6 +245,10 @@
                 <div class="concept-actions" id="plan-theme-actions">
                     {% if not story.plan_theme %}
                     <button id="btn-plan-theme" class="btn-primary">生成主题</button>
+                    {% elif story.content or outline_nodes %}
+                    {# 正文已开跑：策划定稿。原来的 重新生成/编辑/确认 三连
+                       在断点续跑场景下是最大的视觉误导——用户会把它当操作区 #}
+                    <span style="font-size:0.82rem;color:var(--text-dim)">主题已定稿 · 正文见下方进度条与操作栏{% if outline_nodes %}（如需推倒重来用「重新创作」，单节点修改用节点上的重写）{% endif %}</span>
                     {% else %}
                     <button id="btn-plan-theme" class="btn-secondary">重新生成</button>
                     <button id="btn-edit-theme" class="btn-secondary">编辑</button>
@@ -269,6 +273,11 @@
                     <span id="node-progress-text" class="node-progress-text">
                         {{ outline_nodes|selectattr('status','equalto','done')|list|length }}/{{ outline_nodes|length }}
                     </span>
+                    {% if outline_nodes|selectattr('status','equalto','done')|list|length
+                          and outline_nodes|rejectattr('status','equalto','done')|list|length %}
+                    {# 断点续跑·顶部入口：紧跟策划卡可见，无需滚过整篇正文 #}
+                    <button id="btn-resume-top" class="btn-primary btn-sm" style="margin-left:auto">继续生成（第 {{ (outline_nodes|rejectattr('status','equalto','done')|list|first).id }}/{{ outline_nodes|length }} 节点起）</button>
+                    {% endif %}
                 </div>
                 <div class="node-progress-track">
                     <div id="node-progress-fill" class="node-progress-fill"
@@ -974,13 +983,19 @@
             storyActions.innerHTML = `
                 <button id="btn-pause" class="btn-secondary">暂停生成</button>
             `;
-            // 生成中：操作栏悬浮固定，内容再长也够得着
+            // 生成中：操作栏悬浮固定，内容再长也够得着；顶部续跑按钮防双跑
             storyActions.classList.add('generating');
+            const resumeTopBtn = document.getElementById('btn-resume-top');
+            if (resumeTopBtn) resumeTopBtn.disabled = true;
             document.getElementById('btn-pause').addEventListener('click', function() {
                 if (genController) genController.abort();
             });
 
-            const settleBar = () => storyActions.classList.remove('generating');
+            const settleBar = () => {
+                storyActions.classList.remove('generating');
+                const rt = document.getElementById('btn-resume-top');
+                if (rt) rt.disabled = false;
+            };
             const body = reset ? 'reset=1' : '';
 
             genController = streamToElement(
@@ -1145,6 +1160,12 @@
         // Initial binding
         bindConceptActions();
         bindStoryActions();
+        // 服务端直出的顶部续跑按钮（进度条头部，紧跟策划卡）
+        const btnResumeTop = document.getElementById('btn-resume-top');
+        if (btnResumeTop) btnResumeTop.addEventListener('click', function() {
+            if (genController) return;  // 已在生成中，防重复触发
+            triggerWrite(false);
+        });
         // 页面加载即探测断点：有 pending 节点立刻亮出「继续生成」，
         // 不等用户手点（配合服务端状态保险丝，断网/宕机后 F5 即可续跑）
         refreshNodeStatus();
