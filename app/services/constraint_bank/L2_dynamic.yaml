@@ -1,0 +1,38 @@
+# L2 动态层：ai_metric 检出违规 → 预写修正文案
+# 用途：Phase C 时 build_tone_instructions() 从本表取文案（行为保持兼容），
+#       替代现在的函数内字符串拼接。key 与 ai_metric checks 的 name 关键词对齐。
+# 注入规则：只注入命中的条目；跨段措辞重复需带检测出的具体三元组。
+# 新增条目须先在 ai_metric.py 有对应确定性检测——没有检测就没有动态约束。
+meta:
+  version: "1.0"
+  date: "2026-08-26"
+  source: ai_metric.py build_tone_instructions 既有 8 类 + 语料研究冒号滥用(R=3.8/9.4)补齐
+
+entries:
+  # 条目字段说明：template=注入文案（{grams} 为预留占位）；needs_excerpts 与
+  # priority 目前为预留元数据，代码尚未消费——priority 未来可用于多命中时按限截断
+  跨段措辞重复:
+    template: "前文已高频重复以下措辞构式：{grams}。本次写作全部禁用，必须换其他表达方式"
+    needs_excerpts: true   # {grams} 由检测结果的三元组填充，最多6个
+    priority: P0           # 指纹已形成，必须定向打断
+  相邻句同款:
+    template: "前文大量相邻句共用同一句法骨架（逗号数相同、长短相近）。本次写作相邻句必须错开结构：逗号数量、句长、成分顺序均不可连续雷同"
+    priority: P0
+  破折号滥用:
+    template: "本次写作禁用破折号，需要停顿改用逗号或句号"
+    priority: P0
+  提示语冒号:
+    template: "提示语后不用冒号引出内容：删掉提示语或改用动作/句号衔接"
+    priority: P1
+  拟人化理想化喻体:
+    template: "禁止把事物比作理想化的职业人格（导师/守护者/管家等）；喻体要么是具体的人，要么直接写事物本身"
+    priority: P1
+  翻案腔:
+    template: "禁止「不是A而是B」「看似…实则…」式先立后破句式，直接正面陈述判断"
+    priority: P1
+  译文腔:
+    template: "避免「当…时」句首从句、「对于…来说」、「这意味着」复述等翻译腔结构；长定语拆成短句"
+    priority: P1
+  段首零回指评论:
+    template: "每段开头若给出评价，必须带回指词（「这听起来…」「这一点…」），不得凭空抛评论"
+    priority: P2

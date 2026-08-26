@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 **灵砚 (LingYan)** — AI 小说创作系统。Python Flask 后端 + Jinja2 前端，支持长篇和短篇创作。
-**核心特性**：多 Agent 协作（Writer + Critic + 4 Keepers + Editor）、17 维度质量审计、按 Agent 类型配置不同模型、长篇一致性保障（因果链 + 向量记忆 + 信息边界）、短篇逐节点多轮生成、单用户免登录。
+**核心特性**：多 Agent 协作（Writer + Critic + 4 Keepers + Editor）、双盲审两角色审评（阎浮×白骨，替代旧 17 维审计）、按 Agent 类型配置不同模型、长篇一致性保障（因果链 + 向量记忆 + 信息边界）、短篇逐节点多轮生成、单用户免登录。
 
 ## Development Environment
 
@@ -46,10 +46,11 @@ app/
 ├── config.py            # AppConfig 从 .env 加载
 ├── config_utils.py      # 配置解析 (get_model_config / get_effective_config)
 │
-├── models/              # 21 个 SQLAlchemy 模型 (按领域拆分)
+├── models/              # 22 个 SQLAlchemy 模型 (按领域拆分)
 │   ├── __init__.py      # 统一导出 + init_db()
 │   ├── base.py          # db 实例 + now()
-│   ├── novel.py         # Novel, Chapter, ChapterVersion, CriticReview, PromptTemplate, Setting
+│   ├── novel.py         # Novel, Chapter, ChapterVersion, CriticReview, BlindReview,
+│   │                    #   PromptTemplate, Setting
 │   ├── knowledge.py     # Character, WorldSetting, OutlineNode, Foreshadowing, CharacterRelation
 │   ├── state.py         # StoryState, StoryStateSnapshot, ChapterMemory, ChapterSummary
 │   ├── short_story.py   # ShortStory, ShortStoryVersion, ShortStoryReview
@@ -80,7 +81,7 @@ app/
 │   │   ├── rewrite.py   # 改写洗稿 (轻度/中度/重度)
 │   │   └── upload.py    # 文件上传 (TXT/DOCX/EPUB)
 │   ├── pipeline.py      # 多 Agent 并行检查
-│   ├── audit.py         # 17 维度质量审计
+│   ├── blind_review.py  # 双盲审工作台 + 通用 API（/blind/）
 │   ├── story_state.py   # 故事状态引擎
 │   ├── relations.py     # 角色关系
 │   ├── optimizer.py     # 全书优化
@@ -103,9 +104,9 @@ app/
 │   ├── llm.py           # 统一 LLM 调用层 (langchain-openai)
 │   ├── deai_agent.py    # 去 AI 化处理逻辑（词汇层替换；比喻简化规则已按语料研究停用）
 │   ├── deai_patterns.py # 120+ 禁用模式数据
-│   ├── ai_metric.py     # 篇章层 AI 痕迹检测（9 项对照语料验证规则 + 统计指标，零 LLM）
-│   ├── audit.py         # 17 维度审计引擎 (蓝)
-│   ├── book_optimizer.py # 全书诊断
+│   ├── ai_metric.py     # 篇章层 AI 痕迹检测（10 项对照语料验证规则 + 统计指标，零 LLM）
+│   ├── blind_review.py  # 双盲审引擎：阎浮×白骨两角色零上下文盲审 + 返还重写闭环
+│   ├── book_optimizer.py # 全书诊断（人味检测驱动，零 LLM 成本）
 │   ├── causal_chain.py  # 因果链提取 (蓝)
 │   ├── vector_memory.py # FTS5 语义检索 (蓝)
 │   ├── info_boundary.py # 角色知识边界系统
@@ -127,7 +128,7 @@ app/
 
 | 类别 | 模型 |
 |------|------|
-| **核心** | Novel, Chapter, ChapterVersion, CriticReview, PromptTemplate, Setting |
+| **核心** | Novel, Chapter, ChapterVersion, CriticReview, BlindReview, PromptTemplate, Setting |
 | **知识库** | Character, WorldSetting, OutlineNode, Foreshadowing |
 | **高级** | CharacterRelation, StoryState, StoryStateSnapshot, ChapterMemory, ChapterSummary |
 | **短篇** | ShortStory, ShortStoryVersion, ShortStoryReview |
@@ -181,6 +182,7 @@ app/
 
 ### 去 AI 化 (De-AI)
 - **三层防御**：Prompt 约束（最高优先级）→ 文本后处理 → 质量审计
+- **约束词库 (constraint_bank)**：L0 核心/L1 场景/L2 动态文案/L3 参考（词表永不进 prompt）四层数据在 `app/services/constraint_bank/`；writer/critic/rewrite/editor/**short_story** 五链路经 `assemble_constraints()` / `get_constraints_text()` 按预算动态装配（上限 1800 字符，超限按 P2→P1 裁、P0 永不裁），替代全量静态注入解决注意力稀释；`DEFAULT_WRITER_CONSTRAINTS` 已剪枝为应急迷你兜底（勿再往里堆规则）；全局开关 `Setting.constraint_bank_enabled`；gate-check 响应回显 `constraint_assembly`；调研依据见 `docs/约束promote engineer.md`
 - 自动应用于章节保存：`deai_process(content)`（仅 `source == "ai"` 的版本）
 - **全局开关**：Setting 键 `deai_auto = "0"` 可整体关闭自动去AI化（CLI `force=True` 不受影响）
 - 120+ 禁用模式分 8 类：虚词、情感、副词、模式化描写、对话、过渡、解释性开头、成语
@@ -201,14 +203,24 @@ app/
 - **质量门禁 (skill_gate)：** 生成完成后对全文做确定性校验（正则/统计，零 LLM 成本），按当前激活技能选择性检查——对话修饰语、跨句同构排比（句内排比实测人类更高频，不判）、首先其次模板、段末升华、直述情绪标签、抽象感官词；违规带原文摘录，前端在生成结果下方渲染报告；API `POST /api/skills/gate-check` 传 JSON `{text}`
 - **篇章 AI 痕迹检测 (ai_metric)：** 基于 283 万字对照语料研究（`docs/ai-tone-research.md`）的 10 项特征确定性检测——段首零回指评论(R=4.4)、拟人化理想化喻体(7.3)、提示语冒号(3.8)、破折号揭晓式(DeepSeek 高发)、译文腔四种、翻案腔(3.4)、相邻句结构同款(密度/百段)、跨段措辞重复(词汇分布指纹，逐节点生成主要病灶)、顿号并列过密(1.8)、禁用起手式(3.2)；输出 0-100 人味分 + 违规摘录 + 统计指标；随 gate-check 一并返回，长篇/短篇写作页渲染；只检测不修改；检测结果经 `build_tone_instructions()` 转为修正指令自动注入三条生成链路（长篇章节/短篇逐节点/评审重写），二次生成时定向避开构式指纹；阈值含朱雀实测校准点（见 docs 记录表）
 
-### 质量审计 (17 维度)
-| 组 | 维度 |
-|----|------|
-| 角色 | 性格一致性、行为合理性、对话自然度、成长轨迹 |
-| 剧情 | 逻辑连贯性、节奏把控、冲突推进、悬念管理 |
-| 世界观 | 世界观一致性、战力平衡、时间线正确性 |
-| 文笔 | 文笔流畅度、感官描写、AI痕迹、信息密度 |
-| 伏笔 | 伏笔推进、伏笔回收 |
+### 双盲审（两角色审评体系，替代旧 17 维审计）
+
+两位「恶毒编辑」人格对正文做**零上下文盲审**——不给大纲、设定、策划，只看纸面事实：
+
+| 编辑 | 视角 | 只关心 |
+|------|------|--------|
+| 尖酸嘴 · 阎浮 | 市场毒舌 | 读者会不会往下翻：钩子、灌水、跳段瞬间、AI 痕迹 |
+| 白骨 · 文学审稿 | 文学刻薄 | 文字是不是「真的」：假情绪、假细节、套话腔、AI 腔 |
+
+- **铁律**：每条批评必须引用原文片段；禁止空泛形容词；夸奖最多一句且精确到句子
+- **判决**：每位编辑只给二值判决——追读 / 弃稿（不造数字分，诚实呈现）
+- **闭环**：审评可返还 Writer 生成第二稿 → 对第二稿再审 → 循环打磨；重写前可勾选采纳哪位编辑的意见
+- **职责边界**：盲审只管文笔与市场层；角色一致性/伏笔逻辑由 Keepers 流水线负责
+- **入口**：全局导航「盲审」工作台 `/blind/`（任选短篇/章节/自由文本）＋ 长篇写作页「双盲审」按钮 ＋ 短篇写作页评审卡 ＋ 短篇盲审实验室 `/short/{id}/cruel`
+- **API**：`POST /api/blind-review/run`（kind=story/chapter/text）、`POST /api/blind-review/rewrite`（include_editors 可选过滤）、`GET /api/blind-review/latest`
+- **持久化**：独立 `BlindReview` 表（init_db 自动建表），kind+story_id/version_id+editors_json+verdict 判决
+- **全面评审（unified_review）**：critic 结构化评分（历史可比）+ 双盲审文本报告并排呈现；综合分沿用 critic 链路
+- **全书诊断**：逐章跑 ai_metric 人味检测（0-100 分换算 10 分制）+ 去AI化统计，零 token 成本
 
 ### 短篇逐节点多轮生成（灵感+设定模式）
 - **分阶段策划流程**（3 阶段可编辑确认 + 1 阶段创作）：
@@ -228,7 +240,7 @@ app/
 - **断点恢复**：每完成一个节点持久化 `outline_nodes`（含 `content`）；暂停后从第一个 pending点续写
 - **局部编辑**：续写（`continue_story`）、扩写选中（`expand_selection`）、重写选中（`rewrite_selection`）— 纯流式变换，前端替换选区
 - **一致性保障**：手动保存与节点拼接不一致时自动清除节点正文（禁用单节点重写，防止覆盖编辑）
-- **评审集成**：评审 + 17 维度审计并行；审计结果持久化到 `ShortStoryReview.audit_json`，页面加载时渲染审计 bars
+- **评审集成**：短篇写作页评审卡直接跑双盲审（两位编辑并行）；结果持久化到独立 `BlindReview` 表，页面加载经 `/api/blind-review/latest` 恢复展示；深度循环用盲审实验室页
 - **前端**：3 阶段渐进卡片（角色→大纲→主题）+ 节点进度条 + `===NODE:id:title===` 流式标记 + 暂停/继续 + 编辑模式
 - **列表页**：显示节点进度、体裁、更新时间、智能按钮（继续/查看/打开）
 - 细心模式（careful）不变：旧单轮直接生成路径
@@ -319,6 +331,10 @@ python cli.py llm effective --agent-type writer [--novel 1] # 实际生效配置
 python cli.py skill list              # 写作技巧列表（按分类：作者文风协议/通用/自定义）
 python cli.py skill toggle --skill jiangnan_fingerprint  # 切换激活
 python cli.py skill preview --task-type write           # 预览实际注入Writer的完整提示词
+# 去AI味约束词库
+python cli.py constraint show --agent writer [--genre X] [--full]  # 预览装配结果与预算占用
+python cli.py constraint status                         # 词库启停状态+本进程最近装配
+python cli.py constraint toggle                         # 切换启停（停用时生成走兜底常量）
 python cli.py audit run --novel 1 --number 1  # AI 痕迹审计
 python cli.py optimize diagnose --novel 1     # 全书诊断
 python cli.py optimize deai --novel 1 --number 2 [--save]  # 章节去AI化（--save 存新版本）
@@ -400,7 +416,6 @@ python cli.py sys sample-data         # 加载示例小说（对齐 Web 一键�
 | critic | V4 Pro | 0.3 | 2048 |
 | rewrite | V4 Pro | 0.7 | 4096 |
 | editor | V4 Pro | 0.5 | 4096 |
-| audit | V4 Pro | 0.3 | 2048 |
 | character_check | V4 Pro | 0.3 | 2048 |
 | lore_check | V4 Pro | 0.3 | 2048 |
 | foreshadow_check | V4 Pro | 0.3 | 2048 |

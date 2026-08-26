@@ -69,6 +69,24 @@ class CriticReview(db.Model):
     version = db.relationship("ChapterVersion", back_populates="reviews")
 
 
+class BlindReview(db.Model):
+    """双盲审记录 —— 两角色盲审体系的唯一持久化位置。
+
+    kind: "story"（短篇）/ "chapter"（长篇章节版本）/ "text"（自由文本，不落对象引用）
+    编辑输出整体存 editors_json（含 verdict 判决），不再向旧审计字段迁移语义。
+    """
+    __tablename__ = "blind_reviews"
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(10), default="text")
+    story_id = db.Column(db.Integer, db.ForeignKey("short_stories.id"), nullable=True)
+    version_id = db.Column(db.Integer, db.ForeignKey("chapter_versions.id"), nullable=True)
+    title = db.Column(db.String(200), default="")       # 冗余标题，列表页免联查
+    word_count = db.Column(db.Integer, default=0)
+    editors_json = db.Column(db.Text, default="[]")     # [{key,name,verdict,review}]
+    elapsed = db.Column(db.Float, default=0.0)
+    created_at = db.Column(db.String(20), default=now)
+
+
 class PromptTemplate(db.Model):
     __tablename__ = "prompt_templates"
     id = db.Column(db.Integer, primary_key=True)

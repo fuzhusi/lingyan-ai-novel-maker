@@ -6,7 +6,7 @@ from app.models.base import db, now
 
 # 核心小说结构
 from app.models.novel import (
-    Novel, Chapter, ChapterVersion, CriticReview, PromptTemplate, Setting,
+    Novel, Chapter, ChapterVersion, CriticReview, BlindReview, PromptTemplate, Setting,
 )
 
 # 知识库
@@ -77,7 +77,7 @@ def init_db(app):
 
 __all__ = [
     "db", "now", "init_db",
-    "Novel", "Chapter", "ChapterVersion", "CriticReview", "PromptTemplate", "Setting",
+    "Novel", "Chapter", "ChapterVersion", "CriticReview", "BlindReview", "PromptTemplate", "Setting",
     "Character", "WorldSetting", "OutlineNode", "Foreshadowing", "CharacterRelation",
     "StoryState", "StoryStateSnapshot", "ChapterMemory", "ChapterSummary",
     "ShortStory", "ShortStoryVersion", "ShortStoryReview",

@@ -14,8 +14,12 @@
 - 统计指标（句长 CV 等）仅信息性展示不计分——现有公开研究结论互相矛盾，
   待朱雀标注数据校准后再纳入评分
 """
+import logging
+import os
 import re
 from collections import Counter
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # 触发标记定义
@@ -455,6 +459,51 @@ _FUNCTION_CHARS = set(
     "但而且于是很太更最还只已曾经将便才即让使从到在上去来中里外前后左右"
 )
 
+# 修正文案外置到约束词库动态层：constraint_bank/L2_dynamic.yaml
+# （检测命中 → 预写修正文案；新增文案须先有对应确定性检测，没有检测就没有动态约束）
+_L2_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "constraint_bank", "L2_dynamic.yaml")
+_l2_cache = None  # (文件指纹(mtime,size), entries) —— 改 yaml 即时生效，与词库缓存策略一致
+
+# 检测名关键词 → L2 条目 key。顺序即匹配优先级，一条检测只命中一个条目；
+# 「顿号并列过密」「禁用起手式」暂无定向改写价值，维持旧版不生成指令的行为。
+_CHECK_KEY_MAP = [
+    ("相邻句", "相邻句同款"),
+    ("破折号", "破折号滥用"),
+    ("冒号", "提示语冒号"),
+    ("拟人化", "拟人化理想化喻体"),
+    ("翻案腔", "翻案腔"),
+    ("译文腔", "译文腔"),
+    ("段首零回指", "段首零回指评论"),
+]
+
+
+def _load_tone_templates():
+    """加载 L2 动态层文案表（文件指纹缓存，改 yaml 即时生效）。
+
+    加载失败返回空表并告警停用指令生成；文件缺失同样返回空表。
+    """
+    global _l2_cache
+    try:
+        fingerprint = (os.path.getmtime(_L2_PATH), os.path.getsize(_L2_PATH))
+    except OSError:
+        logger.warning("L2_dynamic.yaml 不可读，行文指纹修正指令停用",
+                       exc_info=True)
+        return {}
+    if _l2_cache is not None and _l2_cache[0] == fingerprint:
+        return _l2_cache[1]
+    try:
+        import yaml
+        with open(_L2_PATH, encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+        entries = data.get("entries") or {}
+    except Exception:
+        logger.warning("L2_dynamic.yaml 解析失败，行文指纹修正指令停用",
+                       exc_info=True)
+        entries = {}
+    _l2_cache = (fingerprint, entries)
+    return entries
+
 
 def build_tone_instructions(text):
     """对已有正文跑检测，生成注入 Writer/节点提示词的修正指令块。
@@ -462,41 +511,47 @@ def build_tone_instructions(text):
     用法：二次生成（续写/逐节点/评审重写）时，取已完成文本调用本函数，
     把返回值追加到提示词——模型在写新内容时会主动避开已形成的指纹。
     无违规或文本过短时返回空串。
+    文案来源：constraint_bank/L2_dynamic.yaml（检测名关键词映射）。
     """
     rep = analyze_ai_tone(text)
-    if not rep.get("human_score"):
+    if rep.get("human_score") is None:
+        # 只在无报告（文本过短等）时返回空；score=0 是违规最严重的文本，
+        # 恰恰最需要修正指令，绝不能被 falsy 判断吞掉
         return ""
 
+    entries = _load_tone_templates()
     lines = []
     for c in rep["checks"]:
         if c["risk"] == "low":
             continue
         name = c["name"]
+        entry = None
+        kwargs = {}
         if "跨段措辞重复" in name:
             grams = []
             for ex in c.get("excerpts")[:8]:
                 m = re.match(r"「(.+?)」", ex)
                 if m and any(ch in _FUNCTION_CHARS for ch in m.group(1)):
                     grams.append(m.group(1))
-            if grams:
-                uniq = list(dict.fromkeys(grams))[:6]
-                lines.append(
-                    "前文已高频重复以下措辞构式，本次写作全部禁用，必须换其他表达方式："
-                    + "、".join(f"「{g}」" for g in uniq))
-        elif "相邻句" in name:
-            lines.append(
-                "前文大量相邻句共用同一句法骨架（逗号数相同、长短相近）。"
-                "本次写作相邻句子必须错开结构：逗号数量、句长、成分顺序均不可连续雷同")
-        elif "破折号" in name:
-            lines.append("本次写作禁用破折号，需要停顿改用逗号或句号")
-        elif "拟人化" in name:
-            lines.append("禁止把事物比作理想化的职业人格（导师/守护者/管家等）")
-        elif "翻案腔" in name:
-            lines.append("禁止「不是A而是B」「看似…实则…」式先立后破句式，直接正面陈述")
-        elif "译文腔" in name:
-            lines.append("避免「当…时」句首从句、「对于…来说」、「这意味着」复述等翻译腔结构")
-        elif "段首零回指" in name:
-            lines.append("每段开头若给出评价，必须带回指词（「这听起来…」「这一点…」），不得凭空抛评论")
+            if not grams:
+                continue
+            uniq = list(dict.fromkeys(grams))[:6]
+            kwargs["grams"] = "、".join(f"「{g}」" for g in uniq)
+            entry = entries.get("跨段措辞重复")
+        else:
+            for keyword, key in _CHECK_KEY_MAP:
+                if keyword in name:
+                    entry = entries.get(key)
+                    break
+        if not entry:
+            continue
+        template = entry.get("template") if isinstance(entry, dict) else str(entry)
+        if not template:
+            continue
+        try:
+            lines.append(template.format(**kwargs))
+        except (KeyError, IndexError):
+            lines.append(template)
 
     if not lines:
         return ""

@@ -15,7 +15,8 @@
 | 版本 | 时间 | 主要内容 |
 |------|------|---------|
 | V1.0 | 已完成 | 基础 CRUD + 流式生成 + 版本管理 |
-| V2.0 | 已完成 | 多 Agent 流水线 + 17 维度审计 + 一致性保障 |
+| V2.0 | 已完成 | 多 Agent 流水线 + 一致性保障 |
+| V3.5 | 已完成 | 双盲审两角色审评取代 17 维审计（services/blind_review.py） |
 | V2.5 | 已完成 | Per-Agent 模型配置 + DeepSeek V4 适配 |
 | V3.0 | 已完成 | 用户认证 + 模板库 + 多格式导出 + 移动端 + 草稿保存 |
 
@@ -241,17 +242,18 @@ Writer → [Critic | Character Keeper | Lore Keeper | Foreshadow Keeper] → Edi
 | Foreshadow Keeper | 伏笔管理 | 是否遗漏、是否需回收 |
 | Editor | 最终润色 | 修复所有问题 |
 
-## 4.3 17 维度质量审计
+## 4.3 双盲审（两角色审评体系，V3.5 取代 17 维审计）
 
-| Agent 组 | 维度 | 权重 |
-|----------|------|------|
-| 角色 | 性格一致性、行为合理性、对话自然度、成长轨迹 | 1.0-1.2 |
-| 剧情 | 逻辑连贯性、节奏把控、冲突推进、悬念管理 | 0.9-1.3 |
-| 世界观 | 世界观一致性、战力平衡、时间线正确性 | 0.9-1.2 |
-| 文笔 | 文笔流畅度、感官描写、AI痕迹、信息密度 | 0.8-1.5 |
-| 伏笔 | 伏笔推进、伏笔回收 | 1.0-1.1 |
+两位「恶毒编辑」人格对正文做**零上下文盲审**（不给大纲设定，每条批评必须引用原文）：
 
-评分：S(≥9) / A(≥8) / B+(≥7) / B(≥6) / C(≥5) / D(<5)
+| 编辑 | 视角 | 判决 |
+|------|------|------|
+| 尖酸嘴 · 阎浮 | 市场毒舌：钩子、灌水、跳段、AI 痕迹 | 追读 / 弃稿 |
+| 白骨 · 文学审稿 | 文学刻薄：假情绪、假细节、套话腔、AI 腔 | 追读 / 弃稿 |
+
+- 引擎 `app/services/blind_review.py`；工作台 `/blind/`；短篇深度循环 `/short/{id}/cruel`
+- API：`POST /api/blind-review/run`（kind=story/chapter/text）、`POST /api/blind-review/rewrite`（include_editors 可选过滤）、`GET /api/blind-review/latest`
+- 持久化：独立 `blind_reviews` 表；综合评分沿用 critic 链路保证历史可比
 
 ## 4.4 短篇双 Agent
 
@@ -643,7 +645,22 @@ CREATE TABLE short_story_reviews (
     overall_comment TEXT DEFAULT '',
     full_response TEXT DEFAULT '',
     user_feedback TEXT DEFAULT '',
-    audit_json TEXT DEFAULT NULL,      -- 17 维度审计结果（JSON）
+    audit_json TEXT DEFAULT NULL,      -- 旧审计字段（V3.5 起不再写入，保留兼容）
+    created_at VARCHAR(20)
+);
+
+### 双盲审记录
+
+```sql
+CREATE TABLE blind_reviews (
+    id INTEGER PRIMARY KEY,
+    kind VARCHAR(10) DEFAULT 'text',   -- story / chapter / text
+    story_id INTEGER,                  -- kind=story 时引用 short_stories.id
+    version_id INTEGER,                -- kind=chapter 时引用 chapter_versions.id
+    title VARCHAR(200) DEFAULT '',
+    word_count INTEGER DEFAULT 0,
+    editors_json TEXT DEFAULT '[]',    -- [{key,name,verdict,review}]
+    elapsed FLOAT DEFAULT 0.0,
     created_at VARCHAR(20)
 );
 ```
@@ -754,8 +771,9 @@ CREATE TABLE settings (
 | `/api/diff` | GET | 版本对比 |
 | `/api/pipeline/check` | POST | 多 Agent 检查 |
 | `/api/pipeline/check-stream` | POST | 多 Agent 检查 (SSE) |
-| `/api/audit/run` | POST | 17 维度审计 |
-| `/api/audit/quick` | POST | 快速审计 |
+| `/api/blind-review/run` | POST | 双盲审（kind=story/chapter/text） |
+| `/api/blind-review/rewrite` | POST | 盲审意见返还 Writer 生成第二稿 |
+| `/api/blind-review/latest` | GET | 查询对象最近一次盲审 |
 | `/api/novels/<id>/story-state` | GET/PUT | 故事状态 |
 | `/api/novels/<id>/relations` | GET/POST | 角色关系 |
 | `/api/novels/<id>/causal-chain/extract` | POST | 因果链提取 |

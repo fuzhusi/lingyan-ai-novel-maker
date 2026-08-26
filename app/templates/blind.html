@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+
+{% block title %}双盲审工作台 — 灵砚{% endblock %}
+
+{% block content %}
+<div style="max-width:1100px;margin:0 auto;padding:1.5rem 1rem">
+    <h1 style="margin-bottom:0.3rem">双盲审工作台</h1>
+    <p style="color:var(--text-dim);font-size:0.88rem;margin-bottom:1.2rem">
+        两位恶毒编辑对正文做零上下文盲审——阎浮管读者追不追读，白骨管文字真不真。
+        每条批评必须引用原文；审评可返还 Writer 生成第二稿，循环打磨。
+        <span style="color:var(--text-faint)">（角色一致性、伏笔逻辑由 Keepers 流水线负责，不在此列）</span>
+    </p>
+
+    <!-- 目标选择 -->
+    <div class="sidebar-card" style="margin-bottom:1rem">
+        <div style="display:flex;gap:0.5rem;margin-bottom:0.8rem">
+            <button id="tab-story" class="btn-primary btn-sm">短篇</button>
+            <button id="tab-chapter" class="btn-secondary btn-sm">长篇章节</button>
+            <button id="tab-text" class="btn-secondary btn-sm">自由文本</button>
+        </div>
+
+        <div id="pane-story">
+            <select id="story-select" style="width:100%;padding:0.45rem;margin-bottom:0.6rem">
+                {% for s in stories %}
+                <option value="{{ s.id }}">{{ s.title }}（{{ (s.content or '')|length }} 字）</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div id="pane-chapter" style="display:none">
+            <select id="chapter-select" style="width:100%;padding:0.45rem;margin-bottom:0.6rem">
+                {% for c in chapter_options %}
+                <option value="{{ c.novel_id }},{{ c.chapter_number }}">
+                    {{ c.novel_title }} · 第{{ c.chapter_number }}章 {{ c.title }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div id="pane-text" style="display:none">
+            <textarea id="text-input" rows="8" placeholder="粘贴任意正文……"
+                      style="width:100%;font-size:0.85rem;margin-bottom:0.6rem"></textarea>
+        </div>
+
+        <button id="btn-run" class="btn-primary btn-sm" style="width:100%">
+            ⚔️ 开始双盲审
+        </button>
+        <div id="run-status" style="font-size:0.82rem;color:var(--text-dim);margin-top:0.4rem"></div>
+    </div>
+
+    <!-- 审评结果 -->
+    <div id="result-panel" style="display:none;margin-bottom:1rem">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+            <h3 style="margin:0">审评结果 <span id="meta-line" style="font-size:0.8rem;color:var(--text-dim);font-weight:400"></span></h3>
+            <button id="btn-export" class="btn-secondary btn-sm">导出报告 MD</button>
+        </div>
+        <div id="editors-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:0.8rem"></div>
+    </div>
+
+    <!-- 第二稿 -->
+    <div id="rewrite-panel" class="sidebar-card" style="display:none;margin-bottom:1rem">
+        <h3>返还 Writer · 生成第二稿</h3>
+        <div style="display:flex;gap:1rem;font-size:0.84rem;margin-bottom:0.5rem">
+            <label><input type="checkbox" id="inc-yafu" checked> 采纳 阎浮 的意见</label>
+            <label><input type="checkbox" id="inc-baigu" checked> 采纳 白骨 的意见</label>
+        </div>
+        <button id="btn-rewrite" class="btn-primary btn-sm" style="width:100%">按采纳的审评生成第二稿</button>
+        <div id="rewrite-status" style="font-size:0.82rem;color:var(--text-dim);margin-top:0.4rem"></div>
+        <div id="rewrite-out-wrap" style="display:none;margin-top:0.6rem">
+            <pre id="rewrite-out" style="background:var(--bg);padding:0.8rem;border-radius:6px;max-height:400px;overflow-y:auto;font-size:0.85rem;line-height:1.7;white-space:pre-wrap"></pre>
+            <button id="btn-copy" class="btn-secondary btn-sm" style="margin-top:0.4rem">复制第二稿</button>
+        </div>
+    </div>
+
+    {% if recent %}
+    <div class="sidebar-card">
+        <h3>最近盲审记录</h3>
+        <table style="width:100%;font-size:0.82rem;border-collapse:collapse">
+            <thead><tr style="color:var(--text-dim);text-align:left">
+                <th style="padding:0.3rem">对象</th><th>类型</th><th>判决</th><th>字数</th><th>时间</th>
+            </tr></thead>
+            <tbody>
+            {% for r in recent %}
+            <tr style="border-top:1px solid var(--border)">
+                <td style="padding:0.35rem 0.3rem">{{ r.title }}</td>
+                <td>{{ {'story':'短篇','chapter':'章节','text':'文本'}.get(r.kind, r.kind) }}</td>
+                <td style="color:var(--accent)">{{ r.verdicts }}</td>
+                <td>{{ r.word_count }}</td>
+                <td style="color:var(--text-dim)">{{ r.created_at }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+(function() {
+    const $ = id => document.getElementById(id);
+    const escapeHtml = s => (s || '').replace(/[&<>"']/g,
+        c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    let lastRun = null;   // {editors, kind, targetPayload, content}
+
+    // --- Tabs ---
+    const panes = {story: $('pane-story'), chapter: $('pane-chapter'), text: $('pane-text')};
+    const tabs = {story: $('tab-story'), chapter: $('tab-chapter'), text: $('tab-text')};
+    let mode = 'story';
+    function setMode(m) {
+        mode = m;
+        for (const k of Object.keys(panes)) {
+            panes[k].style.display = k === m ? 'block' : 'none';
+            tabs[k].className = k === m ? 'btn-primary btn-sm' : 'btn-secondary btn-sm';
+        }
+    }
+    Object.entries(tabs).forEach(([k, b]) => b.onclick = () => setMode(k));
+
+    function targetPayload() {
+        if (mode === 'story') {
+            const sel = $('story-select');
+            if (!sel || !sel.value) return {error: '暂无短篇，请先创建'};
+            return {kind: 'story', id: parseInt(sel.value)};
+        }
+        if (mode === 'chapter') {
+            const sel = $('chapter-select');
+            if (!sel || !sel.value) return {error: '暂无有内容的章节'};
+            const [novelId, num] = sel.value.split(',').map(Number);
+            return {kind: 'chapter', novel_id: novelId, chapter_number: num};
+        }
+        const t = $('text-input').value.trim();
+        if (!t) return {error: '请粘贴要盲审的正文'};
+        return {kind: 'text', content: t};
+    }
+
+    function verdictChip(v) {
+        if (v === '追读') return '<span style="background:var(--success);color:var(--bg);padding:0.05rem 0.45rem;border-radius:4px;font-size:0.75rem;font-weight:700">追读</span>';
+        if (v === '弃稿') return '<span style="background:var(--danger);color:var(--bg);padding:0.05rem 0.45rem;border-radius:4px;font-size:0.75rem;font-weight:700">弃稿</span>';
+        return '<span style="color:var(--text-faint);font-size:0.75rem">未判决</span>';
+    }
+
+    function renderEditors(editors) {
+        return editors.map(e => `
+            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:0.9rem">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+                    <strong style="color:${e.key === 'yafu' ? 'var(--accent)' : 'var(--gold)'}">${escapeHtml(e.name)}</strong>
+                    ${verdictChip(e.verdict)}
+                </div>
+                <pre style="white-space:pre-wrap;font-size:0.85rem;line-height:1.7;color:var(--text-bright);margin:0">${escapeHtml(e.review || '')}</pre>
+            </div>`).join('');
+    }
+
+    $('btn-run').onclick = async function() {
+        const payload = targetPayload();
+        if (payload.error) { $('run-status').textContent = payload.error; return; }
+        $('btn-run').disabled = true;
+        $('run-status').textContent = '两位编辑并行盲审中，约需一两分钟……';
+        try {
+            const resp = await fetch('/api/blind-review/run', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload),
+            });
+            const data = await resp.json();
+            if (!resp.ok || data.error) throw new Error(data.error || resp.status);
+            lastRun = {editors: data.editors, payload};
+            $('result-panel').style.display = 'block';
+            $('editors-grid').innerHTML = renderEditors(data.editors);
+            $('meta-line').textContent =
+                `${data.title || '自由文本'} · ${data.word_count} 字 · 耗时 ${data.elapsed}s`;
+            $('rewrite-panel').style.display = 'block';
+            $('run-status').textContent = '';
+        } catch(e) {
+            $('run-status').textContent = '盲审失败: ' + e.message;
+        }
+        $('btn-run').disabled = false;
+    };
+
+    $('btn-rewrite').onclick = async function() {
+        if (!lastRun) return;
+        const include = ['yafu', 'baigu'].filter(k => $('inc-' + k)?.checked);
+        if (!include.length) { $('rewrite-status').textContent = '至少采纳一位编辑的意见'; return; }
+        $('btn-rewrite').disabled = true;
+        $('rewrite-status').textContent = 'Writer 正在按审评意见写第二稿……';
+        try {
+            const resp = await fetch('/api/blind-review/rewrite', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    ...lastRun.payload,
+                    reviews: lastRun.editors,
+                    include_editors: include,
+                }),
+            });
+            const data = await resp.json();
+            if (!resp.ok || data.error) throw new Error(data.error || resp.status);
+            $('rewrite-out-wrap').style.display = 'block';
+            $('rewrite-out').textContent = data.content;
+            $('rewrite-status').textContent =
+                `第二稿完成：${data.orig_words} → ${data.new_words} 字 · ${data.rounds} 轮 · 耗时 ${data.elapsed}s。建议稿不会自动覆盖正文，复制后自行保存。`;
+        } catch(e) {
+            $('rewrite-status').textContent = '重写失败: ' + e.message;
+        }
+        $('btn-rewrite').disabled = false;
+    };
+
+    $('btn-copy').onclick = function() {
+        navigator.clipboard.writeText($('rewrite-out').textContent)
+            .then(() => { $('btn-copy').textContent = '已复制'; setTimeout(() => $('btn-copy').textContent = '复制第二稿', 1500); });
+    };
+
+    $('btn-export').onclick = function() {
+        if (!lastRun) return;
+        const lines = ['# 双盲审报告', '',
+            '> 两角色零上下文盲审 · ' + new Date().toLocaleString(), ''];
+        for (const e of lastRun.editors) {
+            lines.push('## ' + e.name + '　判决：' + (e.verdict || '未给出'), '', e.review, '');
+        }
+        const blob = new Blob([lines.join('\n')], {type: 'text/markdown'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'blind-review-' + Date.now() + '.md';
+        a.click();
+    };
+})();
+</script>
+{% endblock %}

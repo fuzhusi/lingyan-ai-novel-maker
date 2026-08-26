@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block title %}{{ story.title }} — 短篇创作{% endblock %}
 
 {% block content %}
@@ -91,25 +91,21 @@
             <h3>评审与修改</h3>
             {% if story.content %}
             <button id="btn-review" class="btn-primary btn-sm" style="width:100%;margin-bottom:0.6rem">
-                质量评审（评分 + 17维度审计）
+                双盲审（两位编辑零上下文盲审）
             </button>
             {% else %}
             <button id="btn-review" class="btn-secondary btn-sm" style="width:100%;margin-bottom:0.6rem" disabled
                     title="请先生成短篇内容">
-                质量评审（暂无内容）
+                双盲审（暂无内容）
             </button>
             {% endif %}
 
             <!-- Review result (hidden until review completes) -->
             <div id="review-result" style="display:none">
-                <!-- Overall score -->
-                <div id="review-score" style="font-size:1.3rem;font-weight:700;text-align:center;margin-bottom:0.3rem"></div>
-                <!-- Audit dimension bars -->
-                <div id="audit-bars" style="margin-bottom:0.6rem"></div>
+                <!-- Editor verdicts -->
+                <div id="blind-reports" style="margin-bottom:0.6rem"></div>
                 <!-- Critic comment -->
                 <div id="review-comment" style="font-size:0.82rem;color:var(--text-dim);line-height:1.5;margin-bottom:0.6rem;max-height:120px;overflow-y:auto"></div>
-                <!-- Issues summary -->
-                <div id="review-issues" style="margin-bottom:0.6rem"></div>
                 <!-- User feedback -->
                 <details style="margin-bottom:0.5rem">
                     <summary style="cursor:pointer;font-size:0.82rem;color:var(--text-dim)">我的意见</summary>
@@ -1385,13 +1381,11 @@
         });
     });
 
-    // --- Unified Review (Critic + 17-dimension Audit) ---
+    // --- 双盲审（两位编辑零上下文盲审） ---
     const btnReview = document.getElementById('btn-review');
     const reviewResult = document.getElementById('review-result');
-    const reviewScore = document.getElementById('review-score');
     const reviewComment = document.getElementById('review-comment');
-    const reviewIssues = document.getElementById('review-issues');
-    const auditBars = document.getElementById('audit-bars');
+    const blindReports = document.getElementById('blind-reports');
     const userFeedback = document.getElementById('user-feedback');
 
     // 内容生成完成后的 UI 同步：启用评审/润色按钮、更新字数、隐藏草稿横幅
@@ -1400,7 +1394,7 @@
             btnReview.disabled = false;
             btnReview.classList.remove('btn-secondary');
             btnReview.classList.add('btn-primary');
-            btnReview.textContent = '质量评审（评分 + 17维度审计）';
+            btnReview.textContent = '双盲审（两位编辑零上下文盲审）';
             btnReview.removeAttribute('title');
         }
         // 启用自由润色按钮和输入框
@@ -1415,110 +1409,78 @@
     const btnSaveFeedback = document.getElementById('btn-save-feedback');
     const btnRewriteFeedback = document.getElementById('btn-rewrite-feedback');
 
-    function renderAuditBars(groups) {
-        const groupNames = {character:'角色', plot:'剧情', world:'世界观', writing:'文笔', foreshadow:'伏笔'};
-        let html = '';
-        for (const [g, info] of Object.entries(groups || {})) {
-            const pct = Math.round(info.score * 10);
-            const barColor = info.score >= 8 ? 'var(--success)' : info.score >= 6 ? 'var(--accent)' : 'var(--danger)';
-            html += `<div style="margin-bottom:0.35rem">
-                <div style="display:flex;justify-content:space-between;font-size:0.75rem;margin-bottom:0.1rem">
-                    <span style="color:var(--text-dim)">${groupNames[g]||g}</span>
-                    <span style="color:${barColor}">${info.score}</span>
-                </div>
-                <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">
-                    <div style="height:100%;width:${pct}%;background:${barColor};border-radius:2px;transition:width 0.8s ease"></div>
-                </div>
-            </div>`;
-        }
-        return html;
+    function verdictChip(v) {
+        if (v === '追读') return '<span style="background:var(--success);color:var(--bg);padding:0.05rem 0.45rem;border-radius:4px;font-size:0.72rem;font-weight:700">追读</span>';
+        if (v === '弃稿') return '<span style="background:var(--danger);color:var(--bg);padding:0.05rem 0.45rem;border-radius:4px;font-size:0.72rem;font-weight:700">弃稿</span>';
+        return '<span style="color:var(--text-faint);font-size:0.75rem">未判决</span>';
     }
 
-    function renderIssues(issues, highCount) {
-        if (!issues || issues.length === 0) return '<div style="font-size:0.78rem;color:var(--success)">无明显问题</div>';
-        let html = `<div style="font-size:0.78rem;color:var(--text-faint);margin-bottom:0.3rem">${highCount} 个高优先级</div>`;
-        for (const issue of issues.slice(0, 5)) {
-            const sevColor = issue.severity === 'high' ? 'var(--danger)' : issue.severity === 'medium' ? 'var(--accent)' : 'var(--text-dim)';
-            html += `<div style="font-size:0.78rem;padding:0.25rem 0.4rem;margin-bottom:0.2rem;background:var(--bg);border-left:2px solid ${sevColor};border-radius:0 4px 4px 0">
-                <span style="color:${sevColor};font-weight:600">${escapeHtml(issue.dimension_name||'')}</span> ${escapeHtml(issue.issue||'')}
+    function renderBlindEditors(editors) {
+        return (editors || []).map(e => {
+            const color = e.key === 'yafu' ? 'var(--accent)' : 'var(--gold)';
+            return `<div style="margin-bottom:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.3rem">
+                    <strong style="color:${color};font-size:0.82rem">${escapeHtml(e.name)}</strong>
+                    ${verdictChip(e.verdict)}
+                </div>
+                <pre style="white-space:pre-wrap;font-size:0.78rem;line-height:1.6;color:var(--text-bright);margin:0;max-height:220px;overflow-y:auto">${escapeHtml(e.review || '')}</pre>
             </div>`;
-        }
-        return html;
+        }).join('');
     }
 
     if (btnReview) {
         btnReview.addEventListener('click', async function() {
             btnReview.disabled = true;
-            btnReview.textContent = '评审中...';
+            btnReview.textContent = '盲审中...';
             reviewResult.style.display = 'block';
-            reviewScore.textContent = '...';
-            auditBars.innerHTML = '';
+            blindReports.innerHTML = '<div style="font-size:0.8rem;color:var(--text-dim)">两位编辑并行盲审中，约需一两分钟……</div>';
             reviewComment.textContent = '';
-            reviewIssues.innerHTML = '';
 
             try {
-                // Run review + audit in parallel
-                const [reviewResp, auditResp] = await Promise.all([
-                    fetch(`/short/${storyId}/review`, { method: 'POST' }),
-                    fetch('/api/audit/short-story', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: `story_id=${storyId}`
-                    })
-                ]);
-                const reviewData = await reviewResp.json();
-                const auditData = await auditResp.json();
-
-                // Show audit grade as main score
-                if (auditData.overall_score != null) {
-                    const color = auditData.overall_score >= 8 ? 'var(--success)' : auditData.overall_score >= 6 ? 'var(--accent)' : 'var(--danger)';
-                    reviewScore.innerHTML = `<span style="color:${color}">${auditData.grade}</span> <span style="font-size:0.8rem;color:var(--text-dim)">${auditData.overall_score}/10</span>`;
-                    auditBars.innerHTML = renderAuditBars(auditData.groups);
-                    reviewIssues.innerHTML = renderIssues(auditData.issues, auditData.high_issues);
-                } else if (reviewData.overall_score != null) {
-                    const color = reviewData.overall_score >= 8 ? 'var(--success)' : reviewData.overall_score >= 6 ? 'var(--accent)' : 'var(--danger)';
-                    reviewScore.innerHTML = `<span style="color:${color}">${reviewData.overall_score}/10</span>`;
-                }
-
-                // Show critic comment
-                reviewComment.textContent = reviewData.overall_comment || auditData.summary || '';
-
+                const resp = await fetch('/api/blind-review/run', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({kind: 'story', id: storyId}),
+                });
+                const data = await resp.json();
+                if (!resp.ok || data.error) throw new Error(data.error || resp.status);
+                blindReports.innerHTML = renderBlindEditors(data.editors);
+                reviewComment.textContent =
+                    `${data.word_count} 字 · 耗时 ${data.elapsed}s · 结果已存档（盲审工作台可回看）`;
             } catch(e) {
-                reviewScore.textContent = '评审失败';
-                reviewComment.textContent = e.message;
+                blindReports.innerHTML = '';
+                reviewComment.textContent = '盲审失败: ' + e.message;
             }
             btnReview.disabled = false;
-            btnReview.textContent = '质量评审（评分 + 17维度审计）';
+            btnReview.textContent = '双盲审（两位编辑零上下文盲审）';
         });
 
-        // Load existing review on page load
+        // 页面加载：恢复意见输入 + 最近一次盲审记录
         fetch(`/short/${storyId}/review/get`).then(r => r.json()).then(data => {
-            if (data && (data.overallScore || data.audit)) {
-                reviewResult.style.display = 'block';
-                if (data.audit) {
-                    if (data.audit.overall_score != null) {
-                        const color = data.audit.overall_score >= 8 ? 'var(--success)' : data.audit.overall_score >= 6 ? 'var(--accent)' : 'var(--danger)';
-                        reviewScore.innerHTML = `<span style="color:${color}">${data.audit.grade}</span> <span style="font-size:0.8rem;color:var(--text-dim)">${data.audit.overall_score}/10</span>`;
-                        auditBars.innerHTML = renderAuditBars(data.audit.groups);
-                        reviewIssues.innerHTML = renderIssues(data.audit.issues, data.audit.high_issues);
-                    }
-                    reviewComment.textContent = data.overallComment || data.audit.summary || '';
-                } else if (data.overallScore) {
-                    const color = data.overallScore >= 8 ? 'var(--success)' : data.overallScore >= 6 ? 'var(--accent)' : 'var(--danger)';
-                    reviewScore.innerHTML = `<span style="color:${color}">${data.overallScore}/10</span>`;
-                    reviewComment.textContent = data.overallComment || '';
-                }
-                if (data.userFeedback) userFeedback.value = data.userFeedback;
-            }
+            if (data && data.userFeedback) userFeedback.value = data.userFeedback;
         });
+        fetch(`/api/blind-review/latest?kind=story&id=${storyId}`).then(r => r.json())
+            .then(rec => {
+                if (rec && rec.editors && rec.editors.length) {
+                    reviewResult.style.display = 'block';
+                    blindReports.innerHTML = renderBlindEditors(rec.editors);
+                    reviewComment.textContent =
+                        `${rec.title || ''} · ${rec.word_count} 字 · ${rec.created_at} 的盲审记录`;
+                }
+            });
     }
 
     if (btnSaveFeedback) {
         btnSaveFeedback.addEventListener('click', async function() {
             const fd = new FormData();
             fd.append('feedback', userFeedback.value);
-            await fetch(`/short/${storyId}/review/feedback`, { method: 'POST', body: fd });
-            btnSaveFeedback.textContent = '已保存';
+            try {
+                const resp = await fetch(`/short/${storyId}/review/feedback`, { method: 'POST', body: fd });
+                if (!resp.ok) throw new Error((await resp.json()).error || resp.status);
+                btnSaveFeedback.textContent = '已保存';
+            } catch (e) {
+                btnSaveFeedback.textContent = '保存失败';
+            }
             setTimeout(() => btnSaveFeedback.textContent = '保存意见', 1500);
         });
     }

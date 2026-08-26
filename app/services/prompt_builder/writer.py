@@ -1,8 +1,12 @@
 """Writer 类提示词构建：章节生成、大纲生成。"""
+import logging
+
 from app.services.prompt_builder.context import (
     _section, _load_system_prompt, _load_constraints, DEFAULT_WRITER_CONSTRAINTS,
     get_skill_prompt,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def build_writer_prompt(novel_title="", chapter_title="", outline="", user_directive="",
@@ -17,7 +21,19 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
         "保持人物性格和行为的一致性。"
     ))
 
+    # 约束来源优先级：DB 模板(用户显式自定义) > 约束词库(按预算装配，见
+    # app/services/constraint_bank/) > DEFAULT_WRITER_CONSTRAINTS(兜底)。
+    # 词库装配把常驻约束从 1566 字压到 ~800 字以内，且超预算自动裁低优先模块。
     constraints = _load_constraints(db, "writer")
+    if not constraints:
+        try:
+            from app.services.constraint_bank import assemble_constraints
+            constraints = assemble_constraints(
+                agent_type="writer", genre=genre or None)["text"]
+        except Exception:
+            logger.warning("constraint bank unavailable, fallback to default",
+                           exc_info=True)
+            constraints = ""
     if not constraints:
         constraints = DEFAULT_WRITER_CONSTRAINTS
 

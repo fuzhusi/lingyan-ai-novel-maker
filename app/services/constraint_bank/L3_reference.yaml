@@ -1,0 +1,96 @@
+# L3 参考层 —— 【永不进 prompt】
+# 职责边界：
+#   词汇层执行者是 deai_patterns.py（后处理替换）与 skill_gate（生成后校验），本表是它们的
+#   词源参考与对齐基准，不是第二份执行逻辑；
+#   结构性构式（不是而是/排比/破折号/冒号/相邻句同款…）的正则在 ai_metric.py，
+#   以 283 万字语料验证过 R 值的才保留，此处不重复维护正则。
+meta:
+  version: "1.0"
+  date: "2026-08-26"
+  sources:
+    - 小红书高赞笔记生态（SMZDM 20+笔记综述结论：问题多半不在词上 → 本层仅作辅助）
+    - 今日头条蒸馏模板（眼底闪过一丝/心中五味杂陈/不知过了多久…）
+    - 原手写 DEFAULT_WRITER_CONSTRAINTS 禁用词全量迁移
+    - 英文社区 slop 词族（metric37 / atharvashah / gerimileva / Sukino Banned Tokens）
+
+banned_words_cn:
+  # 动作神态套壳（小红书系高频抱怨 Top 组）
+  - 眼底闪过一丝
+  - 眼中闪过
+  - 嘴角勾起一抹
+  - 嘴角微微上扬
+  - 一抹微笑
+  - 若有所思
+  - 意味深长
+  - 目光深邃
+  # 内心直述标签
+  - 心中暗想
+  - 心中五味杂陈
+  - 一股暖流涌上心头
+  - 他知道
+  - 他明白
+  - 他意识到
+  # 否定副词启动
+  - 不禁
+  - 不由得
+  - 不由自主
+  - 情不自禁
+  # 叠词副词（密度超标才是问题，单次出现由 gate 按频次判）
+  - 默默地
+  - 静静地
+  - 轻轻地
+  - 缓缓地
+  - 微微地
+  - 深深地
+  # 场景凝固套话
+  - 空气仿佛凝固
+  - 空气中仿佛凝固了
+  - 时间仿佛静止
+  - 不知过了多久
+  - 霎时间
+  # 动作起手式
+  - 攥紧
+  - 深吸一口气
+  - 缓缓说道
+  - 轻声道
+  - 微微一笑
+  # 身体反应套话
+  - 脊背发凉
+  - 汗流浃背
+  - 如释重负
+
+banned_phrases_cn_structural_note:
+  # 以下属构式级（非单词），执行归 ai_metric.py，列出仅为索引：
+  # 不是A而是B 全家族 / 看似…实则 / 你以为…其实 / 说到底 / 与其说…不如说 /
+  # 三项并列连发（rule of three）/ 提示语+冒号 / 破折号揭晓式 / 「了一下」尾巴高密度
+  note: 构式正则唯一维护点在 ai_metric.py 与 skill_gate，此处只做目录
+
+english_slop_reference:
+  # 仅英文创作/翻译腔参照，中文链路不使用
+  words: [delve, tapestry, testament, realm, landscape, navigate, underscore,
+          pivotal, crucial, foster, leverage, showcase, vibrant, ever-evolving]
+  phrases:
+    - barely above a whisper
+    - eyes glinted
+    - shivers down her spine
+    - heart hammered
+    - breath hitched
+    - couldn't help but
+    - little did they know
+    - it's not X, it's Y
+    - plays a significant role in shaping
+    - serves as a testament to
+    - it is important to note
+
+whitelist_do_not_ban:
+  # 语料研究的反向结论——任何新规则不得删除/压制以下特征（违者视为回归 Phase 0 前的老 bug）
+  - 设问          # 人类是 AI 的 17 倍 (R=0.05)，按流行建议删设问会更像 AI
+  - 比喻独立成段  # 人类比喻密度是 AI 的 2.4 倍 (R=0.42)
+  - 句内排比      # 人类更高频 (R=0.61)，只有跨相邻句同构才成立 (R=2.0)
+  - 口语虚词      # 单字虚词「就」方向是补不是删 (R=0.45)
+
+iteration_discipline:
+  # 规则表必须随模型版本迭代维护（Sukino 仓库增删史为证；lieflat 方法学纪律）
+  review_cycle: 季度复核 + 换主力模型时全量复核
+  acceptance: 任何新词/新正则采信前，人工检视 ≥20 条命中实例，方向反了就弃用
+  owner: 手动维护；Phase D 后可由 ai_metric 统计自动提名候选词

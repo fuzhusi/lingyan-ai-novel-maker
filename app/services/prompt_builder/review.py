@@ -1,7 +1,11 @@
 """Review 类提示词构建：评审、摘要、改写。"""
+import logging
+
 from app.services.prompt_builder.context import (
     _section, _load_system_prompt, DEFAULT_WRITER_CONSTRAINTS, get_skill_prompt,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def build_critic_prompt(novel_title="", chapter_title="", chapter_content="",
@@ -18,6 +22,18 @@ def build_critic_prompt(novel_title="", chapter_title="", chapter_content="",
         "6. 用户指示完成度（特别指示是否得到充分体现）"
         "\n请输出JSON格式的评审结果，不要输出其他内容。"
     ))
+
+    # AI 味评审清单（词库 critic_checklist 模块）：证据化逐项检查 + 强制亮点保留，
+    # 让 critic 的文笔维度从凭感觉打分升级为对照清单取证，并防止后续改稿误伤人味特征
+    try:
+        from app.services.constraint_bank import assemble_constraints
+        critic_kit = assemble_constraints(agent_type="critic")["text"]
+    except Exception:
+        logger.warning("constraint bank unavailable for critic, skip checklist",
+                       exc_info=True)
+        critic_kit = ""
+    if critic_kit:
+        system_prompt = system_prompt + "\n\n" + critic_kit
 
     user_parts = []
     if novel_title:
@@ -86,12 +102,19 @@ def build_rewrite_prompt(original_content="", critic_feedback="", novel_title=""
         "解决指出的问题，同时保持原文的优点。"
     ))
 
-    # 注入去AI化约束（最高优先级）+ 活跃技能（改写同样要遵循技法）
-    full_system = DEFAULT_WRITER_CONSTRAINTS + """
+    # 去AI化约束：词库装配(rewrite 场景=核心层+润色守则) > 静态默认值兜底
+    try:
+        from app.services.constraint_bank import assemble_constraints
+        bank_constraints = assemble_constraints(agent_type="rewrite")["text"]
+    except Exception:
+        logger.warning("constraint bank unavailable for rewrite, fallback",
+                       exc_info=True)
+        bank_constraints = ""
+    # 注入去AI化约束（最高优先级）+ 活跃技能（改写同样要遵循技法）。
+    # 原"特别注意"块中与词库 editor_preserve 模块重复的两条已并入模块去重。
+    full_system = (bank_constraints or DEFAULT_WRITER_CONSTRAINTS) + """
 
 【改写特别注意】
-- 不要"修复"文本中的自然不完美（碎片句、口语化表达、不工整的节奏）
-- 这些是有意为之的风格特征，不是错误
 - 只修复评审指出的具体问题，不要"美化"文字
 - 保持原文的人味，不要改得更"流畅优美"
 """

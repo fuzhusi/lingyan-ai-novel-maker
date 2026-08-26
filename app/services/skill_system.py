@@ -654,7 +654,8 @@ def gate_check():
 
     Body: JSON {"text": "..."} 或表单 text 字段。
     Returns: {"passed": bool, "checks": [{skill, name, passed, violations[]}],
-              "ai_tone": {passed, human_score, checks[], stats{}}}  # 篇章层 AI 痕迹
+              "ai_tone": {passed, human_score, checks[], stats{}},   # 篇章层 AI 痕迹
+              "constraint_assembly": {agent_type: 最近一次词库装配快照}}  # 可观测性回显
     """
     data = request.get_json(silent=True) or {}
     text = (data.get("text") or request.form.get("text") or "").strip()
@@ -665,6 +666,14 @@ def gate_check():
     rep = run_gate(text)
     try:
         rep["ai_tone"] = analyze_ai_tone(text)
+    except Exception:
+        pass
+    # 约束装配回显：展示最近一次生成实际注入的词库模块（可观测性闭环）
+    try:
+        from app.services.constraint_bank import get_last_assembly
+        asm = get_last_assembly()
+        if asm:
+            rep["constraint_assembly"] = asm
     except Exception:
         pass
     return jsonify(rep)

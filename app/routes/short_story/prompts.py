@@ -4,6 +4,15 @@ from app.services.skill_system import build_skill_prompt
 from app.services.short_story_templates import get_template_prompt
 
 
+def _bank_constraints(story):
+    """约束词库装配（short_story 场景，按体裁）；停用/异常返回 None 走兜底常量。"""
+    try:
+        from app.services.constraint_bank import get_constraints_text
+        return get_constraints_text("short_story", genre=story.genre)
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Genre-specific prompt helpers
 # ---------------------------------------------------------------------------
@@ -205,7 +214,7 @@ def _build_writer_from_concept_prompt(story):
         "5. 不要输出创作说明、构思复述等非小说内容\n"
         f"6. 【重要】全文必须达到 {word_target} 字以上，这是硬性要求。"
         "通过丰富的场景描写、角色内心活动、对话细节来充实内容，不要草草收尾。\n\n"
-        + DEFAULT_WRITER_CONSTRAINTS
+        + (_bank_constraints(story) or DEFAULT_WRITER_CONSTRAINTS)
     )
     # 注入活跃的写作技巧
     skill_ctx = build_skill_prompt()
@@ -267,7 +276,7 @@ def _build_setting_prompt(story):
         "4. 情节紧凑，不拖沓\n"
         "5. 直接输出小说正文，标题用一级标题格式\n"
         f"6. 【重要】全文必须达到 {word_target} 字以上，通过丰富描写和细节充实内容\n\n"
-        + DEFAULT_WRITER_CONSTRAINTS
+        + (_bank_constraints(story) or DEFAULT_WRITER_CONSTRAINTS)
     )
     # 注入活跃的写作技巧
     skill_ctx = build_skill_prompt()
@@ -330,7 +339,7 @@ def _build_careful_prompt(story):
         "5. 主题深刻，引人深思\n"
         "6. 直接输出小说正文，标题用一级标题格式\n"
         f"7. 【重要】全文必须达到 {word_target} 字以上，通过丰富描写和细节充实内容\n\n"
-        + DEFAULT_WRITER_CONSTRAINTS
+        + (_bank_constraints(story) or DEFAULT_WRITER_CONSTRAINTS)
     )
     # 注入活跃的写作技巧
     skill_ctx = build_skill_prompt()
@@ -472,7 +481,7 @@ def build_node_prompt(story, nodes, current_idx, prev_text):
         f"【完整剧情大纲 — 严格按此推进】\n{outline_str}\n\n"
         f"【当前节点】\n节点{current['id']}（{current.get('act', '')}）：{current.get('title', '')}\n"
         f"目标字数：约 {current.get('word_count', 1000)} 字\n\n"
-        + DEFAULT_WRITER_CONSTRAINTS
+        + (_bank_constraints(story) or DEFAULT_WRITER_CONSTRAINTS)
     )
 
     # 注入活跃的写作技巧

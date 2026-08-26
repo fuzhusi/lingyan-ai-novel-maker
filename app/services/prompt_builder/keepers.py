@@ -1,7 +1,11 @@
 """Keeper 类提示词构建：角色检查、世界观检查、伏笔检查、编辑润色。"""
+import logging
+
 from app.services.prompt_builder.context import (
     _section, _load_system_prompt, DEFAULT_WRITER_CONSTRAINTS, get_skill_prompt,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def build_character_keeper_prompt(chapter_content="", characters=None, novel_title="", db=None):
@@ -131,15 +135,21 @@ def build_editor_prompt(chapter_content="", check_results=None, novel_title="",
         "只输出修改后的完整章节正文，不要输出其他内容。"
     ))
 
+    # 去AI化约束：词库装配(editor 场景=核心层+润色守则) > 静态默认值兜底。
+    # 原"特别注意"块中与词库 editor_preserve 模块重复的两条已并入模块，此处去重瘦身。
+    try:
+        from app.services.constraint_bank import assemble_constraints
+        bank_constraints = assemble_constraints(agent_type="editor")["text"]
+    except Exception:
+        logger.warning("constraint bank unavailable for editor, fallback",
+                       exc_info=True)
+        bank_constraints = ""
     # 注入去AI化约束（最高优先级）+ 润色向技能（笔法指纹 + 质检模块）
-    full_system = DEFAULT_WRITER_CONSTRAINTS + """
+    full_system = (bank_constraints or DEFAULT_WRITER_CONSTRAINTS) + """
 
 【编辑润色特别注意】
-- 不要"修复"文本中的自然不完美（碎片句、口语化表达、不工整的节奏）
-- 这些是有意为之的风格特征，不是错误
 - 只修复真正的逻辑错误和事实错误，不要"美化"文字
 - 保留对话中的语气词、不完整句、打断重叠——这些是人味
-- 保留段落的不均匀节奏——这是有意的风格选择
 - 如果原文已经很好，不要改动，直接输出原文
 """
     skill_prompt = get_skill_prompt("polish")

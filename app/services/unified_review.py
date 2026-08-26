@@ -1,9 +1,9 @@
-"""统一评审服务 — 将评审 (review) 和多维审计 (audit) 合并为一个流程。
+"""统一评审服务 — 将 critic 结构化评分和双盲审合并为一个流程。
 
 工作流：
-    Step 1: 评审 (流式) → AI 整体文学评论
-    Step 2: 多维审计 (并行) → 17 维度结构化问题
-    Step 3: 合并报告 → 综合分数 + 问题清单 + 修改建议
+    Step 1: Critic 评审 (流式) → AI 整体文学评论 + 结构化评分
+    Step 2: 双盲审 (并行) → 阎浮×白骨两角色零上下文盲审
+    Step 3: 合并报告 → 综合分数 + 盲审意见 + 问题清单
     Step 4 (可选): 自动改写 → 基于报告生成改进版本
 
 设计原则：
@@ -17,7 +17,7 @@ import concurrent.futures
 from app.services.llm import call_llm_sync, stream_llm_tokens, LLMError
 from app.models import (db, ChapterVersion, CriticReview, Chapter, Novel,
                         Character, WorldSetting, Foreshadowing, ChapterSummary)
-from app.services.audit import run_full_audit
+from app.services.blind_review import run_dual_review
 from app.services.prompt_builder import (build_critic_prompt, build_rewrite_prompt,
                                           assemble_chapter_context)
 from app.config_utils import get_effective_config
@@ -34,19 +34,15 @@ def unified_review(novel_id, chapter_number, version_id=None, include_rewrite=Fa
 
     Returns:
         {
-            "overall_score": float,
-            "grade": str,  # S/A/B+/B/C/D
-            "critic_comment": str,  # 整体评论
-            "dimensions": {  # 17 维度分数
-                "personality_consistency": {"score": 8.5, "issues": [...], "weight": 1.2},
+            "overall_score": float,   # critic 链路评分（历史可比）
+            "grade": str,             # S/A/B+/B/C/D（由分数推导）
+            "critic_comment": str,    # 整体评论
+            "blind_reviews": [        # 双盲审文本报告（不产数字分）
+                {"key": "yafu", "name": "尖酸嘴 · 阎浮",
+                 "verdict": "追读/弃稿", "review": "..."},
                 ...
-            },
-            "groups": {  # 5 分组分数
-                "character": 8.2,
-                "plot": 7.5,
-                ...
-            },
-            "issues": [  # 完整问题清单（按严重度排序）
+            ],
+            "issues": [  # 完整问题清单（按严重度排序，来源 critic）
                 {"dimension": "...", "severity": "high/medium/low", "issue": "...", "suggestion": "..."},
                 ...
             ],
@@ -97,21 +93,15 @@ def unified_review(novel_id, chapter_number, version_id=None, include_rewrite=Fa
         cfg=cfg,
     )
 
-    # 4. Step 2: 多维审计（并行 6 Agent）
-    audit_result = run_full_audit(
-        chapter_content=version.content,
-        outline=chapter.outline or "",
-        chapter_number=chapter_number,
-        characters=ctx.get("characters", []),
-        world_settings=ctx.get("world_settings", []),
-        summaries=ctx.get("summaries", []),
-        foreshadowing_items=ctx.get("foreshadowing_items", []),
-        novel_title=novel.title,
-        cfg=cfg,
-    )
+    # 4. Step 2: 双盲审（两位编辑并行，零上下文只看正文）
+    try:
+        blind_result = run_dual_review(version.content)
+    except Exception:
+        # 盲审失败不阻断评审：critic 结果照常返回
+        blind_result = {"editors": [], "elapsed": 0.0}
 
-    # 5. Step 3: 合并报告
-    report = _merge_report(critic_result, audit_result, version.content)
+    # 5. Step 3: 合并报告（critic 结构化评分 + 双盲审文本报告）
+    report = _merge_report(critic_result, blind_result)
 
     # 6. Step 4 (可选): 自动改写
     if include_rewrite and report.get("total_issue_count", 0) > 0:
@@ -212,42 +202,37 @@ def _parse_critic_response(text):
         }
 
 
-def _merge_report(critic_result, audit_result, original_content):
-    """合并 Critic 评审和 Audit 审计为统一报告。"""
-    # 从 audit_result 提取数据
-    audit_dimensions = audit_result.get("dimensions", {})
-    audit_groups = audit_result.get("groups", {})
-    audit_issues = audit_result.get("issues", [])
-    audit_score = audit_result.get("overall_score", 0)
-    audit_grade = audit_result.get("grade", "?")
+def _score_grade(score):
+    """0-10 分 → S/A/B+/B/C/D 等级。"""
+    if score is None:
+        return "?"
+    if score >= 8.5:
+        return "S"
+    if score >= 7.5:
+        return "A"
+    if score >= 6.5:
+        return "B+"
+    if score >= 5.5:
+        return "B"
+    if score >= 4:
+        return "C"
+    return "D"
 
-    # 从 critic_result 提取数据
+
+def _merge_report(critic_result, blind_result):
+    """合并 Critic 结构化评分与双盲审文本报告为统一报告。
+
+    盲审不产数字分——判决（追读/弃稿）与引用式批评以原样呈现，
+    综合分沿用 critic 链路保证历史可比。
+    """
     critic_score = critic_result.get("overall_score")
     critic_comment = critic_result.get("overall_comment", "")
-    critic_dimensions = critic_result.get("dimensions", [])
     critic_annotations = critic_result.get("annotations", [])
 
-    # 综合分数：critic (40%) + audit (60%)
-    if critic_score is not None and audit_score:
-        combined_score = round(critic_score * 0.4 + audit_score * 0.6, 2)
-    elif critic_score is not None:
-        combined_score = critic_score
-    else:
-        combined_score = audit_score
+    blind_editors = blind_result.get("editors", []) if blind_result else []
 
-    # 合并维度信息
-    merged_dimensions = {}
-    for dim_id, dim_data in audit_dimensions.items():
-        merged_dimensions[dim_id] = {
-            "score": dim_data.get("score", 0),
-            "weight": dim_data.get("weight", 1.0),
-            "name": dim_data.get("name", dim_id),
-            "group": dim_data.get("group", ""),
-            "issues": dim_data.get("issues", []),
-        }
-
-    # 合并所有 issues（从 critic annotations + audit issues）
-    all_issues = list(audit_issues)
+    # issues 全部来自 critic annotations（结构化、可定位、可喂改写）
+    all_issues = []
     for ann in critic_annotations:
         all_issues.append({
             "dimension": ann.get("name", "综合评论"),
@@ -257,20 +242,23 @@ def _merge_report(critic_result, audit_result, original_content):
             "suggestion": ann.get("suggestion", ""),
             "location": f"第{ann.get('paragraph_index') + 1}段" if ann.get("paragraph_index") is not None else "",
         })
-
-    # 按严重度排序
     severity_order = {"high": 0, "medium": 1, "low": 2}
     all_issues.sort(key=lambda x: severity_order.get(x.get("severity", "medium"), 1))
-
     high_count = sum(1 for i in all_issues if i.get("severity") == "high")
     total_count = len(all_issues)
 
+    combined_score = critic_score
+    grade = _score_grade(combined_score)
+
     return {
         "overall_score": combined_score,
-        "grade": audit_grade,
+        "grade": grade,
         "critic_comment": critic_comment,
-        "dimensions": merged_dimensions,
-        "groups": audit_groups,
+        "blind_reviews": [
+            {"key": e.get("key"), "name": e.get("name"),
+             "verdict": e.get("verdict"), "review": e.get("review")}
+            for e in blind_editors
+        ],
         "issues": all_issues,
         "high_issue_count": high_count,
         "total_issue_count": total_count,
@@ -280,6 +268,9 @@ def _merge_report(critic_result, audit_result, original_content):
 
 def _generate_summary(score, high_count, total_count):
     """生成综合评语。"""
+    if score is None:
+        return ("critic 未产出有效评分（模型未返回结构化 JSON），"
+                "请以下方两位编辑的盲审意见为准；重跑全面评审可再次尝试评分")
     parts = []
     if score >= 8.5:
         parts.append("📗 优秀")
@@ -351,13 +342,14 @@ def _auto_rewrite(content, issues, novel_title, chapter_title, outline, user_dir
 def _save_review(version_id, report, critic_result):
     """保存评审结果到 CriticReview 表（保留原有数据结构）。"""
     try:
-        # 提取维度分数（兼容原 CriticReview 的 dimension_scores_json 格式）
+        # 提取维度分数（critic 返回的 dimensions 列表；兼容原 dimension_scores_json 格式）
         dim_scores = []
-        for dim_id, dim_data in report.get("dimensions", {}).items():
-            dim_scores.append({
-                "name": dim_data.get("name", dim_id),
-                "score": dim_data.get("score", 0),
-            })
+        for dim in (critic_result or {}).get("dimensions") or []:
+            if isinstance(dim, dict):
+                dim_scores.append({
+                    "name": dim.get("name", dim.get("dimension", "")),
+                    "score": dim.get("score", 0),
+                })
 
         # 提取注释
         annotations = []
@@ -397,8 +389,7 @@ def unified_review_stream(novel_id, chapter_number, version_id=None, include_rew
         {"type": "start", "chapter": 1}
         {"type": "review_token", "token": "..."}
         {"type": "review_done", "comment": "..."}
-        {"type": "audit_group", "group": "character", "score": 8.2}
-        {"type": "audit_issue", "issue": {...}}
+        {"type": "blind_done", "editors": [...], "elapsed": 12.3}
         {"type": "report", "report": {...}}
         {"type": "rewrite_token", "token": "..."}
         {"type": "rewrite_done", "rewritten": "..."}

@@ -14,6 +14,7 @@
     审计: audit run
     设置: setting list/set/get
     技巧: skill list/active/toggle/enable/disable/info/preview/create/delete
+    约束: constraint show/status/toggle
     优化: optimize diagnose
     系统: sys info/backup/reset
 
@@ -2147,6 +2148,55 @@ def cmd_whoami(args):
     print(f"角色: {user['role']}")
 
 
+def cmd_constraint(args):
+    """去AI味约束词库：预览装配结果 / 查看状态 / 切换启停。"""
+    from app.services.constraint_bank import (
+        assemble_constraints, get_last_assembly, is_constraint_bank_enabled,
+    )
+
+    if args.action == "show":
+        result = assemble_constraints(agent_type=args.agent, genre=args.genre)
+        if not result["text"]:
+            print(f"[{args.agent}] 无可用装配（词库为空或已停用），生成时将走兜底常量")
+            return
+        print(f"Agent: {args.agent}   体裁: {args.genre or 'any'}")
+        print(f"装配: {result['total_chars']}/{result['budget']} 字符")
+        for m in result["included"]:
+            print(f"  + {m['id']}  ({m['chars']} 字符)")
+        for d in result["dropped"]:
+            print(f"  - {d}  (超预算裁剪)")
+        if getattr(args, "full", False):
+            print("-" * 46)
+            print(result["text"])
+        return
+
+    if args.action == "status":
+        state = "启用" if is_constraint_bank_enabled() else "停用"
+        print(f"约束词库: {state}  (Setting 键 constraint_bank_enabled)")
+        last_all = get_last_assembly()
+        if last_all:
+            print("本进程最近装配（按 Agent 分记）:")
+            for agent, la in sorted(last_all.items()):
+                mods = ", ".join(i["id"] for i in la.get("included", [])) or "-"
+                extra = f"  [{la['reason']}]" if la.get("reason") else ""
+                print(f"  {agent}: [{mods}] "
+                      f"chars={la.get('total_chars')}/{la.get('budget')}{extra}")
+        else:
+            print("本进程最近装配: （暂无记录，生成一次后可见）")
+        return
+
+    # toggle
+    new_value = "0" if is_constraint_bank_enabled() else "1"
+    row = Setting.query.get("constraint_bank_enabled")
+    if row is None:
+        db.session.add(Setting(key="constraint_bank_enabled", value=new_value))
+    else:
+        row.value = new_value
+    db.session.commit()
+    print(f"约束词库已{'启用' if new_value == '1' else '停用'} "
+          f"(constraint_bank_enabled={new_value})")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="灵砚 CLI — AI小说创作系统命令行工具",
@@ -2372,6 +2422,15 @@ def main():
                          help="协议包加载模式（info/preview 用，默认 write）")
     p_skill.add_argument("-v", "--verbose", action="store_true", help="显示描述/完整协议原文")
 
+    # ========== 约束词库 ==========
+    p_cb = subparsers.add_parser("constraint", help="去AI味约束词库（装配预览/开关）")
+    p_cb.add_argument("action", choices=["show", "status", "toggle"],
+                      help="show 预览装配结果 / status 查看状态与最近装配 / toggle 切换启停")
+    p_cb.add_argument("--agent", default="writer",
+                      help="Agent 类型（show 用，默认 writer；可选 critic/rewrite/editor/short_story）")
+    p_cb.add_argument("--genre", help="体裁过滤（show 用，模块 genre=any 恒匹配）")
+    p_cb.add_argument("--full", action="store_true", help="显示装配全文（show 用）")
+
     # ========== 优化 ==========
     p_opt = subparsers.add_parser("optimize", help="全书优化")
     p_opt.add_argument("action", choices=["diagnose", "deai"], help="操作类型")
@@ -2414,6 +2473,7 @@ def main():
         "setting": cmd_setting,
         "llm": cmd_llm,
         "skill": cmd_skill,
+        "constraint": cmd_constraint,
         "optimize": cmd_optimize,
         "sys": cmd_sys,
         "whoami": cmd_whoami,

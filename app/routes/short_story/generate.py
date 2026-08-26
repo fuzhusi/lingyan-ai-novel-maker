@@ -17,6 +17,15 @@ from app.routes.short_story.prompts import (
 from app.routes.short_story import short_story_bp
 
 
+def _bank_constraints(story):
+    """约束词库装配（short_story 场景，按体裁）；停用/异常返回 None 走兜底常量。"""
+    try:
+        from app.services.constraint_bank import get_constraints_text
+        return get_constraints_text("short_story", genre=story.genre)
+    except Exception:
+        return None
+
+
 def _anchor():
     """文风锚例上下文；未启用/未保存时返回空串。"""
     try:
@@ -604,7 +613,7 @@ def continue_story(story_id):
         "1. 直接接续前文写下去，不要重复已有内容，不要输出任何说明\n"
         "2. 情节与原设定保持一致，不得引入突兀的新人物、新势力、新冲突线\n"
         f"3. 续写约 {words} 字，写到一个自然的停顿处即可\n\n"
-        + DEFAULT_WRITER_CONSTRAINTS
+        + (_bank_constraints(story) or DEFAULT_WRITER_CONSTRAINTS)
         + _anchor()
     )
     user = (
@@ -668,7 +677,7 @@ def expand_selection(story_id):
         "1. 保留原片段的情节、人物、因果关系，只做加法：补充细节、感官描写、动作、心理\n"
         f"2. 在原有内容基础上增加约 {add_words} 字\n"
         "3. 输出扩写后的**完整段落**（含原有内容），不要输出任何说明或前后缀\n\n"
-        + DEFAULT_WRITER_CONSTRAINTS
+        + (_bank_constraints(story) or DEFAULT_WRITER_CONSTRAINTS)
         + _anchor()
     )
     user = (
@@ -709,7 +718,7 @@ def rewrite_selection(story_id):
         "1. 严格按指令修改，未涉及的部分尽量保持原样\n"
         "2. 与前后文的情节、人称、时态保持一致\n"
         "3. 只输出重写后的片段，不要输出任何说明\n\n"
-        + DEFAULT_WRITER_CONSTRAINTS
+        + (_bank_constraints(story) or DEFAULT_WRITER_CONSTRAINTS)
         + _anchor()
     )
     user = (
@@ -875,7 +884,7 @@ def generate_section(story_id):
         f"你是一位才华横溢的短篇小说作家。{section['instruction']}\n\n"
         f"目标字数：约 {target_words} 字\n"
         f"直接输出小说正文，不要输出创作说明。\n\n"
-        + DEFAULT_WRITER_CONSTRAINTS
+        + (_bank_constraints(story) or DEFAULT_WRITER_CONSTRAINTS)
     )
 
     # Add skill context

@@ -10,6 +10,15 @@ from app.services.llm import call_llm_sync, stream_llm_tokens, LLMError
 from app.routes.short_story import short_story_bp
 
 
+def _bank_constraints(story):
+    """约束词库装配（short_story 场景，按体裁）；停用/异常返回 None 走兜底常量。"""
+    try:
+        from app.services.constraint_bank import get_constraints_text
+        return get_constraints_text("short_story", genre=story.genre)
+    except Exception:
+        return None
+
+
 @short_story_bp.route("/<int:story_id>/review", methods=["POST"])
 def review_story(story_id):
     """Run critic review on current content (non-streaming, returns JSON)."""
@@ -144,7 +153,9 @@ def save_feedback(story_id):
     review = ShortStoryReview.query.filter_by(version_id=versions[0].id).order_by(
         ShortStoryReview.id.desc()).first()
     if not review:
-        return jsonify({"error": "请先提交评审"}), 400
+        # 新评审卡只写 BlindReview 表；用户仍可先存意见，行在重写时按需补建
+        review = ShortStoryReview(version_id=versions[0].id)
+        db.session.add(review)
     review.user_feedback = feedback
     db.session.commit()
     return jsonify({"ok": True})
@@ -170,12 +181,25 @@ def rewrite_with_feedback(story_id):
         review = ShortStoryReview.query.filter_by(version_id=versions[0].id).order_by(
             ShortStoryReview.id.desc()).first()
 
-    critic_feedback = review.overall_comment if review else "请改进这篇小说"
+    critic_feedback = review.overall_comment if review else ""
     # 过滤掉失败的评审信息
     if critic_feedback and critic_feedback.startswith("评审失败"):
-        critic_feedback = "请改进这篇小说"
+        critic_feedback = ""
     if review and review.user_feedback and review.user_feedback.strip():
         critic_feedback += "\n\n【用户补充意见】\n" + review.user_feedback.strip()
+
+    # 无历史评审行（新双盲审流程）→ 回退读最近一次盲审记录作为修改依据
+    if not critic_feedback.strip():
+        from app.services.blind_review import get_latest_blind_review
+        rec = get_latest_blind_review(story_id=story_id) or {}
+        parts = []
+        for e in rec.get("editors", []):
+            verdict = e.get("verdict") or "未判"
+            parts.append(f"【{e.get('name', '编辑')} · 判决：{verdict}】\n{e.get('review', '')}")
+        if parts:
+            critic_feedback = "【双盲审意见】\n" + "\n\n".join(parts)
+    if not critic_feedback.strip():
+        critic_feedback = "请改进这篇小说"
 
     original = story.content or ""
     cfg = get_model_config(agent_type="short_story")
@@ -205,7 +229,7 @@ def rewrite_with_feedback(story_id):
         f"- 原文有 {original_len} 字，修改后不得少于原文的 80%\n"
         f"- 通过丰富细节、扩展场景、深化对话来保持字数\n"
         f"- 不要删减情节，而是完善和扩展\n\n"
-        + DEFAULT_WRITER_CONSTRAINTS
+        + (_bank_constraints(story) or DEFAULT_WRITER_CONSTRAINTS)
     )
     # 文风锚例注入（全文重写路径）
     try:
@@ -331,7 +355,7 @@ def _rewrite_by_nodes(story, nodes, done_nodes, critic_feedback, cfg, app, story
                 "4. 保持本节点的核心情节，只做完善、细化、修正，不要无故删改\n"
                 "5. 直接输出重写后的节点正文（完整），不要输出节点编号或说明\n"
                 f"6. 本节点重写后需约 {target_len} 字，不得少于原文的 80%\n\n"
-                + DEFAULT_WRITER_CONSTRAINTS
+                + (_bank_constraints(story) or DEFAULT_WRITER_CONSTRAINTS)
             )
             # 行文指纹修正：基于重写前文本的 AI 痕迹检测（首个节点时前文尚空，用原节点正文）
             try:

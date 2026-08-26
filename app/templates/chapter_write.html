@@ -22,11 +22,11 @@
             <button id="btn-save-human" class="btn-save-human" disabled>保存人工版本</button>
             <button id="btn-edit" class="btn-edit" disabled>手动编辑</button>
             <span class="sep">|</span>
-            <button id="btn-review" class="btn-review" disabled title="评审+审计+改写 一键完成">全面评审</button>
+            <button id="btn-review" class="btn-review" disabled title="评审+双盲审 一键完成">全面评审</button>
             <button id="btn-approve" class="btn-approve" disabled>批准</button>
             <button id="btn-rewrite" class="btn-rewrite" disabled>重写</button>
             <span class="sep">|</span>
-            <button id="btn-audit" class="btn-sm btn-edit" disabled title="17维度质量审计">多维审计</button>
+            <button id="btn-audit" class="btn-sm btn-edit" disabled title="两位毒舌编辑零上下文盲审">双盲审</button>
             <button id="btn-diff" class="btn-sm btn-edit" disabled>版本对比</button>
         </div>
 
@@ -115,16 +115,11 @@
             <button id="btn-save-feedback" class="btn-sm">保存意见</button>
         </div>
 
-        <!-- Audit Panel -->
+        <!-- Blind Review Panel -->
         <div id="audit-panel" class="review-panel" style="display:none">
-            <h3>多维审计 <span id="audit-grade" class="review-score"></span></h3>
+            <h3>双盲审 <span id="audit-grade" class="review-score"></span></h3>
             <div id="audit-summary" style="margin-bottom:1rem;font-size:0.9rem;color:var(--text-dim)"></div>
-            <div id="audit-groups"></div>
-            <details style="margin-top:1rem">
-                <summary style="cursor:pointer;color:var(--accent)">查看全部 17 个维度</summary>
-                <div id="audit-dimensions" style="margin-top:0.5rem"></div>
-            </details>
-            <div id="audit-issues" style="margin-top:1rem"></div>
+            <div id="blind-editors" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:0.8rem"></div>
         </div>
 
         <!-- Diff Panel -->
@@ -310,12 +305,14 @@
     function renderUnifiedReport(report) {
         $('review-panel').style.display = 'block';
 
-        // 综合评分 + 等级
-        const score = report.overall_score || 0;
+        // 综合评分 + 等级（critic 未产出评分时如实显示 —，不造 0 分）
+        const hasScore = typeof report.overall_score === 'number';
+        const score = hasScore ? report.overall_score : null;
         const grade = report.grade || '?';
-        const scoreColor = score >= 8 ? 'var(--success)' : score >= 6 ? 'var(--accent)' : 'var(--danger)';
+        const scoreColor = !hasScore ? 'var(--text-dim)'
+            : score >= 8 ? 'var(--success)' : score >= 6 ? 'var(--accent)' : 'var(--danger)';
         $('review-score').innerHTML = `
-            <span style="color:${scoreColor};font-size:1.4rem;font-weight:700">${score}</span>
+            <span style="color:${scoreColor};font-size:1.4rem;font-weight:700">${hasScore ? score : '—'}</span>
             <span style="color:var(--text-dim);font-size:0.85rem">/10 · ${grade}级</span>
         `;
 
@@ -327,24 +324,22 @@
             <div style="color:var(--text-bright);line-height:1.7">${escapeHtml(report.critic_comment || '')}</div>
         `;
 
-        // 分组分数条
-        let groupsHtml = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:0.5rem;margin-bottom:0.8rem">';
-        const groupNames = {character:'角色', plot:'剧情', world:'世界观', writing:'文笔', foreshadow:'伏笔'};
-        for (const [g, info] of Object.entries(report.groups || {})) {
-            const pct = Math.round(info.score * 10);
-            const color = info.score >= 8 ? 'var(--success)' : info.score >= 6 ? 'var(--accent)' : 'var(--danger)';
-            groupsHtml += `<div style="background:var(--bg);padding:0.4rem 0.6rem;border-radius:4px">
-                <div style="display:flex;justify-content:space-between;font-size:0.78rem">
-                    <span>${groupNames[g]||g}</span>
-                    <span style="color:${color};font-weight:600">${info.score.toFixed(1)}</span>
+        // 双盲审文本报告（两编辑并排）
+        let blindHtml = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0.6rem;margin-bottom:0.8rem">';
+        for (const e of (report.blind_reviews || [])) {
+            const color = e.key === 'yafu' ? 'var(--accent)' : 'var(--gold)';
+            let chip = '<span style="color:var(--text-faint);font-size:0.75rem">未判决</span>';
+            if (e.verdict === '追读') chip = '<span style="background:var(--success);color:var(--bg);padding:0.05rem 0.45rem;border-radius:4px;font-size:0.72rem;font-weight:700">追读</span>';
+            if (e.verdict === '弃稿') chip = '<span style="background:var(--danger);color:var(--bg);padding:0.05rem 0.45rem;border-radius:4px;font-size:0.72rem;font-weight:700">弃稿</span>';
+            blindHtml += `<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.7rem">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem">
+                    <strong style="color:${color};font-size:0.88rem">${escapeHtml(e.name)}</strong>${chip}
                 </div>
-                <div style="height:4px;background:var(--border);border-radius:2px;margin-top:0.2rem;overflow:hidden">
-                    <div style="height:100%;width:${pct}%;background:${color}"></div>
-                </div>
+                <pre style="white-space:pre-wrap;font-size:0.82rem;line-height:1.65;color:var(--text-bright);margin:0;max-height:260px;overflow-y:auto">${escapeHtml(e.review || '')}</pre>
             </div>`;
         }
-        groupsHtml += '</div>';
-        $('review-dimensions').innerHTML = groupsHtml;
+        blindHtml += '</div>';
+        $('review-dimensions').innerHTML = blindHtml;
 
         // 问题清单（按严重度排序）
         let issuesHtml = `<div style="margin-bottom:0.5rem;font-size:0.85rem;color:var(--text-bright)">
@@ -619,10 +614,10 @@
         formData.append('chapter_number', CHAPTER_NUM);
         formData.append('include_rewrite', '0');
 
-        btnReview.innerHTML = '⏳ 评审+审计中...';
+        btnReview.innerHTML = '⏳ 评审+盲审中...';
 
         try {
-            // 一步调用：评审 + 17维审计 + 综合报告
+            // 一步调用：critic 评审 + 双盲审 + 综合报告
             const resp = await fetch('/api/unified-review', { method: 'POST', body: formData });
             const report = await resp.json();
 
@@ -914,77 +909,49 @@
     loadSkills();
     renderVersions();
 
-    // --- Multi-Dimensional Audit ---
+    // --- 双盲审（两角色零上下文盲审）---
     const auditPanel = $('audit-panel');
+
+    function renderBlindEditors(editors) {
+        return (editors || []).map(e => {
+            const color = e.key === 'yafu' ? 'var(--accent)' : 'var(--gold)';
+            let chip = '<span style="color:var(--text-faint);font-size:0.75rem">未判决</span>';
+            if (e.verdict === '追读') chip = '<span style="background:var(--success);color:var(--bg);padding:0.05rem 0.45rem;border-radius:4px;font-size:0.75rem;font-weight:700">追读</span>';
+            if (e.verdict === '弃稿') chip = '<span style="background:var(--danger);color:var(--bg);padding:0.05rem 0.45rem;border-radius:4px;font-size:0.75rem;font-weight:700">弃稿</span>';
+            return `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:0.9rem">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+                    <strong style="color:${color}">${escapeHtml(e.name)}</strong>${chip}
+                </div>
+                <pre style="white-space:pre-wrap;font-size:0.85rem;line-height:1.7;color:var(--text-bright);margin:0">${escapeHtml(e.review || '')}</pre>
+            </div>`;
+        }).join('');
+    }
 
     btnAudit.addEventListener('click', async function() {
         if (!currentVersionId) return;
         btnAudit.disabled = true;
-        btnAudit.textContent = '审计中...';
+        btnAudit.textContent = '盲审中...';
         auditPanel.style.display = 'block';
         $('audit-grade').textContent = '';
-        $('audit-summary').textContent = '正在执行 17 维度审计，请稍候...';
-        $('audit-groups').innerHTML = '';
-        $('audit-dimensions').innerHTML = '';
-        $('audit-issues').innerHTML = '';
+        $('audit-summary').textContent = '两位编辑并行盲审中（零上下文，只看正文），请稍候……';
+        $('blind-editors').innerHTML = '';
 
         try {
-            const fd = new FormData();
-            fd.append('version_id', currentVersionId);
-            fd.append('novel_id', NOVEL_ID);
-            fd.append('chapter_number', CHAPTER_NUM);
-            const resp = await fetch('/api/audit/run', { method: 'POST', body: fd });
+            const resp = await fetch('/api/blind-review/run', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({kind: 'chapter', novel_id: NOVEL_ID, chapter_number: CHAPTER_NUM, version_id: currentVersionId}),
+            });
             const data = await resp.json();
-
-            // Grade badge
-            $('audit-grade').textContent = `${data.grade} (${data.overall_score}/10)`;
-
-            // Summary
-            $('audit-summary').textContent = data.summary || '';
-
-            // Group scores
-            const groupNames = {character:'角色', plot:'剧情', world:'世界观', writing:'文笔', foreshadow:'伏笔'};
-            let groupHtml = '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:0.5rem;margin-bottom:1rem">';
-            for (const [g, info] of Object.entries(data.groups || {})) {
-                const color = info.score >= 8 ? 'var(--success)' : info.score >= 6 ? 'var(--accent)' : 'var(--danger)';
-                groupHtml += `<div style="text-align:center;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:0.6rem">
-                    <div style="font-size:1.4rem;font-weight:700;color:${color}">${info.score}</div>
-                    <div style="font-size:0.75rem;color:var(--text-dim)">${groupNames[g]||g}</div>
-                </div>`;
-            }
-            groupHtml += '</div>';
-            $('audit-groups').innerHTML = groupHtml;
-
-            // All dimensions
-            let dimHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.3rem">';
-            for (const [d, info] of Object.entries(data.dimensions || {})) {
-                const color = info.score >= 8 ? 'var(--success)' : info.score >= 6 ? 'var(--accent)' : 'var(--danger)';
-                dimHtml += `<div style="display:flex;justify-content:space-between;padding:0.3rem 0.5rem;font-size:0.82rem;border-bottom:1px solid var(--border)">
-                    <span style="color:var(--text-dim)">${escapeHtml(info.name || '')}</span>
-                    <span style="color:${color};font-weight:600">${info.score}</span>
-                </div>`;
-            }
-            dimHtml += '</div>';
-            $('audit-dimensions').innerHTML = dimHtml;
-
-            // Issues
-            if (data.issues && data.issues.length > 0) {
-                let issueHtml = `<div style="font-size:0.85rem;color:var(--text-dim);margin-bottom:0.5rem">发现 ${data.total_issues} 个问题（${data.high_issues} 个高优先级）</div>`;
-                for (const issue of data.issues.slice(0, 10)) {
-                    const sevColor = issue.severity === 'high' ? 'var(--danger)' : issue.severity === 'medium' ? 'var(--accent)' : 'var(--text-dim)';
-                    issueHtml += `<div style="padding:0.4rem 0.6rem;margin-bottom:0.3rem;background:var(--bg-card);border-left:3px solid ${sevColor};border-radius:0 6px 6px 0;font-size:0.85rem">
-                        <span style="color:${sevColor};font-weight:600">[${escapeHtml(issue.dimension_name || '')}]</span> ${escapeHtml(issue.issue || '')}
-                    </div>`;
-                }
-                $('audit-issues').innerHTML = issueHtml;
-            } else {
-                $('audit-issues').innerHTML = '<div style="color:var(--success);font-size:0.9rem">未发现明显问题</div>';
-            }
+            if (!resp.ok || data.error) throw new Error(data.error || ('HTTP ' + resp.status));
+            $('audit-grade').textContent = `耗时 ${data.elapsed}s`;
+            $('audit-summary').textContent = `${data.title || ''} · ${data.word_count} 字 · 结果已存档，可在「盲审」工作台回看`;
+            $('blind-editors').innerHTML = renderBlindEditors(data.editors);
         } catch(e) {
-            $('audit-summary').textContent = '审计失败: ' + e.message;
+            $('audit-summary').textContent = '盲审失败: ' + e.message;
         }
         btnAudit.disabled = false;
-        btnAudit.textContent = '多维审计';
+        btnAudit.textContent = '双盲审';
     });
 
     // Enable audit button when version is selected

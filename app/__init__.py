@@ -31,7 +31,7 @@ def create_app():
     from app.routes.relations import relations_bp
     from app.routes.pipeline import pipeline_bp
     from app.routes.short_story import short_story_bp
-    from app.routes.audit import audit_bp
+    from app.routes.blind_review import blind_review_bp
     from app.services.causal_chain import causal_bp
     from app.routes.optimizer import optimizer_bp
     from app.services.vector_memory import memory_bp
@@ -62,7 +62,7 @@ def create_app():
     app.register_blueprint(relations_bp)
     app.register_blueprint(pipeline_bp)
     app.register_blueprint(short_story_bp)
-    app.register_blueprint(audit_bp)
+    app.register_blueprint(blind_review_bp)
     app.register_blueprint(causal_bp)
     app.register_blueprint(optimizer_bp)
     app.register_blueprint(memory_bp)

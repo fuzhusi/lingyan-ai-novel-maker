@@ -13,12 +13,15 @@ import concurrent.futures
 from app.models import (db, Novel, Chapter, ChapterVersion, ChapterSummary,
                         Character, WorldSetting, Foreshadowing, StoryState)
 from app.services.llm import call_llm_sync, stream_llm_tokens, LLMError
-from app.services.audit import run_full_audit
+from app.services.ai_metric import analyze_ai_tone
 from app.services.deai_agent import deai_process
 
 
 def _diagnose_chapter(chapter_id, novel_id, chapter_number, cfg):
-    """Diagnose a single chapter: audit + de-AI check + causal chain check."""
+    """Diagnose a single chapter: 人味检测（零 LLM）+ de-AI check。
+
+    旧 17 维审计已由双盲审体系取代；全书诊断走确定性指标，不花 token。
+    """
     chapter = Chapter.query.get(chapter_id)
     if not chapter:
         return None
@@ -31,37 +34,33 @@ def _diagnose_chapter(chapter_id, novel_id, chapter_number, cfg):
 
     content = version.content
 
-    # 1. Run audit
-    from app.services.prompt_builder import assemble_chapter_context
-    ctx = assemble_chapter_context(novel_id, chapter_number, db)
-
-    audit_result = run_full_audit(
-        chapter_content=content,
-        outline=chapter.outline,
-        chapter_number=chapter_number,
-        characters=ctx.get("characters", []),
-        world_settings=ctx.get("world_settings", []),
-        summaries=ctx.get("summaries", []),
-        foreshadowing_items=ctx.get("foreshadowing_items", []),
-        novel_title="",
-        cfg=cfg,
-    )
+    # 1. 篇章 AI 痕迹检测（确定性规则，0-100 人味分）
+    tone = analyze_ai_tone(content)
+    human_score = tone.get("human_score")
+    # 过短文本 ai_metric 返回 None：不造分，标记为未评分并在聚合时跳过
+    audit_score = round(human_score / 10, 1) if isinstance(human_score, (int, float)) else None
+    grade = ("?" if audit_score is None else
+             "S" if audit_score >= 8.5 else "A" if audit_score >= 7.5 else
+             "B+" if audit_score >= 6.5 else "B" if audit_score >= 5.5 else
+             "C" if audit_score >= 4 else "D")
 
     # 2. De-AI check
     deai_text = deai_process(content)
     deai_changed = deai_text != content
 
-    # 3. Collect issues
+    # 3. Collect issues from tone checks
     issues = []
-    for dim_id, dim in audit_result.get("dimensions", {}).items():
-        if dim.get("score", 10) <= 5:
-            for issue in dim.get("issues", []):
-                issues.append({
-                    "chapter": chapter_number,
-                    "dimension": dim.get("name", dim_id),
-                    "issue": issue,
-                    "severity": "high" if dim.get("score", 10) <= 3 else "medium",
-                })
+    for check in tone.get("checks", []):
+        risk = check.get("risk", "")
+        if risk not in ("high", "mid"):
+            continue
+        excerpts = check.get("excerpts") or []
+        issues.append({
+            "chapter": chapter_number,
+            "dimension": check.get("name", "AI痕迹"),
+            "issue": (excerpts[0] if excerpts else "命中篇章级 AI 特征"),
+            "severity": "high" if risk == "high" else "medium",
+        })
 
     if deai_changed:
         issues.append({
@@ -75,8 +74,8 @@ def _diagnose_chapter(chapter_id, novel_id, chapter_number, cfg):
         "chapter_id": chapter_id,
         "chapter_number": chapter_number,
         "title": chapter.title,
-        "audit_score": audit_result.get("overall_score", 0),
-        "grade": audit_result.get("grade", "?"),
+        "audit_score": audit_score,
+        "grade": grade,
         "issues": issues,
         "deai_changed": deai_changed,
         "content_length": len(content),
@@ -114,7 +113,9 @@ def diagnose_book(novel_id, cfg=None):
     # Aggregate
     total_issues = sum(len(r.get("issues", [])) for r in results)
     high_issues = sum(1 for r in results for i in r.get("issues", []) if i.get("severity") == "high")
-    avg_score = round(sum(r.get("audit_score", 0) for r in results) / max(len(results), 1), 1)
+    scored = [r["audit_score"] for r in results
+              if isinstance(r.get("audit_score"), (int, float))]
+    avg_score = round(sum(scored) / len(scored), 1) if scored else None
     chapters_needing_fix = sum(1 for r in results if r.get("issues"))
 
     return {

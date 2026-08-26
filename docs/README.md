@@ -12,6 +12,7 @@
 | [实现状态与路线图](roadmap.md) | `docs/roadmap.md` | 各版本实现状态 (V1.0→V3.5 已完成)、项目指标、V4.0 未来规划 | ✅ 维护中 |
 | [MCP & CLI 使用指南](mcp-cli-guide.md) | `docs/mcp-cli-guide.md` | 26 个 MCP 工具、18 个 CLI 命令组、自动化脚本示例 | ✅ 维护中 |
 | [AI 味研究](ai-tone-research.md) | `docs/ai-tone-research.md` | 283 万字对照语料研究 — 10 项有效 AI 特征 + 朱雀实测校准记录 | ✅ 最新 (2026-08) |
+| [约束 Prompt Engineer](约束promote%20engineer.md) | `docs/约束promote engineer.md` | 去 AI 味约束提示词网络调研汇编 — 平台红线、五层规则总库、可拼装 mod 模板（M0-M7）、工程架构启示 | ✅ 最新 (2026-08) |
 | [代码审查报告](code-review.md) | `docs/code-review.md` | 全面审查 — 120+ 发现（P0/P1/工程化），含复现证据 | 📋 归档 (2026-08) |
 | [修复报告](fix-report.md) | `docs/fix-report.md` | 审查问题的完整修复记录 — 47 文件、四批路线图、验证结果 | ✅ 最新 (2026-08) |
 | [开源调研报告](open-source-survey.md) | `docs/open-source-survey.md` | 45 个开源项目调研、竞品对比、技术趋势、借鉴实现情况 | 📋 归档 (2026-06) |
@@ -38,8 +39,9 @@
 ### 想了解去 AI 化 / 降低检测率
 
 1. [AI 味研究](ai-tone-research.md) — 语料研究结论 + 朱雀实测数据
-2. CLAUDE.md「文风锚例 / ai_metric / 采样惩罚」条目 — 当前实现的三件套
-3. [实现状态与路线图](roadmap.md) V3.5 节 — 本轮攻坚全记录
+2. [约束 Prompt Engineer](约束promote%20engineer.md) — 网络调研的约束提示词模块库（M0-M7）与冲突警示
+3. CLAUDE.md「文风锚例 / ai_metric / 采样惩罚」条目 — 当前实现的三件套
+4. [实现状态与路线图](roadmap.md) V3.5 节 — 本轮攻坚全记录
 
 ### 想了解竞品和技术选型背景
 
