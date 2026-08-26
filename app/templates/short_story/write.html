@@ -344,6 +344,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/lingyan-stream.js') }}"></script>
 <script>
 (function() {
     // XSS protection helper
@@ -420,164 +421,24 @@
             .then(() => { if (typeof loadVersions === 'function') loadVersions(); });
     }
 
+    // 流式渲染到正文区——管道实现在 /static/js/lingyan-stream.js 共享，
+    // 长篇/短篇两页复用同一实现（暂停/错误/节点标记语义不变），页面只注入
+    // 本页依赖：字数回调与草稿键。
     function streamToElement(url, body, targetEl, onDone, opts) {
         opts = opts || {};
-        const controller = new AbortController();
-        const initialText = opts.initial || '';
-        targetEl.style.display = 'block';
-        targetEl.innerHTML = '';
-        // Use a text node + separate cursor element to avoid full re-render
-        const textNode = document.createTextNode(initialText);
-        const cursor = document.createElement('span');
-        cursor.className = 'typing-cursor';
-        cursor.textContent = '|';
-        targetEl.appendChild(textNode);
-        targetEl.appendChild(cursor);
-        let rawText = initialText;          // 含节点标记的原文
-        let displayText = initialText;      // 剔除节点标记后展示
-        let lastBoundary = 0;               // 最近一个完整节点的结束位置（displayText 坐标）
-
-        function handleNodeMarkers() {
-            const nodeRe = /===NODE:(\d+):(.*?)===/g;
-            let m;
-            while ((m = nodeRe.exec(rawText)) !== null) {
-                // 该标记出现前的内容（剔除之前的标记）即上一个节点的完整文本
-                const cleanBefore = rawText.slice(0, m.index)
-                    .replace(/===NODE:\d+:.*?===/g, '');
-                lastBoundary = cleanBefore.length;
-                if (opts.onNode) opts.onNode(parseInt(m[1]), m[2].trim(), lastBoundary);
-            }
-            displayText = rawText.replace(/===NODE:\d+:.*?===/g, '');
-        }
-
-        fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body || '',
-            signal: controller.signal,
-        }).then(async resp => {
-            if (!resp.ok) { const errText = await resp.text(); throw new Error(errText || ('HTTP ' + resp.status)); }
-            const reader = resp.body.getReader();
-            const decoder = new TextDecoder();
-
-            function read() {
-                reader.read().then(({ done, value }) => {
-                    if (done) {
-                        cursor.remove();
-                        textNode.textContent = displayText;
-                        if (onDone) onDone(displayText);
-                        // 成功保存到服务器，清除本地草稿
-                        localStorage.removeItem(`lingyan_draft_${storyId}`);
-                        return;
-                    }
-                    const chunk = decoder.decode(value, { stream: true });
-                    rawText += chunk;
-                    handleNodeMarkers();
-                    textNode.textContent = displayText;
-                    updateCount(displayText);
-                    // Auto-scroll to bottom
-                    targetEl.scrollTop = targetEl.scrollHeight;
-                    read();
-                }).catch(err => {
-                    cursor.remove();
-                    if (err.name === 'AbortError') {
-                        // 用户暂停：保留已生成文本
-                        textNode.textContent = displayText;
-                        if (opts.onAbort) opts.onAbort(displayText);
-                    } else {
-                        const errorP = document.createElement('p');
-                        errorP.style.color = 'var(--danger)';
-                        errorP.textContent = '失败: ' + err.message;
-                        targetEl.appendChild(errorP);
-                        if (opts.onError) opts.onError(err);
-                    }
-                });
-            }
-            read();
-        }).catch(err => {
-            if (err.name === 'AbortError') {
-                if (opts.onAbort) opts.onAbort(displayText);
-                return;
-            }
-            targetEl.innerHTML = '';
-            const errorP = document.createElement('p');
-            errorP.style.color = 'var(--danger)';
-            errorP.textContent = '失败: ' + err.message;
-            targetEl.appendChild(errorP);
-            if (opts.onError) opts.onError(err);
-        });
-
-        return controller;
+        opts.onCount = opts.onCount || updateCount;
+        opts.draftKey = opts.draftKey || `lingyan_draft_${storyId}`;
+        return LingyanStream.toElement(url, body, targetEl, onDone, opts);
     }
 
     // 流式追加到 textarea（续写用）；返回 AbortController
     function streamToEditor(url, body, editor, onDone) {
-        const controller = new AbortController();
-        const startLen = editor.value.length;
-        editor.value += '';
-        fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body || '',
-            signal: controller.signal,
-        }).then(async resp => {
-            if (!resp.ok) { const errText = await resp.text(); throw new Error(errText || ('HTTP ' + resp.status)); }
-            const reader = resp.body.getReader();
-            const decoder = new TextDecoder();
-            let acc = '';
-            (function read() {
-                reader.read().then(({ done, value }) => {
-                    if (done) {
-                        if (onDone) onDone(acc);
-                        return;
-                    }
-                    const chunk = decoder.decode(value, { stream: true });
-                    acc += chunk;
-                    editor.value = editor.value.slice(0, startLen) + acc;
-                    editor.scrollTop = editor.scrollHeight;
-                    updateCount(editor.value);
-                    read();
-                }).catch(err => {
-                    if (err.name !== 'AbortError') {
-                        editor.value += '\n[失败: ' + err.message + ']';
-                    }
-                });
-            })();
-        }).catch(err => {
-            if (err.name !== 'AbortError') editor.value += '\n[失败: ' + err.message + ']';
-        });
-        return controller;
+        return LingyanStream.toEditor(url, body, editor, onDone, { onCount: updateCount });
     }
 
     // 流式收集到变量（扩写/局部重写用，完成后替换选区）
     function streamCollect(url, body, onToken, onDone, onErr) {
-        const controller = new AbortController();
-        fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body || '',
-            signal: controller.signal,
-        }).then(async resp => {
-            if (!resp.ok) { const errText = await resp.text(); throw new Error(errText || ('HTTP ' + resp.status)); }
-            const reader = resp.body.getReader();
-            const decoder = new TextDecoder();
-            let acc = '';
-            (function read() {
-                reader.read().then(({ done, value }) => {
-                    if (done) { if (onDone) onDone(acc); return; }
-                    const chunk = decoder.decode(value, { stream: true });
-                    acc += chunk;
-                    if (onToken) onToken(acc);
-                    read();
-                }).catch(err => {
-                    if (err.name === 'AbortError') return;
-                    if (onErr) onErr(err.message);
-                });
-            })();
-        }).catch(err => {
-            if (err.name !== 'AbortError' && onErr) onErr(err.message);
-        });
-        return controller;
+        return LingyanStream.collect(url, body, onToken, onDone, onErr);
     }
 
     // 绑定局部编辑工具（续写/扩写选中/重写选中），编辑模式注入按钮后调用
