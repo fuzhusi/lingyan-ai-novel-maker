@@ -1,6 +1,6 @@
 # 灵砚 MCP Server & CLI 使用文档
 
-> **更新于 2026-08-17** - 覆盖 V3.1 功能（单用户免登录、短篇逐节点多轮生成、多格式导出、模板库、Per-Agent 配置等）
+> **更新于 2026-09-08** - 覆盖 V3.7 功能（MCP 27 工具 / CLI 27 命令组、一键本章编排器、一致性链、创作罗盘、去AI味收敛、待确认队列等）（单用户免登录、短篇逐节点多轮生成、多格式导出、模板库、Per-Agent 配置等）
 
 ## 一、概述
 
@@ -41,7 +41,7 @@ python mcp_server.py
 }
 ```
 
-### 2.3 可用工具 (26 个)
+### 2.3 可用工具 (27 个)
 
 #### 小说管理 (4)
 
@@ -52,7 +52,7 @@ python mcp_server.py
 | `delete_novel` | novel_id | 删除小说及所有数据 |
 | `get_novel_info` | novel_id | 获取小说详细信息 |
 
-#### 章节管理 (5)
+#### 章节管理 (6)
 
 | 工具 | 参数 | 说明 |
 | --- | --- | --- |
@@ -61,6 +61,7 @@ python mcp_server.py
 | `get_chapter_content` | novel_id, chapter_number | 获取章节最新版本 |
 | `approve_chapter` | novel_id, chapter_number | 审批通过最新版本 |
 | `save_chapter_content` | novel_id, chapter_number, content, source? | 保存章节（创建新版本） |
+| `run_chapter_pipeline` | novel_id, chapter_number, user_directive?, auto_save? | 一键本章：缺大纲生成→正文→门禁→AI味收敛→停在人工闸门 |
 
 #### 人物管理 (3)
 
@@ -402,7 +403,7 @@ python cli.py state get --novel 1
 
 # 更新状态字段
 python cli.py state set --novel 1 --quest "寻找圣剑" --progress "已获得地图碎片"
-python cli.py state set --novel 1 --phase development --intensity 3    # 阶段 setup/development/climax/resolution，强度 1~5
+python cli.py state set --novel 1 --phase development --intensity 3    # 阶段 setup/development/climax/resolution，强度 1~10
 python cli.py state set --novel 1 --subplot "师门恩怨线" --conflict "与师兄的误会"   # 追加支线/冲突
 
 # 弧线阶段自动检测（基于章节字数分布；--apply 写回）
@@ -537,6 +538,52 @@ python cli.py blind rewrite --story 1 --out 二稿.md
 说明：`run` 与 `rewrite` 需要已配置可用模型（深度分析类走 critic/rewrite 配置）；
 `rewrite` 仅支持短篇/章节目标——自由文本的循环重写请在 Web 工作台人工勾选意见进行。
 
+### 4.17 创作罗盘 (compass) / 一键本章 (pipeline)
+
+```bash
+# 查看 / 设定创作罗盘（全书承诺 + 阶段目标）
+python cli.py compass show --novel 1
+python cli.py compass set --novel 1 --intent "复仇外壳写救赎" --focus "第二卷收尾"
+
+# 一键本章流水线：缺大纲生成 → 正文 → 门禁 → AI味收敛（不升回滚）→ 停在人工审阅
+python cli.py chapter pipeline --novel 1 --number 5
+python cli.py chapter pipeline --novel 1 --number 5 --save   # 自动保存 AI 版本（不审批）
+```
+
+### 4.18 去AI味 (tone) / 一致性核查 (consistency)
+
+```bash
+# AI 痕迹检测（10 项确定性特征 + 人味分）
+python cli.py tone check --novel 1 --number 5
+
+# 去AI味收敛回滚环：检测→定向重写→复测，人味分不升自动回滚保留原稿
+python cli.py tone converge --novel 1 --number 5 [--save]
+
+# 困惑度雷达：logprobs 逐句 ppl，定位选词过于可预测的句子
+python cli.py tone radar --novel 1 --number 5
+
+# 一致性核查：时序真相回潮 / 伏笔排期脱班 / 已回收复现（确定性三查）
+python cli.py chapter consistency --novel 1 --number 5
+python cli.py chapter consistency --novel 1 --number 5 --adjudicate   # 交 Keepers AI 裁决疑点
+
+# 大纲失配清单 / 字数超标压缩
+python cli.py chapter stale --novel 1
+python cli.py chapter condense --novel 1 --number 5 [--target 2500] [--save]
+```
+
+### 4.19 创作偏好档案 (preferences) / 待确认队列 (queue)
+
+```bash
+# 创作偏好档案：文风/禁忌/读者，注入全部写作链
+python cli.py preferences show
+python cli.py preferences set --style "冷峻克制" --taboos "不写床戏" --audience "男频"
+
+# 抽取待确认队列（时序真相自动抽取先入队，人工核验采纳才落真源）
+python cli.py queue list --novel 1
+python cli.py queue adopt --id 3
+python cli.py queue discard --id 4
+```
+
 ---
 
 ## 五、自动化脚本示例
@@ -648,6 +695,21 @@ curl -X POST http://127.0.0.1:5000/sample/load-all
   "message": "已加载 3 部示例小说 (新增 3)"
 }
 ```
+
+---
+
+### 6.5 V3.7 新增 API 端点
+
+| 端点 | 方法 | 说明 |
+| --- | --- | --- |
+| `/api/tone-converge` | POST | 去AI味收敛回滚环（检测→定向重写→复测，不升回滚） |
+| `/api/condense` | POST | 字数超标压缩（保留情节节拍，压描写冗余） |
+| `/api/consistency-check` | POST | 一致性链：确定性三查 → 可选 Keepers 裁决 |
+| `/api/chapter-pipeline` | POST | 一键本章流水线（大纲→正文→门禁→收敛→人工闸门） |
+| `/settings/api/creator-preferences` | GET/POST | 创作偏好档案（注入全部写作链） |
+| `/api/novels/<id>/pending-extractions` | GET | 抽取待确认队列 |
+| `/api/pending-extractions/<id>/resolve` | POST | 核验一条抽取（adopt=true 落真源 / false 丢弃） |
+| `/novel/<id>/compass` | POST | 创作罗盘保存 |
 
 ---
 

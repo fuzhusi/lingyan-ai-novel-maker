@@ -1,6 +1,6 @@
 # 灵砚 — AI 小说创作系统 实现状态
 
-> **更新于 2026-08-20** - V1.0 ~ V3.0 全部完成，V4.0 规划中
+> **更新于 2026-09-08** - V1.0 ~ V3.7 全部完成，V4.0 规划中（Agent 协同 P1-P4 已实施）
 
 ## Current State
 
@@ -211,7 +211,7 @@
 
 ### @skill-id 按需启用 ✅
 - [x] **特别指示临时附加技能** — `@chapter_hook` 语法仅本次调用生效，不改全局激活状态；只摘除已注册技能 id，未知 @词（如社交 handle）原样保留；邮箱类不误判；writer/rewrite 链路支持
-- [x] **测试** — 149 个用例全过（test_compass_budget.py 20 含路由级接线；test_perplexity_radar.py 9；test_merge_writes.py 12；test_agent_collab.py 13 覆盖意见契约/一致性链/编排器/写作包）
+- [x] **测试** — 149 个用例全过（test_compass_budget.py 20；test_perplexity_radar.py 9；test_merge_writes.py 12；test_agent_collab.py 14；CLI code review 修复后全量回归）
 
 ---
 
@@ -229,7 +229,7 @@
 - [x] **大纲失配标记** — `chapters.outline_hash` 记录生成正文时的大纲指纹（Web/MCP 双入口打点），改纲后 `outline_stale()` 失配、双页徽标提示
 - [x] **锚例反向提取** — 人工版本审批时提取文风锚例候选（含对话段落优先），前端确认入库
 - [x] **抽取待确认队列** — `PendingExtraction` 表 + truths/extract `queue=1` 模式，错抽不落真源
-- [x] **测试** — 149 个用例全过（本版净增 41：雷达 9 / 快赢 12 / 协同 13 / V3.6 修复 7）
+- [x] **测试** — 151 个用例全过（本版：CLI code review 20 项修复全量回归 + Agent 协同 P1-P4 各链路 smoke，全绿）
 
 ---
 
@@ -254,9 +254,9 @@
 | 项目 | 数量 |
 |------|------|
 | 数据库模型 | 23 |
-| Flask Blueprint | 22 (含 6 个服务蓝图) |
-| 路由模块 | 16 |
-| 业务服务 | 12 + 通用 HTTP 客户端 |
+| Flask Blueprint | 25 (含 5 个服务蓝图) |
+| 路由模块 | 20 |
+| 业务服务 | 24 个模块 (含 __init__ 共 25 个 .py) |
 | MCP 工具 | 27 |
 | CLI 命令组 | 27 |
 | 禁用模式 (De-AI) | 120+ (8 大类) |

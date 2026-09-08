@@ -1,6 +1,6 @@
-# 灵砚 — AI 小说创作系统 V3.0 技术设计文档
+# 灵砚 — AI 小说创作系统 V3.7 技术设计文档
 
-> **更新于 2026-08-20** - 完整记录 V1.0 ~ V3.2 全部功能设计
+> **更新于 2026-09-08** - 完整记录 V1.0 ~ V3.7 全部功能设计（含去 AI 化体系 / Agent 协同 P1-P4 / 编排器 / CLI 27 命令组）
 
 ## 项目名称
 
@@ -16,9 +16,12 @@
 |------|------|---------|
 | V1.0 | 已完成 | 基础 CRUD + 流式生成 + 版本管理 |
 | V2.0 | 已完成 | 多 Agent 流水线 + 一致性保障 |
-| V3.5 | 已完成 | 双盲审两角色审评取代 17 维审计（services/blind_review.py） |
 | V2.5 | 已完成 | Per-Agent 模型配置 + DeepSeek V4 适配 |
 | V3.0 | 已完成 | 用户认证 + 模板库 + 多格式导出 + 移动端 + 草稿保存 |
+| V3.2 | 已完成 | 长篇相关性上下文注入 + 短篇 3+1 阶段策划 |
+| V3.5 | 已完成 | 双盲审两角色审评取代 17 维审计（services/blind_review.py） |
+| V3.6 | 已完成 | OpenWrite 机制：创作罗盘 + 上下文预算压缩 + 审批事务 + @skill 按需启用 |
+| V3.7 | 已完成 | 困惑度雷达 + 收敛回滚环 + 字数压缩 + 一致性链 + Agent 协同 P1-P4 + CLI 全面修复 |
 
 ---
 
@@ -426,7 +429,7 @@ SQLite FTS5 全文检索，零外部依赖：
 
 # 9. 数据库设计
 
-## 9.1 表结构 (18 张表)
+## 9.1 表结构 (23 张表)
 
 ### 核心业务
 
@@ -652,6 +655,20 @@ CREATE TABLE short_story_reviews (
     created_at VARCHAR(20)
 );
 
+### 抽取待确认队列（V3.7）
+
+```sql
+CREATE TABLE pending_extractions (
+    id INTEGER PRIMARY KEY,
+    novel_id INTEGER NOT NULL REFERENCES novels(id),
+    kind VARCHAR(20) DEFAULT 'truth',     -- truth 等自动抽取源
+    payload_json TEXT DEFAULT '{}',
+    chapter_number INTEGER,
+    status VARCHAR(20) DEFAULT 'pending', -- pending / adopted / discarded
+    created_at VARCHAR(20)
+);
+```
+
 ### 双盲审记录
 
 ```sql
@@ -781,8 +798,8 @@ CREATE TABLE settings (
 | `/api/condense` | POST | 字数超标压缩（保留情节节拍，压描写冗余） |
 | `/api/consistency-check` | POST | 一致性链：确定性三查 → 可选 Keepers 裁决（P2） |
 | `/api/chapter-pipeline` | POST | 一键本章流水线：大纲→正文→门禁→收敛→人工闸门（P3，同步长请求） |
-| `/api/creator-preferences` | GET/POST | 创作偏好档案（`/settings` 前缀，注入全部写作链） |
-| `/novels/<id>/pending-extractions` | GET | 抽取待确认队列（A4，核验后才落真源） |
+| `/settings/api/creator-preferences` | GET/POST | 创作偏好档案（注入全部写作链） |
+| `/api/novels/<id>/pending-extractions` | GET | 抽取待确认队列（A4，核验后才落真源） |
 | `/api/novels/<id>/story-state` | GET/PUT | 故事状态 |
 | `/api/novels/<id>/relations` | GET/POST | 角色关系 |
 | `/api/novels/<id>/causal-chain/extract` | POST | 因果链提取 |
@@ -859,10 +876,10 @@ CREATE TABLE settings (
 
 ## 11.4 Per-Agent 模型配置
 
-**三级配置优先级：**
+**配置优先级（从高到低）：**
 
 ```
-Agent 特定配置 > 小说覆盖 (model_override) > 全局配置
+Agent 显式指定厂商/模型 > Agent 参数 (temperature/max_tokens/惩罚) > 小说覆盖 (model_override) > 自动默认（按已勾选模型匹配） > Setting 遗留 > .env 兜底
 ```
 
 **16 种 Agent 类型：**
@@ -916,12 +933,13 @@ def get_effective_config(novel=None, agent_type=None):
 
 # 12. MCP Server
 
-26 个 MCP 工具，支持 Claude Code / Cursor 集成：
+27 个 MCP 工具，支持 Claude Code / Cursor 集成：
 
 | 类别 | 工具 |
 |------|------|
 | 小说管理 | list_novels, create_novel, delete_novel, get_novel_info |
 | 章节管理 | list_chapters, create_chapter, get_chapter_content, approve_chapter, save_chapter_content |
+| 编排 | run_chapter_pipeline（一键本章：大纲→正文→门禁→收敛→人工闸门） |
 | 人物管理 | list_characters, create_character, update_character |
 | 世界观 | list_world_settings, create_world_setting |
 | 伏笔 | list_foreshadowing, create_foreshadowing, update_foreshadowing_status |
@@ -934,7 +952,21 @@ def get_effective_config(novel=None, agent_type=None):
 
 # 13. CLI 命令
 
-**15 个命令组（含 auth/whoami）：**
+**27 个命令组（含 auth/whoami/compass/queue/preferences/tone/pipeline 等）：**
+
+```bash
+# 创作罗盘 / 一键本章 / AI味收敛 / 一致性核查
+python cli.py compass show --novel 1
+python cli.py chapter pipeline --novel 1 --number 5 --save
+python cli.py chapter converge --novel 1 --number 5
+python cli.py chapter consistency --novel 1 --number 5 --adjudicate
+python cli.py tone check --novel 1 --number 5
+python cli.py tone radar --novel 1 --number 5
+
+# 偏好档案 / 待确认队列
+python cli.py preferences set --style ...
+python cli.py queue list --novel 1
+```
 
 ```bash
 # 小说

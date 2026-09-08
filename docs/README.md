@@ -1,15 +1,15 @@
 # 灵砚 (LingYan) 文档索引
 
-> 最后更新：2026-09-04
+> 最后更新：2026-09-08
 
 ## 文档总览
 
 | 文档 | 路径 | 说明 | 状态 |
 |------|------|------|------|
 | [CLAUDE.md](../CLAUDE.md) | 项目根目录 | Claude Code 项目指令 — 架构概览、开发规范、常用操作 | ✅ 维护中 |
-| [架构文档](architecture.md) | `docs/architecture.md` | 系统架构、技术栈、项目结构、数据模型、认证、多 Agent、配置系统 | ✅ 维护中 |
+| [架构文档](architecture.md) | `docs/architecture.md` | 系统架构、技术栈、项目结构、数据模型、认证、评审架构、配置系统 | ✅ 维护中 |
 | [技术设计文档](technical-design.md) | `docs/technical-design.md` | 完整技术设计 — 功能模块、Agent 架构、质量控制系统、记忆系统、数据库 DDL、API 接口、开发路线 | ✅ 维护中 |
-| [实现状态与路线图](roadmap.md) | `docs/roadmap.md` | 各版本实现状态 (V1.0→V3.6 已完成)、项目指标、V4.0 未来规划 | ✅ 维护中 |
+| [实现状态与路线图](roadmap.md) | `docs/roadmap.md` | 各版本实现状态 (V1.0→V3.7 已完成)、项目指标、V4.0 未来规划 | ✅ 维护中 |
 | [MCP & CLI 使用指南](mcp-cli-guide.md) | `docs/mcp-cli-guide.md` | 27 个 MCP 工具、27 个 CLI 命令组、自动化脚本示例 | ✅ 维护中 |
 | [CLI 操作指引](cli操作指引.md) | `docs/cli操作指引.md` | 面向创作流程的实操手册 —— 从配模型、建小说、搭知识库到审批导出的按序操作 | ✅ 最新 (2026-09) |
 | [AI 味研究](ai-tone-research.md) | `docs/ai-tone-research.md` | 283 万字对照语料研究 — 10 项有效 AI 特征 + 朱雀实测校准记录 | ✅ 最新 (2026-09) |

@@ -220,7 +220,7 @@ $PY cli.py novel export --id 1 --format epub --output 你应该好好爱自己.e
 
 ```bash
 $PY cli.py novel list / info / update / export / delete
-$PY cli.py chapter list / content / update / approve / version-list / version-content / deai / delete / stale / pipeline / converge / condense / consistency-check
+$PY cli.py chapter list / content / update / approve / version-list / version-content / deai / delete / stale / pipeline / converge / condense / consistency / create
 $PY cli.py character list / create / info / update / delete / template-list
 $PY cli.py world list / create / update / delete
 $PY cli.py outline list / create / update / delete / create-chapter
@@ -228,19 +228,20 @@ $PY cli.py foreshadow list / create / status / update / timeout-check / delete
 $PY cli.py relation list / create / update / event / delete
 $PY cli.py state get / set / auto-detect / snapshot / snapshots / rollback
 $PY cli.py short list / create / content / version-list / approve / export
+$PY cli.py template list / create / delete                      # 提示词模板（writer/critic/summary/outline）
 $PY cli.py llm preset-list / provider-* / fetch-models / model-* / test / agent-* / effective
 $PY cli.py skill list / active / toggle / info / preview / create / delete
 $PY cli.py constraint show / status / toggle
 $PY cli.py audit run · blind run/latest/rewrite · optimize diagnose/deai
-$PY cli.py setting list / set / get / apply-recommended
+$PY cli.py setting list / set / get / apply-recommended / clear-agent
 $PY cli.py compass show / set                       # 创作罗盘（全书承诺+阶段目标）
 $PY cli.py queue list / adopt / discard              # 抽取待确认队列（错抽不落真相库）
 $PY cli.py preferences show / set                    # 创作偏好档案（长期有效写作约束）
 $PY cli.py tone check / converge / radar             # 去AI味检测/收敛/困惑度雷达
 $PY cli.py style-anchor view / set / toggle / preview # 文风锚例（真人原文直插prompt）
 $PY cli.py template-outline list / show / apply       # 大纲模板（节拍式/三幕/英雄之旅/四幕）
-$PY cli.py pipeline --novel 1 --number 5 --save      # 一键本章流水线（CLI版，生成→门禁→收敛→落版本）
-$PY cli.py sys info / backup / sample-data
+$PY cli.py chapter pipeline --novel 1 --number 5 --save  # 一键本章流水线（生成→门禁→收敛→落版本）
+$PY cli.py sys info / backup / sample-data / reset
 ```
 
 > 备份习惯：每天收工 `sys backup`，写崩了有退路。

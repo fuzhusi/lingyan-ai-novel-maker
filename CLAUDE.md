@@ -95,7 +95,7 @@ app/
 │   ├── outline_templates.py # 大纲模板库 API
 │   └── llm_settings.py  # LLM 厂商配置 API（厂商 CRUD + 拉取模型 + 勾选）
 │
-├── services/            # 业务逻辑 (18 个模块 + 6 个含 API 的服务)
+├── services/            # 业务逻辑 (24 个模块 + 5 个含 API 的服务)
 │   ├── prompt_builder/  # 提示词构建 (子包)
 │   │   ├── __init__.py  # 统一导出 + DEFAULT_WRITER_CONSTRAINTS
 │   │   ├── context.py   # 模板加载 + 上下文组装
@@ -111,6 +111,8 @@ app/
 │   ├── consistency_check.py # 一致性链：确定性三查 + Keepers 裁决者（P2）
 │   ├── opinions.py      # 统一意见 Schema：Critic 分项 + 双盲审意见降维合并（P1）
 │   ├── extraction_queue.py # 抽取待确认队列（A4：错抽不落真源）
+│   ├── skill_gate.py    # 技巧门禁：生成后确定性验收（零 LLM）
+│   ├── unified_review.py # 统一评审服务：Critic 评分 + 双盲审并行合并
 │   ├── deai_agent.py    # 去 AI 化处理逻辑（词汇层替换；比喻简化规则已按语料研究停用）
 │   ├── deai_patterns.py # 120+ 禁用模式数据
 │   ├── ai_metric.py     # 篇章层 AI 痕迹检测（10 项对照语料验证规则 + 统计指标，零 LLM）
@@ -125,7 +127,7 @@ app/
 │   ├── text_cleaner.py  # 文本清理
 │   └── short_story_templates.py # 短篇结构模板
 │
-├── templates/           # 17 个 Jinja2 模板 (含 login.html + short_story/)
+├── templates/           # 23 个 Jinja2 模板 (含 login.html + short_story/)
 └── static/              # 静态资源
     ├── css/main.css     # 朱金 · 玄漆 主题·中式版（夜幕下摊开的稿纸：玄漆暖黑夜幕 + 朱砂/泥金主色；阅读面转宣纸稿纸，令牌影射自动适配；毛笔题字 + 朱印落款）
     └── js/
@@ -133,13 +135,13 @@ app/
         └── inkflow.js   # 网关沉浸页增强场景（Three.js 大满月+桂花雨粒子+朱金光尘+鼠标扰动）
 ```
 
-## 数据库模型 (21 个)
+## 数据库模型 (23 个)
 
 | 类别 | 模型 |
 |------|------|
 | **核心** | Novel, Chapter, ChapterVersion, CriticReview, BlindReview, PromptTemplate, Setting |
-| **知识库** | Character, WorldSetting, OutlineNode, Foreshadowing |
-| **高级** | CharacterRelation, StoryState, StoryStateSnapshot, ChapterMemory, ChapterSummary |
+| **知识库** | Character, WorldSetting, OutlineNode, Foreshadowing, CharacterRelation, PendingExtraction |
+| **高级** | StoryState, StoryStateSnapshot, ChapterMemory, ChapterSummary |
 | **短篇** | ShortStory, ShortStoryVersion, ShortStoryReview |
 | **借鉴** | PlagiarizeTask |
 | **LLM 厂商** | LLMProvider, LLMModel |
@@ -271,7 +273,7 @@ app/
 
 ## MCP Server & CLI
 
-### MCP Server (26 个工具)
+### MCP Server (27 个工具)
 - **配置：** `.claude/settings.json` 中添加 `lingyan` 服务器
 - **小说/章节/角色/世界观/伏笔/大纲/短篇** 全 CRUD
 - **质量审计：** `quick_audit`, `get_knowledge_context`

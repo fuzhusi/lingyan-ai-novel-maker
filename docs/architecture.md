@@ -1,7 +1,7 @@
 # 灵砚 — AI 小说创作系统 架构文档
 
 
-> **更新于 2026-08-20** - 反映 V3.2 最新架构（单用户免登录、短篇 3+1 阶段策划、逐节点多轮生成、长篇相关性上下文注入、LLM 多厂商配置）
+> **更新于 2026-09-08** - 反映 V3.7 最新架构（去 AI 化体系 + 困惑度雷达、Agent 协同 P1-P4、一键本章编排器、CLI 27 命令组、MCP 27 工具）
 
 ## 1. 概述
 
@@ -15,7 +15,9 @@
 - **去 AI 化 + 风格指纹 + Skill 系统** 文字质量控制
 - **按 Agent 类型配置模型** — 灵活的成本与质量权衡
 - **短篇三模式** — Inspiration（发散 → 逐节点多轮生成）/ Setting / Careful
-- **MCP Server + CLI** AI 与自动化可操作
+- **MCP Server + CLI** AI 与自动化可操作（MCP 27 工具 / CLI 27 命令组，共用服务层）
+- **去 AI 化体系** — 三层防御 + 10 项确定性检测 + 困惑度雷达 + 收敛回滚环 + 采样惩罚
+- **Agent 协同 P1-P4** — 统一意见 Schema / 一致性链（Keepers 裁决者）/ 编排器 / 写作包契约
 - **单用户免登录** — Web/CLI 直接使用
 
 ---
@@ -43,17 +45,17 @@
 ```text
 Ai novel system/
 ├── run.py                          # Web 入口 (免登录)
-├── cli.py                          # CLI 工具 (15 命令组，免登录)
-├── mcp_server.py                   # MCP Server (26 工具)
+├── cli.py                          # CLI 工具 (27 命令组，免登录)
+├── mcp_server.py                   # MCP Server (27 工具)
 ├── .env                            # API 配置
 ├── data.db                         # SQLite 数据库
 │
 └── app/
-    ├── __init__.py                 # Flask app 工厂 (22 blueprints)
+    ├── __init__.py                 # Flask app 工厂 (25 blueprints)
     ├── config.py                   # 环境变量加载
-    ├── models.py                   # 18 SQLAlchemy 数据模型
+    ├── models/                     # 23 SQLAlchemy 数据模型 (包)
     │
-    ├── routes/                     # 16 个路由蓝图
+    ├── routes/                     # 20 个路由蓝图
     │   ├── novel.py                # 小说 CRUD + gateway
     │   ├── chapter.py              # 章节 CRUD + 版本管理
     │   ├── generate.py             # AI 生成 SSE 流式
@@ -68,26 +70,39 @@ Ai novel system/
     │   ├── settings.py             # 全局 + Per-Agent 配置
     │   ├── templates_lib.py        # 提示词模板库
     │   ├── export.py               # TXT/DOCX/MD/HTML/EPUB 导出
-    │   └── dashboard.py            # 仪表盘 (含趋势图)
+    │   ├── dashboard.py            # 仪表盘 (含趋势图)
+    │   ├── sample_data.py          # 示例数据生成
+    │   ├── outline_templates.py    # 大纲模板库 API
+    │   └── llm_settings.py        # LLM 厂商配置 API
     │
-    ├── services/                   # 业务逻辑 (18 + 6 独立蓝图)
-    │   ├── prompt_builder.py       # 提示词组装 + 约束
-    │   ├── blind_review.py        # 双盲审引擎（阎浮×白骨）
-    │   ├── causal_chain.py         # 因果链引擎 (蓝)
-    │   ├── book_optimizer.py       # 全书诊断
-    │   ├── vector_memory.py        # FTS5 向量记忆 (蓝)
+    ├── services/                   # 业务逻辑 (24 模块 + 5 含 API 服务)
+    │   ├── prompt_builder/         # 提示词构建 (子包)
+    │   ├── llm.py                  # 统一 LLM 调用层 (langchain-openai)
+    │   ├── writer_chain.py         # 写作链公共层：写作包 + 生成流（编排器与 generate-stream 共用）
+    │   ├── chapter_runner.py       # 一键本章编排器（P3）
+    │   ├── chapter_approval.py     # 审批事务单一真源（Web/MCP/CLI 共用）
+    │   ├── tone_convergence.py     # 去AI味收敛回滚环 + 字数压缩
+    │   ├── perplexity_radar.py     # 困惑度雷达（logprobs 逐句 ppl）
+    │   ├── consistency_check.py    # 一致性链（确定性三查 + Keepers 裁决）
+    │   ├── opinions.py             # 统一意见 Schema（P1）
+    │   ├── extraction_queue.py     # 抽取待确认队列（A4）
     │   ├── deai_agent.py           # 去 AI 化 (120+ 禁用模式)
+    │   ├── deai_patterns.py        # 禁用模式数据
+    │   ├── ai_metric.py            # 篇章 AI 痕迹检测（10 项，零 LLM）
+    │   ├── blind_review.py        # 双盲审引擎（阎浮×白骨）
+    │   ├── book_optimizer.py       # 全书诊断
+    │   ├── causal_chain.py         # 因果链引擎 (蓝)
+    │   ├── vector_memory.py        # FTS5 向量记忆 (蓝)
+    │   ├── skill_gate.py           # 技巧门禁（确定性验收）
+    │   ├── unified_review.py       # 统一评审服务
     │   ├── info_boundary.py        # 信息边界系统
-    │   ├── style_fingerprint.py    # 风格指纹 + 文风锚例 (原文直插 prompt)
+    │   ├── style_fingerprint.py    # 风格指纹 + 文风锚例
     │   ├── skill_system.py         # Skill 系统 (蓝)
     │   ├── temporal_truth.py       # 时序真理库 (蓝)
     │   ├── text_cleaner.py         # 文本清理
-    │   ├── http_client.py          # SSL 容错 httpx 工厂
-    │   ├── auth.py                 # 认证已禁用（单用户，login_required 为 no-op）
-    │   ├── sample_data.py          # 示例数据生成 (蓝)
-    │   └── outline_templates.py    # 大纲模板库 (蓝)
+    │   └── short_story_templates.py # 短篇结构模板
     │
-    ├── templates/                  # 17 Jinja2 模板
+    ├── templates/                  # 23 Jinja2 模板
     │   ├── base.html               # 基础布局 (含移动端菜单)
     │   ├── login.html              # 登录页（已禁用，仅保留路由）
     │   ├── gateway.html            # 网关首页 (含引导卡片)
@@ -116,20 +131,21 @@ Ai novel system/
 
 ---
 
-## 4. 数据模型 (18 张表)
+## 4. 数据模型 (23 张表)
 
-### 4.1 核心业务 (6 张)
+### 4.1 核心业务 (7 张)
 
 | 表 | 说明 |
 |---|---|
-| `novels` | 小说主体（标题、类型、简介、世界观、model_override） |
-| `chapters` | 章节（编号、标题、大纲、用户指示） |
+| `novels` | 小说主体（标题、类型、简介、世界观、model_override、创作罗盘 author_intent/current_focus、风格备忘录） |
+| `chapters` | 章节（编号、标题、大纲、用户指示、大纲指纹 outline_hash） |
 | `chapter_versions` | 多版本支持（来源：ai/human/rewrite） |
 | `chapter_summaries` | 章节摘要 + 因果链 JSON |
 | `critic_reviews` | 评审记录 |
+| `blind_reviews` | 双盲审记录（kind + editors_json + verdict） |
 | `prompt_templates` | 提示词模板（含约束） |
 
-### 4.2 知识库 (4 张)
+### 4.2 知识库 (6 张)
 
 | 表 | 说明 |
 |---|---|
@@ -137,16 +153,17 @@ Ai novel system/
 | `world_settings` | 世界观设定（按类别） |
 | `outline_nodes` | 大纲树（卷 → 章 → 场景） |
 | `foreshadowing` | 伏笔（状态机 + 超时 + 重要度） |
+| `character_relations` | 角色关系（5 维度量化） |
+| `pending_extractions` | 抽取待确认队列（A4：人工核验后才落真源） |
 
-### 4.3 高级功能 (5 张)
+### 4.3 高级功能 (4 张)
 
 | 表 | 说明 |
 |---|---|
-| `character_relations` | 角色关系（5 维度量化） |
-| `story_states` | 故事状态引擎（弧阶段、冲突、伏笔） |
-| `story_state_snapshots` | 状态快照（用于回滚） |
+| `story_states` | 故事状态引擎（弧阶段、冲突、伏笔、兴奋度/节奏引擎字段） |
+| `story_state_snapshots` | 状态快照（用于回滚，含引擎字段） |
 | `chapter_memories` | 章节记忆（场景级，键事件，角色变化） |
-| `short_stories` | 短篇（3 模式 + 状态机 + 3 阶段策划字段 plan_characters/plan_theme） |
+| `short_stories` | 短篇（3 模式 + 状态机 + 3 阶段策划字段） |
 
 ### 4.4 系统设置 (3 张)
 
@@ -155,6 +172,11 @@ Ai novel system/
 | `settings` | KV 表（全局 + Per-Agent 配置） |
 | `llm_providers` | LLM 厂商（api_key/base_url/启用状态） |
 | `llm_models` | LLM 模型（厂商下属模型，勾选启用） |
+
+### 4.5 短篇 (2 张)
+
+| 表 | 说明 |
+|---|---|
 | `short_story_versions` | 短篇版本 |
 | `short_story_reviews` | 短篇评审 |
 
@@ -343,20 +365,28 @@ DATABASE_PATH=data.db
 
 | 服务 | 功能 |
 |------|------|
-| `prompt_builder` | 提示词组装 + 9 种模板 + 写作约束注入 |
+| `prompt_builder/` | 提示词构建（writer/outline/rewrite/critic/keepers 子模块 + 上下文组装 + 预算压缩 + 罗盘） |
+| `writer_chain` | 写作链公共层：写作包 build_writer_kwargs + 生成流 generation_tokens（generate-stream 与编排器共用） |
+| `chapter_runner` | 一键本章编排器：大纲→正文→门禁→收敛→人工闸门（P3） |
+| `chapter_approval` | 审批事务单一真源（Web/MCP/CLI 共用 + create_version_record） |
+| `tone_convergence` | 去AI味收敛回滚环 + 字数超标压缩 |
+| `perplexity_radar` | 困惑度雷达：logprobs 逐句 ppl（选词分布层检测） |
+| `consistency_check` | 一致性链：确定性三查 + Keepers 裁决者（P2） |
+| `opinions` | 统一意见 Schema（Critic + 双盲审降维合并，P1） |
+| `extraction_queue` | 抽取待确认队列（A4：错抽不落真源） |
+| `unified_review` | 统一评审：Critic 评分 + 双盲审并行合并 |
 | `blind_review` | 双盲审引擎：阎浮×白骨两角色盲审 + 返还重写闭环 |
 | `causal_chain` | 因果链提取（因→事→果→策） |
 | `vector_memory` | FTS5 语义检索 |
-| `deai_agent` | 120+ 禁用词 + 5 步处理 |
+| `skill_gate` | 技巧门禁：生成后确定性验收 |
+| `deai_agent` / `deai_patterns` | 120+ 禁用词 + 5 步处理 |
+| `ai_metric` | 篇章 AI 痕迹检测（10 项，零 LLM） |
 | `info_boundary` | 角色知识边界追踪 |
-| `style_fingerprint` | 风格指纹提取 + 文风锚例（原文直插 prompt，全部正文生成链路） |
-| `skill_system` | 7 内置 + 自定义写作技巧 |
+| `style_fingerprint` | 风格指纹提取 + 文风锚例（原文直插 prompt） |
+| `skill_system` | 13 内置 + 自定义写作技巧 + 作者文风协议 |
 | `temporal_truth` | 时序真理库 |
 | `book_optimizer` | 全书诊断 + 自动修订 |
-| `http_client` | SSL 容错 httpx 工厂 |
-| `auth` | 认证已禁用（单用户免登录） |
-| `sample_data` | 示例数据生成 |
-| `outline_templates` | 大纲模板库 |
+| `llm` | 统一 LLM 调用层（langchain-openai，11 厂商） |
 
 ---
 

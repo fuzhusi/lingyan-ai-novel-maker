@@ -142,7 +142,7 @@ AGENT_TYPES 中已标注「预留·一致性裁决者」。
 实现载体（2026-09-04）：`opinions.py` / `consistency_check.py` / `extraction_queue.py` /
 `writer_chain.py` / `chapter_runner.py`；路由 `/api/consistency-check`、
 `/api/chapter-pipeline`、`/settings/api/creator-preferences`、
-`/novels/<id>/pending-extractions`；测试 `tests/test_agent_collab.py`（13 例）。
+`/api/novels/<id>/pending-extractions`；测试 `tests/test_agent_collab.py`（14 例）。
 
 ## 五、与既有决策的衔接
 
