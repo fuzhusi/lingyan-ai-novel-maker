@@ -1,6 +1,6 @@
 # 灵砚 (LingYan) 文档索引
 
-> 最后更新：2026-08-26
+> 最后更新：2026-09-04
 
 ## 文档总览
 
@@ -9,13 +9,16 @@
 | [CLAUDE.md](../CLAUDE.md) | 项目根目录 | Claude Code 项目指令 — 架构概览、开发规范、常用操作 | ✅ 维护中 |
 | [架构文档](architecture.md) | `docs/architecture.md` | 系统架构、技术栈、项目结构、数据模型、认证、多 Agent、配置系统 | ✅ 维护中 |
 | [技术设计文档](technical-design.md) | `docs/technical-design.md` | 完整技术设计 — 功能模块、Agent 架构、质量控制系统、记忆系统、数据库 DDL、API 接口、开发路线 | ✅ 维护中 |
-| [实现状态与路线图](roadmap.md) | `docs/roadmap.md` | 各版本实现状态 (V1.0→V3.5 已完成)、项目指标、V4.0 未来规划 | ✅ 维护中 |
-| [MCP & CLI 使用指南](mcp-cli-guide.md) | `docs/mcp-cli-guide.md` | 26 个 MCP 工具、18 个 CLI 命令组、自动化脚本示例 | ✅ 维护中 |
-| [AI 味研究](ai-tone-research.md) | `docs/ai-tone-research.md` | 283 万字对照语料研究 — 10 项有效 AI 特征 + 朱雀实测校准记录 | ✅ 最新 (2026-08) |
-| [约束 Prompt Engineer](约束promote%20engineer.md) | `docs/约束promote engineer.md` | 去 AI 味约束提示词网络调研汇编 — 平台红线、五层规则总库、可拼装 mod 模板（M0-M7）、工程架构启示 | ✅ 最新 (2026-08) |
+| [实现状态与路线图](roadmap.md) | `docs/roadmap.md` | 各版本实现状态 (V1.0→V3.6 已完成)、项目指标、V4.0 未来规划 | ✅ 维护中 |
+| [MCP & CLI 使用指南](mcp-cli-guide.md) | `docs/mcp-cli-guide.md` | 27 个 MCP 工具、27 个 CLI 命令组、自动化脚本示例 | ✅ 维护中 |
+| [CLI 操作指引](cli操作指引.md) | `docs/cli操作指引.md` | 面向创作流程的实操手册 —— 从配模型、建小说、搭知识库到审批导出的按序操作 | ✅ 最新 (2026-09) |
+| [AI 味研究](ai-tone-research.md) | `docs/ai-tone-research.md` | 283 万字对照语料研究 — 10 项有效 AI 特征 + 朱雀实测校准记录 | ✅ 最新 (2026-09) |
+| [约束 Prompt Engineer](约束promote%20engineer.md) | `docs/约束promote engineer.md` | 去 AI 味约束提示词网络调研汇编 — 平台红线、五层规则总库、可拼装 mod 模板（M0-M7）、工程架构启示 | ✅ 最新 (2026-09) |
 | [代码审查报告](code-review.md) | `docs/code-review.md` | 全面审查 — 120+ 发现（P0/P1/工程化），含复现证据 | 📋 归档 (2026-08) |
 | [修复报告](fix-report.md) | `docs/fix-report.md` | 审查问题的完整修复记录 — 47 文件、四批路线图、验证结果 | ✅ 最新 (2026-08) |
 | [开源调研报告](open-source-survey.md) | `docs/open-source-survey.md` | 45 个开源项目调研、竞品对比、技术趋势、借鉴实现情况 | 📋 归档 (2026-06) |
+| [第二轮开源融合评估](merge-assessment.md) | `docs/merge-assessment.md` | jarvis-write / NovelForge / AI_NovelGenerator 机制拆解 — 采纳/改造/暂缓/拒收逐项裁决表 + 落地顺序建议 | ✅ 最新 (2026-09) |
+| [Agent 协同方案](agent-collaboration.md) | `docs/agent-collaboration.md` | 双 Agent 改制后的协同设计 — 现状盘点、七项缺口、四条链拓扑（写作/评审/定稿/一致性）、写作包与统一意见契约、编排器分期（P1-P4） | ✅ 已实施 (2026-09) |
 | [产品整改计划](improvement-plan.md) | `docs/improvement-plan.md` | V3.0 整改计划 (P0-P3)、时间线、验收标准 — 大部分已完成 | 📋 归档 (2026-07) |
 
 ## 阅读建议

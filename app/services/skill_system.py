@@ -505,7 +505,50 @@ def _render_static_skill(skill):
     return block
 
 
-def build_skill_prompt(task_type="write"):
+def _known_skill_ids():
+    """当前全部可用技能 id（内置 + 作者协议 + 自定义）。
+
+    查询失败（如无 app 上下文）返回空集：@ 词全部保留原文，宁可不激活
+    也不吞用户的指示文本。
+    """
+    try:
+        return set(get_all_skills().keys())
+    except Exception:
+        return set()
+
+
+def parse_directive_skills(user_directive):
+    """从特别指示中解析 @skill-id 语法（借鉴 OpenWrite 的 @skill 按需启用）。
+
+    返回 (清理后的指示, [skill_id 列表])。@skill-id 只在行首或空白后出现，
+    例如「本章加强悬念 @chapter_hook @pacing_control 注意收束节奏」。
+    只摘除确实对应已注册技能的 @id；未知的 @词（如社交 handle）原样保留。
+    @ 前无空白/非行首不匹配，邮箱类不误判。
+    无匹配时返回 (原指示, [])。
+    """
+    import re
+    if not user_directive:
+        return user_directive or "", []
+    known = _known_skill_ids()
+    pattern = re.compile(r"(^|\s)@([a-z0-9_]+)", re.M)
+
+    def _strip_known(m):
+        return (m.group(1) or "") if m.group(2) in known else m.group(0)
+
+    ids = []
+    for m in pattern.finditer(user_directive):
+        sid = m.group(2)
+        if sid in known and sid not in ids:
+            ids.append(sid)
+    if not ids:
+        return user_directive, []
+    cleaned = re.sub(pattern, _strip_known, user_directive)
+    # 归并多余空白（@xxx 摘除后留下的双空格）
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).rstrip()
+    return cleaned, ids
+
+
+def build_skill_prompt(task_type="write", extra_skills=None):
     """Build the combined skill prompt from active skills.
 
     task_type: write / diagnose / polish / outline
@@ -517,10 +560,17 @@ def build_skill_prompt(task_type="write"):
     大纲生成用 outline。
     带协议包字段的技巧优先加载完整文件协议，回退到静态浓缩 prompt。
 
+    extra_skills: 临时附加的技能 id 列表（@skill-id 语法从特别指示解析而来，
+    仅本次调用生效，不改变全局激活状态）。
+
     同一协议包（如三个江南技巧都指向 jiangnan）只整包加载一次，避免重复注入
     浪费 token。约束来自该包下所有激活技巧的 constraints（去重合并）。
     """
-    active = get_active_skills()
+    active = list(get_active_skills())
+    if extra_skills:
+        for s in extra_skills:
+            if s and s not in active:
+                active.append(s)
     all_skills = get_all_skills()
     skip_packs = (task_type == "outline")
 
@@ -652,9 +702,10 @@ def update_active():
 def gate_check():
     """技能质量门禁：对文本做确定性校验，报告活跃技巧的违规情况。
 
-    Body: JSON {"text": "..."} 或表单 text 字段。
+    Body: JSON {"text": "...", "with_ppl": bool} 或表单 text 字段。
     Returns: {"passed": bool, "checks": [{skill, name, passed, violations[]}],
               "ai_tone": {passed, human_score, checks[], stats{}},   # 篇章层 AI 痕迹
+              "perplexity": {available, overall_ppl, smoothest[]},   # 困惑度雷达（with_ppl=1 时）
               "constraint_assembly": {agent_type: 最近一次词库装配快照}}  # 可观测性回显
     """
     data = request.get_json(silent=True) or {}
@@ -668,6 +719,15 @@ def gate_check():
         rep["ai_tone"] = analyze_ai_tone(text)
     except Exception:
         pass
+    # 困惑度雷达：选词分布层信号（显式 opt-in——每次要 N 次复述调用，有成本）
+    if data.get("with_ppl") or request.form.get("with_ppl"):
+        try:
+            from app.config_utils import get_effective_config
+            from app.services.perplexity_radar import analyze_perplexity
+            cfg = get_effective_config(None, agent_type="summary")
+            rep["perplexity"] = analyze_perplexity(text, cfg)
+        except Exception as e:
+            rep["perplexity"] = {"available": False, "reason": str(e)[:200]}
     # 约束装配回显：展示最近一次生成实际注入的词库模块（可观测性闭环）
     try:
         from app.services.constraint_bank import get_last_assembly

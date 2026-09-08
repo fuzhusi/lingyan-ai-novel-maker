@@ -12,6 +12,7 @@ from app.models.novel import (
 # 知识库
 from app.models.knowledge import (
     Character, WorldSetting, OutlineNode, Foreshadowing, CharacterRelation,
+    PendingExtraction,
 )
 
 # 故事状态
@@ -66,6 +67,13 @@ def init_db(app):
             "ALTER TABLE prompt_templates ADD COLUMN constraints TEXT DEFAULT ''",
             # Causal chain column
             "ALTER TABLE chapter_summaries ADD COLUMN causal_chain_json TEXT DEFAULT ''",
+            # 创作罗盘（借鉴 OpenWrite）：全书承诺 + 当前阶段目标
+            "ALTER TABLE novels ADD COLUMN author_intent TEXT DEFAULT ''",
+            "ALTER TABLE novels ADD COLUMN current_focus TEXT DEFAULT ''",
+            # 大纲失配标记（merge-assessment A1v1）：正文生成时的大纲指纹
+            "ALTER TABLE chapters ADD COLUMN outline_hash VARCHAR(64) DEFAULT ''",
+            # P4 风格备忘录（B3）
+            "ALTER TABLE novels ADD COLUMN style_memo_json TEXT DEFAULT '[]'",
         ]
         for sql in migrations:
             try:
@@ -79,6 +87,7 @@ __all__ = [
     "db", "now", "init_db",
     "Novel", "Chapter", "ChapterVersion", "CriticReview", "BlindReview", "PromptTemplate", "Setting",
     "Character", "WorldSetting", "OutlineNode", "Foreshadowing", "CharacterRelation",
+    "PendingExtraction",
     "StoryState", "StoryStateSnapshot", "ChapterMemory", "ChapterSummary",
     "ShortStory", "ShortStoryVersion", "ShortStoryReview",
     "PlagiarizeTask",

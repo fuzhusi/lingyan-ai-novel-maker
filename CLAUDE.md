@@ -5,7 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 **灵砚 (LingYan)** — AI 小说创作系统。Python Flask 后端 + Jinja2 前端，支持长篇和短篇创作。
-**核心特性**：多 Agent 协作（Writer + Critic + 4 Keepers + Editor）、双盲审两角色审评（阎浮×白骨，替代旧 17 维审计）、按 Agent 类型配置不同模型、长篇一致性保障（因果链 + 向量记忆 + 信息边界）、短篇逐节点多轮生成、单用户免登录。
+**核心特性**：双盲审两角色审评（阎浮×白骨零上下文盲审，与 Critic 结构化评分合并为统一评审）、按 Agent 类型配置不同模型、长篇一致性保障（因果链 + 向量记忆 + 信息边界）、短篇逐节点多轮生成、单用户免登录。
+**注意**：旧多 Agent 流水线（Writer + Critic + 4 Keepers + Editor，`app/routes/pipeline.py`）代码保留但已停用——blueprint 仍注册（HTTP 手动可达），前端/CLI/MCP/测试零调用，勿再作为现行机制描述或扩展。
 
 ## Development Environment
 
@@ -46,7 +47,7 @@ app/
 ├── config.py            # AppConfig 从 .env 加载
 ├── config_utils.py      # 配置解析 (get_model_config / get_effective_config)
 │
-├── models/              # 22 个 SQLAlchemy 模型 (按领域拆分)
+├── models/              # 23 个 SQLAlchemy 模型 (按领域拆分)
 │   ├── __init__.py      # 统一导出 + init_db()
 │   ├── base.py          # db 实例 + now()
 │   ├── novel.py         # Novel, Chapter, ChapterVersion, CriticReview, BlindReview,
@@ -80,7 +81,7 @@ app/
 │   │   ├── plot.py      # 情节借鉴 + 情节骨架提取
 │   │   ├── rewrite.py   # 改写洗稿 (轻度/中度/重度)
 │   │   └── upload.py    # 文件上传 (TXT/DOCX/EPUB)
-│   ├── pipeline.py      # 多 Agent 并行检查
+│   ├── pipeline.py      # 多 Agent 并行检查（保留停用：无任何入口调用）
 │   ├── blind_review.py  # 双盲审工作台 + 通用 API（/blind/）
 │   ├── story_state.py   # 故事状态引擎
 │   ├── relations.py     # 角色关系
@@ -94,14 +95,22 @@ app/
 │   ├── outline_templates.py # 大纲模板库 API
 │   └── llm_settings.py  # LLM 厂商配置 API（厂商 CRUD + 拉取模型 + 勾选）
 │
-├── services/            # 业务逻辑 (9 个模块 + 5 个含 API 的服务)
+├── services/            # 业务逻辑 (18 个模块 + 6 个含 API 的服务)
 │   ├── prompt_builder/  # 提示词构建 (子包)
 │   │   ├── __init__.py  # 统一导出 + DEFAULT_WRITER_CONSTRAINTS
 │   │   ├── context.py   # 模板加载 + 上下文组装
 │   │   ├── writer.py    # Writer 类提示词
 │   │   ├── review.py    # Review 类提示词
-│   │   └── keepers.py   # Keeper + Editor 类提示词
+│   │   └── keepers.py   # Keeper + Editor 类提示词（仅供停用的 pipeline 使用）
 │   ├── llm.py           # 统一 LLM 调用层 (langchain-openai)
+│   ├── writer_chain.py  # 写作链公共层：写作包 build_writer_kwargs + 生成流 generation_tokens（generate-stream 与编排器共用）
+│   ├── chapter_runner.py # 一键本章编排器：大纲→正文→门禁→收敛→人工闸门（P3）
+│   ├── chapter_approval.py # 章节审批事务单一真源（Web/MCP/CLI 共用：空内容拒绝 + 摘要兜底 + 结构化记忆 + create_version_record）
+│   ├── tone_convergence.py # 去AI味收敛回滚环 + 字数超标压缩（A2/A5）
+│   ├── perplexity_radar.py # 困惑度雷达：logprobs 逐句 ppl（选词分布层检测）
+│   ├── consistency_check.py # 一致性链：确定性三查 + Keepers 裁决者（P2）
+│   ├── opinions.py      # 统一意见 Schema：Critic 分项 + 双盲审意见降维合并（P1）
+│   ├── extraction_queue.py # 抽取待确认队列（A4：错抽不落真源）
 │   ├── deai_agent.py    # 去 AI 化处理逻辑（词汇层替换；比喻简化规则已按语料研究停用）
 │   ├── deai_patterns.py # 120+ 禁用模式数据
 │   ├── ai_metric.py     # 篇章层 AI 痕迹检测（10 项对照语料验证规则 + 统计指标，零 LLM）
@@ -165,16 +174,30 @@ app/
 - 实现位置：`app/routes/generate.py:17` (`_stream_to_sse`)
 - 客户端使用 `fetch` + ReadableStream 接收
 
-### 多 Agent 协作
-- **Writer** (章节生成) → **Critic + 4 Keepers** (并行评审) → **Editor** (润色)
+### 评审链路（现行：统一评审 = Critic + 双盲审）
+- **统一评审 `unified_review()`**（`/api/unified-review`，写作页一键入口）：Critic 结构化评分（历史可比）→ 阎浮×白骨双盲审并行 → 合并报告 → 可选自动改写
+- **单步 API 保留**：`/review-stream`（单 Critic 流式）、`/unified-review-stream` 同样无前端调用方，属高级手动 API
 - 每个 Agent 调用时传入 `agent_type` 参数使用各自的模型配置
-- Keepers: Character Keeper, Lore Keeper, Foreshadow Keeper
+- **已停用**：多 Agent 流水线（Writer → Critic + 4 Keepers 并行 → Editor，`app/routes/pipeline.py`）——blueprint 仍注册但零调用，Keeper/Editor 提示词（`keepers.py`）仅它使用；如需恢复需先重新接线
+- **协同规划（P1-P4 已实施）**：缺口清单、四条链拓扑与契约见 `docs/agent-collaboration.md`
+- **统一意见 Schema（P1）**：`opinions.py` 把 Critic 分项 + 阎浮/白骨意见降维合并；unified_review 返回 `merged_opinions`；评审面板可勾选，「重写」携带勾选意见经 `opinions_block` 注入改写链
+- **一致性链（P2）**：`consistency_check.py` 确定性三查（时序真相旧值回潮/伏笔排期脱班/已回收复现）→ 疑点才交 character/lore/foreshadow_check 裁决（只裁疑点不重读全文）；`POST /api/consistency-check` + 写作页「一致性核查」；抽取待确认队列 `PendingExtraction`（truths/extract `queue=1` 入队，核验采纳才落真相库）
+- **编排器（P3）**：写作链公共层 `writer_chain.py`（写作包 `build_writer_kwargs` + 生成流 `generation_tokens`，generate-stream 与编排器共用）；`chapter_runner.run_chapter_pipeline` = 缺大纲生成 → 正文 → 门禁 → 收敛 → 停在人工闸门；`POST /api/chapter-pipeline` + MCP `run_chapter_pipeline` + 写作页「一键本章」；版本创建三入口统一走 `chapter_approval.create_version_record`
+- **写作包与备忘录（P4）**：`Novel.style_memo_json` 审批时经 memory agent 累积文体要点（保留 10 条），写作包注入最近 3 条；创作偏好档案（`Setting:creator_preferences`，设置页卡片）作为长期约束注入写作链
 
 ### 长篇上下文注入（相关性驱动）
+- **创作罗盘**（借鉴 OpenWrite）：`Novel.author_intent`（全书承诺，长期不变，≤500 字）+ `current_focus`（阶段目标，手动更新，≤300 字）；经 `build_compass_block` 单点拼装，注入 writer/outline/rewrite/focus 四条生成链路的最高优先位置；上下文压缩永不裁罗盘；章节列表页「创作罗盘」卡编辑（`POST /novel/<id>/compass`）
+- **上下文预算渐进压缩**（借鉴 OpenWrite 稳定优先级）：`apply_context_budget(kw, budget=14000字符)` 超预算时按 远章概要→近章摘要(逐章降级)→世界观补充(截断)→语义检索记忆(截半)→角色次要字段(外貌/背景/弧光) 顺序收缩；罗盘/boundary_context(信息边界+时序真相)/上章结尾/本章大纲/特别指示/伏笔/因果链永不压缩
+- **@skill-id 按需启用**：特别指示里 `@chapter_hook` 语法临时附加技能（仅本次调用生效，不改全局激活状态）；只摘除已注册技能 id，未知 @词原样保留，邮箱类不误判；writer/rewrite 链路支持
+- **审批事务单一真源**：`chapter_approval.approve_chapter_version()` — 空内容拒绝 + 摘要兜底（LLM 失败截正文开头 300 字）+ 结构化记忆，Web(`/api/approve`) / MCP(`approve_chapter`) / CLI(`chapter approve`) 三入口共用；generate_summary=False 时仅标记 approved（MCP/CLI 历史语义）
+- **大纲失配标记**（merge-assessment A1v1）：`chapters.outline_hash` 记录生成正文时的大纲指纹（Web save-version / MCP save_chapter_content 双入口打点）；大纲事后变更 → `outline_stale()` 为真，章节列表页与写作页显示「⚠ 大纲已变更」徽标
+- **去AI味收敛回滚环**（A2）：`tone_convergence.converge_tone()` — ai_metric 检测 → 违规指令定向重写 → 复测 → 人味分不升自动回滚保留原稿（绝不保留更差版本）；`POST /api/tone-converge`，写作页「AI味收敛」按钮
+- **字数超标压缩**（A5）：`condense_text()` — 超目标 1.3 倍触发，保留情节节拍/对话/因果，压描写冗余；`POST /api/condense`，写作页「压缩超标」按钮（与「不足续写」对偶成字数双向保障）
+- **锚例反向提取**（A3）：人工版本审批时 `extract_anchor_candidate()` 返回文风锚例候选（含对话段落优先，零 LLM 成本），前端确认后经 `/api/style-anchor` 入库——用户改稿直接转化为生成质量
 - **出场角色勾选**：写作页右侧「本章出场角色」面板勾选登场角色，生成时只注入选中角色档案（减少无关设定稀释注意力）；全不勾 = 不注入任何角色档案；参数缺省（旧流程/MCP）= 全部角色
 - **分层记忆**：上一章结尾原文 ~800 字（保障文风与钩子衔接）-> 近 3 章详细摘要 -> 更早章节合并压缩概要（>600 字截断），不再全量线性注入
 - **摘要兜底**：`ChapterSummary` 只在审批时生成；生成前情提要时对无摘要章节自动截取正文开头 300 字做粗摘要
-- **注入顺序**（`build_writer_prompt`）：约束(system) > 小说名称 > 小说类型 > 简介 > 世界观 > 大纲树规划 > 世界观补充 > 出场角色 > 上一章结尾 > 近章摘要 > 远章概要 > 待回收伏笔 > 因果链 > 相关记忆 > 章节标题 > 本章大纲 > 特别指示(末尾最高优先)
+- **注入顺序**（`build_writer_prompt`）：约束(system) > 小说名称 > 小说类型 > 简介 > 创作罗盘 > 世界观 > 大纲树规划 > 世界观补充 > 出场角色 > 上一章结尾 > 近章摘要 > 远章概要 > 待回收伏笔 > 因果链 > 相关记忆 > 信息边界与既定事实 > 章节标题 > 本章大纲 > 特别指示(末尾最高优先)
 - **伏笔全态注入**：「待回收伏笔」注入全部未回收状态（open/planned/buried/advancing/reclaimable），仅排除 resolved/abandoned，渲染附标题+埋设章+状态
 - **职责分离去重**：结构化上下文（摘要/伏笔）由 `assemble_chapter_context` 统一负责；`memory_context` 只做 FTS 语义检索，不再重复注入摘要和伏笔
 - **FTS 中文检索**：unicode61 分词器不识别 CJK 词边界，`_cjk_tokenize` 对索引/查询两侧中文逐字加空格实现按字检索；`_sanitize_fts_query` 按字短语 OR 连接支持纯中文大纲查询召回。**重建索引**后旧数据才可被检索（`POST /api/novel/{id}/memory/index`）
@@ -202,6 +225,7 @@ app/
 - **示例锚定：** 内置技能采用「短规则 + ❌AI味/✅技巧写法 中文对照锚例」结构（实证依据：规则+对照例执行率远高于纯规则堆叠）；协议包技能（江南等）自带完整文件协议不受影响
 - **质量门禁 (skill_gate)：** 生成完成后对全文做确定性校验（正则/统计，零 LLM 成本），按当前激活技能选择性检查——对话修饰语、跨句同构排比（句内排比实测人类更高频，不判）、首先其次模板、段末升华、直述情绪标签、抽象感官词；违规带原文摘录，前端在生成结果下方渲染报告；API `POST /api/skills/gate-check` 传 JSON `{text}`
 - **篇章 AI 痕迹检测 (ai_metric)：** 基于 283 万字对照语料研究（`docs/ai-tone-research.md`）的 10 项特征确定性检测——段首零回指评论(R=4.4)、拟人化理想化喻体(7.3)、提示语冒号(3.8)、破折号揭晓式(DeepSeek 高发)、译文腔四种、翻案腔(3.4)、相邻句结构同款(密度/百段)、跨段措辞重复(词汇分布指纹，逐节点生成主要病灶)、顿号并列过密(1.8)、禁用起手式(3.2)；输出 0-100 人味分 + 违规摘录 + 统计指标；随 gate-check 一并返回，长篇/短篇写作页渲染；只检测不修改；检测结果经 `build_tone_instructions()` 转为修正指令自动注入三条生成链路（长篇章节/短篇逐节点/评审重写），二次生成时定向避开构式指纹；阈值含朱雀实测校准点（见 docs 记录表）
+- **困惑度雷达 (perplexity_radar)：** 选词分布层检测（ai_metric 构式层不覆盖，对应朱雀第一维信号）——用厂商 logprobs 拿逐 token 对数概率（temperature=0 逐字复述 + 顺序对齐，覆盖率<70% 分块跳过），聚合逐句 ppl 定位「选词过于可预测」的句子作为定向改写目标；gate-check `with_ppl=1` 显式开启（有调用成本，计分用 summary Agent 配置），厂商不支持自动降级为不可用；0.6×中位数的「过于顺滑」计分线待与朱雀分效果校准（`docs/ai-tone-research.md` §八，Phase 1c）
 
 ### 双盲审（两角色审评体系，替代旧 17 维审计）
 
@@ -215,7 +239,7 @@ app/
 - **铁律**：每条批评必须引用原文片段；禁止空泛形容词；夸奖最多一句且精确到句子
 - **判决**：每位编辑只给二值判决——追读 / 弃稿（不造数字分，诚实呈现）
 - **闭环**：审评可返还 Writer 生成第二稿 → 对第二稿再审 → 循环打磨；重写前可勾选采纳哪位编辑的意见
-- **职责边界**：盲审只管文笔与市场层；角色一致性/伏笔逻辑由 Keepers 流水线负责
+- **职责边界**：盲审只管文笔与市场层；角色一致性/伏笔逻辑由生成链路的上下文注入保障（因果链 + 伏笔状态注入 + 信息边界 + 时序真相），不依赖 Keepers 流水线（已停用）
 - **入口（归属写作上下文，不占顶级导航）**：网关首页「双盲审」特性卡 → 盲审工作台 `/blind/`（任选短篇/章节/自由文本）；长篇写作页「双盲审」按钮；短篇写作页侧边栏评审卡；两处写作页的存档提示均可点回工作台
 - **API**：`POST /api/blind-review/run`（kind=story/chapter/text）、`POST /api/blind-review/rewrite`（include_editors 可选过滤）、`GET /api/blind-review/latest`
 - **持久化**：独立 `BlindReview` 表（init_db 自动建表），kind+story_id/version_id+editors_json+verdict 判决
@@ -252,7 +276,7 @@ app/
 - **小说/章节/角色/世界观/伏笔/大纲/短篇** 全 CRUD
 - **质量审计：** `quick_audit`, `get_knowledge_context`
 
-### CLI (19 个命令组，免登录)
+### CLI (27 个命令组，免登录)
 ```bash
 python cli.py whoami                 # 查看当前用户（恒为默认管理员）
 

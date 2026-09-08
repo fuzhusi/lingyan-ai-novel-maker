@@ -119,20 +119,11 @@ def save_version(novel_id, chapter_number):
     prompt_used = request.form.get("prompt_used", "")
     model_params_json = request.form.get("model_params_json", "{}")
 
-    max_ver = db.session.query(db.func.max(ChapterVersion.version_number)).filter_by(chapter_id=chapter.id).scalar()
-    version_number = (max_ver or 0) + 1
-
-    version = ChapterVersion(
-        chapter_id=chapter.id,
-        version_number=version_number,
-        content=content,
-        source=source,
-        prompt_used=prompt_used,
-        model_params_json=model_params_json,
-    )
-    db.session.add(version)
-    db.session.commit()
-    return jsonify({"version_number": version_number, "id": version.id})
+    from app.services.chapter_approval import create_version_record
+    version = create_version_record(novel_id, chapter_number, content, source,
+                                    prompt_used=prompt_used,
+                                    model_params_json=model_params_json)
+    return jsonify({"version_number": version.version_number, "id": version.id})
 
 
 @chapter_bp.route("/chapter/<int:chapter_number>/version/<int:version_id>")

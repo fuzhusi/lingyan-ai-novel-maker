@@ -5,6 +5,7 @@
 from app.services.prompt_builder.context import (
     _section, _load_system_prompt, _load_constraints,
     DEFAULT_WRITER_CONSTRAINTS, assemble_chapter_context,
+    apply_context_budget, build_compass_block,
 )
 from app.services.prompt_builder.writer import (
     build_writer_prompt, build_outline_prompt,
@@ -20,6 +21,8 @@ from app.services.prompt_builder.keepers import (
 __all__ = [
     "DEFAULT_WRITER_CONSTRAINTS",
     "assemble_chapter_context",
+    "apply_context_budget",
+    "build_compass_block",
     "build_writer_prompt",
     "build_outline_prompt",
     "build_critic_prompt",

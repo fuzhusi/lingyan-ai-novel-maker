@@ -8,7 +8,7 @@
 
 ## 项目目标
 
-打造一套具备长期记忆、人物管理、世界观管理、伏笔管理、多 Agent 协同创作能力、按 Agent 类型灵活配置模型、单用户免登录的 AI 小说生成平台。支持长篇和短篇创作。
+打造一套具备长期记忆、人物管理、世界观管理、伏笔管理、双盲审两角色评审（统一评审 = Critic 结构化评分 + 阎浮×白骨并行盲审）、按 Agent 类型灵活配置模型、单用户免登录的 AI 小说生成平台。支持长篇和短篇创作。
 
 ## 版本演进
 
@@ -98,7 +98,7 @@
 
 入口页面，选择创作模式：
 
-- **长篇创作** — 多章节架构、人物管理、伏笔追踪、多 Agent 协作
+- **长篇创作** — 多章节架构、人物管理、伏笔追踪、双盲审评审
 - **短篇创作** — 灵感驱动、双 Agent 协作、一次成文
 
 ## 3.2 长篇系统
@@ -224,7 +224,10 @@ planned → buried → advancing → reclaimable → resolved
 
 # 4. Agent 架构
 
-## 4.1 多 Agent 流水线
+## 4.1 多 Agent 流水线（⚠ 已停用保留）
+
+> 状态：端点 `/api/pipeline/check`、`/api/pipeline/check-stream` 保留（blueprint 仍注册，HTTP 手动可达），
+> 但前端 / CLI / MCP / 测试零调用。现行评审链路见 4.3 双盲审与统一评审（`/api/unified-review`）。
 
 ```text
 Writer → [Critic | Character Keeper | Lore Keeper | Foreshadow Keeper] → Editor
@@ -769,11 +772,17 @@ CREATE TABLE settings (
 | `/api/review/feedback` | POST | 用户反馈 |
 | `/api/approve` | POST | 审批 |
 | `/api/diff` | GET | 版本对比 |
-| `/api/pipeline/check` | POST | 多 Agent 检查 |
-| `/api/pipeline/check-stream` | POST | 多 Agent 检查 (SSE) |
+| `/api/pipeline/check` | POST | 多 Agent 检查（已停用保留，无调用方） |
+| `/api/pipeline/check-stream` | POST | 多 Agent 检查 (SSE)（已停用保留，无调用方） |
 | `/api/blind-review/run` | POST | 双盲审（kind=story/chapter/text） |
 | `/api/blind-review/rewrite` | POST | 盲审意见返还 Writer 生成第二稿 |
 | `/api/blind-review/latest` | GET | 查询对象最近一次盲审 |
+| `/api/tone-converge` | POST | 去AI味收敛回滚环（检测→定向重写→复测，不升回滚） |
+| `/api/condense` | POST | 字数超标压缩（保留情节节拍，压描写冗余） |
+| `/api/consistency-check` | POST | 一致性链：确定性三查 → 可选 Keepers 裁决（P2） |
+| `/api/chapter-pipeline` | POST | 一键本章流水线：大纲→正文→门禁→收敛→人工闸门（P3，同步长请求） |
+| `/api/creator-preferences` | GET/POST | 创作偏好档案（`/settings` 前缀，注入全部写作链） |
+| `/novels/<id>/pending-extractions` | GET | 抽取待确认队列（A4，核验后才落真源） |
 | `/api/novels/<id>/story-state` | GET/PUT | 故事状态 |
 | `/api/novels/<id>/relations` | GET/POST | 角色关系 |
 | `/api/novels/<id>/causal-chain/extract` | POST | 因果链提取 |

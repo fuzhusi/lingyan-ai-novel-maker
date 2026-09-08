@@ -1,18 +1,17 @@
 import json
-from flask import Blueprint, request, Response, current_app
+from flask import Blueprint, request, Response, jsonify, current_app
 from app.services.prompt_builder import (
-    build_writer_prompt, assemble_chapter_context, build_outline_prompt
+    build_outline_prompt, build_writer_prompt, assemble_chapter_context,
 )
-from app.services.llm import stream_llm_tokens, LLMError
+from app.services.writer_chain import (
+    build_writer_kwargs, generation_tokens,
+    CHAPTER_WORD_TARGET,
+)
+from app.services.llm import LLMError
 from app.models import db, Novel, Character, Chapter
 from app.config_utils import get_effective_config
 
 generate_bp = Blueprint("generate", __name__, url_prefix="/api")
-
-# 章节字数保障：目标约 2500 字，低于底线自动续写补足（对齐短篇的续写模式）
-CHAPTER_WORD_TARGET = 2500
-CHAPTER_WORD_FLOOR = 2000
-CHAPTER_MAX_CONTINUE_ROUNDS = 3
 
 
 def _sse_event(data: dict) -> str:
@@ -22,50 +21,15 @@ def _sse_event(data: dict) -> str:
 def _stream_to_sse(messages, cfg, word_target=None):
     """Shared streaming helper — yields SSE event strings.
 
-    word_target: 传入时启用字数保障——流结束后正文不足 CHAPTER_WORD_FLOOR
+    word_target: 传入时启用字数保障——流结束后正文不足字数底线
     则携带前文尾部自动续写，续写 token 继续推入同一 SSE 流。
+    生成逻辑（含续写轮）在 writer_chain.generation_tokens，与编排器共用。
     """
     collected = []
-
-    def _single_round(msgs, max_tokens):
-        for token in stream_llm_tokens(
-            model=cfg["model_name"],
-            messages=msgs,
-            api_key=cfg.get("api_key", ""),
-            base_url=cfg.get("base_url", ""),
-            provider_type=cfg.get("provider_type", "deepseek"),
-            temperature=cfg.get("temperature", 0.8),
-            max_tokens=max_tokens,
-            frequency_penalty=cfg.get("frequency_penalty"),
-            presence_penalty=cfg.get("presence_penalty"),
-        ):
+    try:
+        for token in generation_tokens(messages, cfg, word_target=word_target):
             collected.append(token)
             yield _sse_event({"token": token})
-
-    try:
-        for event in _single_round(messages, cfg.get("max_tokens", 4096)):
-            yield event
-        # 字数保障：仅章节生成传入 word_target 时启用
-        if word_target:
-            rounds = 0
-            while len("".join(collected)) < CHAPTER_WORD_FLOOR and rounds < CHAPTER_MAX_CONTINUE_ROUNDS:
-                rounds += 1
-                full = "".join(collected)
-                remaining = word_target - len(full)
-                yield _sse_event({"token": "\n\n"})
-                continue_messages = [
-                    {"role": "system", "content": (
-                        "你正在续写一章小说。直接接续前文写下去，"
-                        "不要重复已有内容，不要总结前文，不要输出任何说明文字。"
-                    )},
-                    {"role": "user", "content": (
-                        f"【本章已写内容（结尾部分）】\n{full[-3000:]}\n\n"
-                        f"【要求】从上文断点直接继续，自然推进本章大纲中的情节，"
-                        f"还需写约 {max(remaining, 500)} 字。"
-                    )},
-                ]
-                for event in _single_round(continue_messages, min(remaining * 2, 16000)):
-                    yield event
         yield _sse_event({"done": True, "full_text": "".join(collected)})
     except LLMError as e:
         yield _sse_event({"error": str(e), "full_text": "".join(collected)})
@@ -82,103 +46,22 @@ def generate_stream():
     novel_id = request.form.get("novel_id", type=int)
     chapter_number = request.form.get("chapter_number", type=int)
 
-    kw = {}
-    if novel_id and chapter_number:
-        # 出场角色勾选（前端角色库勾选区）：逗号分隔的角色 id
-        # None/缺省 = 全部角色（兼容旧流程与 MCP）；显式空串 = 不注入任何角色档案
-        character_ids = None
-        raw_ids = request.form.get("character_ids")
-        if raw_ids is not None and raw_ids.strip():
-            try:
-                character_ids = [int(x) for x in raw_ids.split(",") if x.strip()]
-            except ValueError:
-                character_ids = None
-        elif raw_ids is not None:
-            character_ids = []
-
-        ctx = assemble_chapter_context(novel_id, chapter_number, db, character_ids=character_ids)
-        kw = {
-            "characters": ctx["characters"],
-            "world_settings": ctx["world_settings"],
-            "summaries": ctx["summaries"],
-            "earlier_summaries": ctx["earlier_summaries"],
-            "prev_ending": ctx["prev_ending"],
-            "foreshadowing_items": ctx["foreshadowing_items"],
-            "synopsis": ctx["synopsis"],
-            "world_intro": ctx["world_intro"],
-            "genre": ctx["genre"],
-            "outline_node_context": ctx["outline_node_context"],
-        }
-
-        # Causal chain context from previous chapters
+    # 出场角色勾选（前端角色库勾选区）：逗号分隔的角色 id
+    # None/缺省 = 全部角色（兼容旧流程与 MCP）；显式空串 = 不注入任何角色档案
+    character_ids = None
+    raw_ids = request.form.get("character_ids")
+    if raw_ids is not None and raw_ids.strip():
         try:
-            from app.services.causal_chain import get_chain_context, format_chain_for_prompt
-            chains = get_chain_context(novel_id, chapter_number)
-            kw["causal_chain"] = format_chain_for_prompt(chains)
-        except Exception:
-            pass
+            character_ids = [int(x) for x in raw_ids.split(",") if x.strip()]
+        except ValueError:
+            character_ids = None
+    elif raw_ids is not None:
+        character_ids = []
 
-        # Vector memory context
-        try:
-            from app.services.vector_memory import build_context_for_chapter
-            kw["memory_context"] = build_context_for_chapter(novel_id, chapter_number, outline)
-        except Exception:
-            pass
-
-        # Information boundary context
-        try:
-            from app.services.info_boundary import format_knowledge_boundaries
-            boundary_ctx = format_knowledge_boundaries(novel_id, chapter_number)
-            if boundary_ctx:
-                existing = kw.get("memory_context", "")
-                kw["memory_context"] = (existing + "\n\n" + boundary_ctx).strip()
-        except Exception:
-            pass
-
-        # Temporal truth context
-        try:
-            from app.services.temporal_truth import format_truths_for_prompt
-            truth_ctx = format_truths_for_prompt(novel_id, chapter_number)
-            if truth_ctx:
-                existing = kw.get("memory_context", "")
-                kw["memory_context"] = (existing + "\n\n" + truth_ctx).strip()
-        except Exception:
-            pass
-
-        # Style fingerprint
-        try:
-            from app.services.style_fingerprint import load_style, format_style_for_prompt, format_anchor_for_prompt
-            style = load_style()
-            if style:
-                style_ctx = format_style_for_prompt(style)
-                if style_ctx:
-                    existing = kw.get("memory_context", "")
-                    kw["memory_context"] = (existing + "\n\n" + style_ctx).strip()
-            anchor_ctx = format_anchor_for_prompt()
-            if anchor_ctx:
-                existing = kw.get("memory_context", "")
-                kw["memory_context"] = (existing + "\n\n" + anchor_ctx).strip()
-        except Exception:
-            pass
-
-        # 行文指纹修正指令：基于近期章节正文的 AI 痕迹检测（降 AI 率闭环）
-        try:
-            from app.services.ai_metric import build_tone_instructions
-            recent = (Chapter.query
-                      .filter(Chapter.novel_id == novel_id,
-                              Chapter.chapter_number < chapter_number)
-                      .order_by(Chapter.chapter_number.desc())
-                      .limit(2).all())
-            sample_text = "\n\n".join(ch.content or "" for ch in reversed(recent))
-            if len(sample_text.strip()) >= 500:
-                tone_inst = build_tone_instructions(sample_text[-15000:])
-                if tone_inst:
-                    kw["tone_instructions"] = tone_inst
-        except Exception:
-            pass
-
-        # Active skills — 已移至 writer.py 的 system message 中注入
-        # 不再在 memory_context 中注入技能提示
+    # 写作包：上下文组装/预算压缩/锚例/罗盘/tone 指令/备忘录统一在 writer_chain
+    kw, novel = build_writer_kwargs(novel_id, chapter_number, outline,
+                                    user_directive=user_directive,
+                                    character_ids=character_ids)
 
     messages = build_writer_prompt(
         novel_title=novel_title,
@@ -189,7 +72,6 @@ def generate_stream():
         **kw,
     )
 
-    novel = Novel.query.get(novel_id) if novel_id else None
     cfg = get_effective_config(novel, agent_type="writer")
     return Response(_stream_to_sse(messages, cfg, word_target=CHAPTER_WORD_TARGET),
                     mimetype="text/event-stream")
@@ -212,6 +94,8 @@ def outline_stream():
             "characters": ctx["characters"],
             "summaries": ctx["summaries"],
             "foreshadowing_items": ctx["foreshadowing_items"],
+            "author_intent": ctx["author_intent"],
+            "current_focus": ctx["current_focus"],
         }
 
     messages = build_outline_prompt(
@@ -246,6 +130,14 @@ def focus_generate_stream():
         f"根据以下场景和角色设定，写出一段聚焦于该角色的小说片段。"
         f"要深入展现该角色的内心世界、性格特征和行为方式。"
     )
+    # 创作罗盘（与其他三条链路共用同一拼装 helper，防止文案漂移）
+    try:
+        from app.services.prompt_builder.context import build_compass_block
+        compass = build_compass_block(novel.author_intent, novel.current_focus)
+        if compass:
+            system_prompt += "\n\n" + compass
+    except Exception:
+        pass
     try:
         from app.services.style_fingerprint import format_anchor_for_prompt
         anchor_ctx = format_anchor_for_prompt()
@@ -305,3 +197,27 @@ def focus_generate_stream():
 
     cfg = get_effective_config(novel, agent_type="writer")
     return Response(_stream_to_sse(messages, cfg), mimetype="text/event-stream")
+
+
+@generate_bp.route("/chapter-pipeline", methods=["POST"])
+def chapter_pipeline():
+    """一键本章流水线（P3）：缺大纲生成 → 正文 → 门禁 → 收敛（回滚兜底）→ 人工闸门。
+
+    同步长请求（整章生成，数十秒级）。Body JSON:
+    {"novel_id", "chapter_number", "user_directive"?, "auto_save"?}
+    auto_save=True 时落 AI 版本（仍不自动审批）。
+    """
+    data = request.get_json(silent=True) or {}
+    novel_id = data.get("novel_id") or request.form.get("novel_id", type=int)
+    chapter_number = (data.get("chapter_number")
+                      or request.form.get("chapter_number", type=int))
+    if not novel_id or not chapter_number:
+        return jsonify({"error": "novel_id / chapter_number required"}), 400
+    from app.services.chapter_runner import run_chapter_pipeline
+    result = run_chapter_pipeline(
+        novel_id, chapter_number,
+        user_directive=data.get("user_directive")
+        or request.form.get("user_directive", ""),
+        auto_save=bool(data.get("auto_save")),
+    )
+    return jsonify(result)

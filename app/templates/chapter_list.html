@@ -25,6 +25,35 @@
             {% if novel.synopsis %}<span style="font-size:0.85rem;color:var(--text-dim)">{{ novel.synopsis[:150] }}{% if novel.synopsis|length > 150 %}&hellip;{% endif %}</span>{% endif %}
         </div>
         {% endif %}
+
+        <!-- 创作罗盘：全书承诺 + 阶段目标 -->
+        <details style="margin-bottom:1.25rem;" {% if not novel.author_intent and not novel.current_focus %}{% else %}open{% endif %}>
+            <summary style="cursor:pointer;color:var(--accent);font-weight:600;margin-bottom:0.5rem;">
+                创作罗盘
+                {% if novel.author_intent or novel.current_focus %}
+                <span style="font-size:0.75rem;color:var(--success);margin-left:0.4rem">● 已设定</span>
+                {% else %}
+                <span style="font-size:0.75rem;color:var(--text-faint);margin-left:0.4rem">未设定（建议填写，防止长篇写歪）</span>
+                {% endif %}
+            </summary>
+            <form method="POST" action="/novel/{{ novel.id }}/compass" style="background:var(--bg);padding:1rem;border-radius:var(--radius);border:1px solid var(--border);">
+                <div style="margin-bottom:0.75rem;">
+                    <label style="font-size:0.85rem;color:var(--text-dim);display:block;margin-bottom:0.3rem;">
+                        作者意图 — 全书承诺（长期不变，注入每一次生成的最高优先位置，≤500 字）
+                    </label>
+                    <textarea name="author_intent" rows="3" maxlength="500" style="width:100%;font-size:0.9rem;font-family:inherit;"
+                        placeholder="这本书最终要兑现什么？例如：复仇故事的外壳下写救赎；主角始终不杀人；全程无系统金手指；悲壮结局但不虐读者...">{{ novel.author_intent or "" }}</textarea>
+                </div>
+                <div style="margin-bottom:0.75rem;">
+                    <label style="font-size:0.85rem;color:var(--text-dim);display:block;margin-bottom:0.3rem;">
+                        当前重心 — 本阶段目标（随剧情推进手动更新，≤300 字）
+                    </label>
+                    <textarea name="current_focus" rows="2" maxlength="300" style="width:100%;font-size:0.9rem;font-family:inherit;"
+                        placeholder="最近几章在写什么？例如：第二卷收尾，把北境三条伏笔收回两条，主角与女主关系推进到决裂边缘...">{{ novel.current_focus or "" }}</textarea>
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm">保存罗盘</button>
+            </form>
+        </details>
         
         <!-- 导出区域 -->
         <details style="margin-bottom:1.25rem;">
@@ -79,6 +108,7 @@
                 <span class="ch-outline-ref">&#x1F4CB; {{ outline_nodes[ch.outline_node_id].title }}</span>
                 {% endif %}
                 <span class="ch-versions">{{ ch.versions|length }} 个版本</span>
+                {% if ch.outline_stale() %}<span style="font-size:0.75rem;color:#c9862b">&#x26A0; 大纲已变更，正文待重生成</span>{% endif %}
             </a>
             <form method="POST" action="/novel/{{ novel.id }}/chapter/{{ ch.chapter_number }}/delete"
                   onsubmit='return confirm("确定删除第 {{ ch.chapter_number }} 章「" + {{ (ch.title or "无标题")|tojson }} + "」及其所有版本和评审数据？")'

@@ -74,6 +74,21 @@ def create_novel():
     return redirect(url_for("novel.index"))
 
 
+@novel_bp.route("/novel/<int:novel_id>/compass", methods=["POST"])
+def save_compass(novel_id):
+    """保存创作罗盘：作者意图（全书承诺）+ 当前重心（阶段目标）。
+
+    罗盘注入每一次生成且豁免上下文压缩，必须限长，防止长文本无界膨胀 prompt。
+    """
+    MAX_AUTHOR_INTENT = 500
+    MAX_CURRENT_FOCUS = 300
+    novel = Novel.query.get_or_404(novel_id)
+    novel.author_intent = request.form.get("author_intent", "").strip()[:MAX_AUTHOR_INTENT]
+    novel.current_focus = request.form.get("current_focus", "").strip()[:MAX_CURRENT_FOCUS]
+    db.session.commit()
+    return redirect(url_for("chapter.chapter_list", novel_id=novel_id))
+
+
 @novel_bp.route("/novel/<int:novel_id>/delete", methods=["POST"])
 def delete_novel(novel_id):
     novel = Novel.query.get_or_404(novel_id)

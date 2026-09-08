@@ -10,15 +10,16 @@ def _section(title, content):
     return f"【{title}】\n{content}"
 
 
-def get_skill_prompt(task_type="write"):
+def get_skill_prompt(task_type="write", extra_skills=None):
     """获取活跃技能提示词（供所有 prompt builder 共用）。
 
+    extra_skills: @skill-id 语法解析出的临时附加技能（仅本次调用生效）。
     失败时记录警告并返回空串——技能注入永远不能阻断生成，
     但静默吞错会让"生成没用技能"这类问题无从排查。
     """
     try:
         from app.services.skill_system import build_skill_prompt
-        return build_skill_prompt(task_type=task_type)
+        return build_skill_prompt(task_type=task_type, extra_skills=extra_skills)
     except Exception:
         logger.warning("build_skill_prompt(%s) failed, skills skipped", task_type,
                        exc_info=True)
@@ -196,4 +197,112 @@ def assemble_chapter_context(novel_id, chapter_number, db, character_ids=None):
         "genre": novel.genre if novel else "",
         "synopsis": novel.synopsis if novel else "",
         "world_intro": novel.world_intro if novel else "",
+        "author_intent": (novel.author_intent or "") if novel else "",
+        "current_focus": (novel.current_focus or "") if novel else "",
     }
+
+
+# ---------------------------------------------------------------------------
+# 上下文预算渐进压缩（借鉴 OpenWrite 的稳定优先级压缩思路）
+# ---------------------------------------------------------------------------
+
+# 默认输入预算（字符数，非 token；中文 1 字 ≈ 1 token，1 字符 = 1 字，留余量）
+DEFAULT_CONTEXT_BUDGET = 14000
+
+
+def build_compass_block(author_intent="", current_focus="", verb="写作时必须兑现"):
+    """创作罗盘提示块。writer / outline / rewrite / focus 四条链路共用，
+    标签文案单点维护，防止多处手拼逐渐漂移。
+
+    verb: 按链路定制的意图动词（写作时必须兑现 / 修改时必须保持 / 大纲必须服务于此）。
+    两项皆空返回空串，调用方按 falsy 跳过。罗盘不参与 apply_context_budget 压缩。
+    """
+    parts = []
+    intent = (author_intent or "").strip()
+    focus = (current_focus or "").strip()
+    if intent:
+        parts.append(f"【作者意图 — 全书承诺，{verb}】\n{intent}")
+    if focus:
+        parts.append("【当前重心 — 本阶段最高优先级目标】\n" + focus)
+    if not parts:
+        return ""
+    return _section("创作罗盘", "\n\n".join(parts))
+
+
+def apply_context_budget(kw, budget=DEFAULT_CONTEXT_BUDGET):
+    """按稳定优先级渐进收缩上下文，超预算时长记忆先让路。
+
+    收缩顺序（先动最可牺牲的，与 OpenWrite 的渐进压缩哲学一致）：
+      1. earlier_summaries  远章概要（粗粒度，全删影响最小）
+      2. summaries          近章摘要（3 章 -> 2 章 -> 1 章）
+      3. world_settings     世界观补充设定（保留分类标题，砍内容长度）
+      4. memory_context     语义检索记忆（FTS 召回是补充性的）
+      5. characters         角色档案（砍次要字段，保姓名/性格/动机）
+
+    永不收缩：创作罗盘（author_intent/current_focus）、boundary_context（信息边界
+    + 时序真相，一致性红线）、prev_ending（文风衔接）、本章大纲、特别指示、
+    伏笔、因果链——这些是"作者意图 + 当前任务 + 精确事实"层。
+    返回收缩日志字符串（无收缩返回空串），便于调试与前端提示。
+    """
+    import json as _json
+
+    def _size():
+        n = 0
+        n += len(_json.dumps(kw.get("summaries") or [], ensure_ascii=False))
+        n += len(kw.get("earlier_summaries") or "")
+        n += len(_json.dumps(kw.get("world_settings") or [], ensure_ascii=False))
+        n += len(_json.dumps(kw.get("characters") or [], ensure_ascii=False))
+        n += len(kw.get("memory_context") or "")
+        return n
+
+    log = []
+    if _size() <= budget:
+        return ""
+
+    # 1) 远章概要整体让路
+    if kw.get("earlier_summaries"):
+        log.append("远章概要已裁剪（超上下文预算）")
+        kw["earlier_summaries"] = ""
+        if _size() <= budget:
+            return "; ".join(log)
+
+    # 2) 近章摘要逐级降数量（3 -> 2 -> 1 -> 0）
+    summaries = kw.get("summaries") or []
+    while summaries and _size() > budget:
+        dropped = summaries.pop(0)  # 丢最旧的一章
+        log.append(f"近章摘要裁掉第{dropped.get('chapter_number', '?')}章")
+    if _size() <= budget:
+        kw["summaries"] = summaries
+        return "; ".join(log)
+
+    # 3) 世界观补充设定：每条内容截断到 200 字
+    ws = kw.get("world_settings") or []
+    for item in ws:
+        content = item.get("content") or ""
+        if len(content) > 200:
+            item["content"] = content[:200] + "……"
+    if ws:
+        log.append("世界观补充设定已截断")
+        kw["world_settings"] = ws
+        if _size() <= budget:
+            return "; ".join(log)
+
+    # 4) 语义检索记忆截半
+    mc = kw.get("memory_context") or ""
+    if mc:
+        kw["memory_context"] = mc[:len(mc) // 2] + "\n……（检索记忆已压缩）"
+        log.append("语义检索记忆已压缩")
+        if _size() <= budget:
+            return "; ".join(log)
+
+    # 5) 角色档案：砍次要字段（外貌/背景/弧光），保姓名/性格/说话风格/动机/状态
+    chars = kw.get("characters") or []
+    minor_fields = ("appearance", "background", "arc_direction")
+    if chars:
+        for c in chars:
+            for f in minor_fields:
+                c[f] = ""
+        log.append("角色档案次要字段已裁剪")
+        kw["characters"] = chars
+
+    return "; ".join(log)

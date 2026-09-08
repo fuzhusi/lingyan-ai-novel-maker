@@ -30,9 +30,10 @@ AGENT_TYPES = {
     # 深度分析类 (V4 Pro)
     "critic":            {"name": "评审",         "group": "deep", "recommended_model": "deepseek-v4-pro"},
     "rewrite":           {"name": "改写",         "group": "deep", "recommended_model": "deepseek-v4-pro"},
-    "character_check":   {"name": "角色检查",     "group": "deep", "recommended_model": "deepseek-v4-pro"},
-    "lore_check":        {"name": "世界观检查",   "group": "deep", "recommended_model": "deepseek-v4-pro"},
-    "foreshadow_check":  {"name": "伏笔检查",     "group": "deep", "recommended_model": "deepseek-v4-pro"},
+    # 以下三个为一致性链「裁决者」预留配置（P2 前 no-op，见 docs/agent-collaboration.md）
+    "character_check":   {"name": "角色检查（预留·一致性裁决者）",   "group": "deep", "recommended_model": "deepseek-v4-pro"},
+    "lore_check":        {"name": "世界观检查（预留·一致性裁决者）", "group": "deep", "recommended_model": "deepseek-v4-pro"},
+    "foreshadow_check":  {"name": "伏笔检查（预留·一致性裁决者）",   "group": "deep", "recommended_model": "deepseek-v4-pro"},
     "editor":            {"name": "编辑润色",     "group": "deep", "recommended_model": "deepseek-v4-pro"},
     "audit":             {"name": "质量审计",     "group": "deep", "recommended_model": "deepseek-v4-pro"},
     "optimizer":         {"name": "全书优化",     "group": "deep", "recommended_model": "deepseek-v4-pro"},
@@ -153,6 +154,38 @@ def save_agent_settings():
                     db.session.delete(existing)
     db.session.commit()
     return redirect(url_for("settings.settings_page"))
+
+
+@settings_bp.route("/api/creator-preferences", methods=["GET"])
+def get_creator_preferences():
+    """创作偏好档案（P4）：长期有效的文风/禁忌/受众约束，注入全部写作链。"""
+    pref = Setting.query.get("creator_preferences")
+    import json as _json
+    data = {}
+    if pref and (pref.value or "").strip():
+        try:
+            data = _json.loads(pref.value)
+        except Exception:
+            data = {}
+    return jsonify(data)
+
+
+@settings_bp.route("/api/creator-preferences", methods=["POST"])
+def save_creator_preferences():
+    """保存创作偏好档案（JSON body: {style, taboos, audience}）。"""
+    import json as _json
+    data = request.get_json(silent=True) or {}
+    prefs = {k: (data.get(k) or "").strip()[:500]
+             for k in ("style", "taboos", "audience")}
+    value = _json.dumps(prefs, ensure_ascii=False)
+    s = Setting.query.get("creator_preferences")
+    if s:
+        s.value = value
+    else:
+        s = Setting(key="creator_preferences", value=value)
+        db.session.add(s)
+    db.session.commit()
+    return jsonify({"ok": True, "preferences": prefs})
 
 
 @settings_bp.route("/api/apply-recommended", methods=["POST"])

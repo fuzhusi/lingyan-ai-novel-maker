@@ -69,6 +69,22 @@ class Foreshadowing(db.Model):
     novel = db.relationship("Novel", backref="foreshadowing_items")
 
 
+class PendingExtraction(db.Model):
+    """抽取待确认队列（merge-assessment A4 / Agent 协同方案 P2）。
+
+    自动抽取的事实先进队列，人工核验采纳后才写回真源——防止错抽污染
+    一致性注入。kind: "truth"（时序真相）；后续 causal_chain 等接入复用。
+    """
+    __tablename__ = "pending_extractions"
+    id = db.Column(db.Integer, primary_key=True)
+    novel_id = db.Column(db.Integer, db.ForeignKey("novels.id"), nullable=False)
+    kind = db.Column(db.String(20), default="truth")
+    payload_json = db.Column(db.Text, default="{}")
+    chapter_number = db.Column(db.Integer, nullable=True)
+    status = db.Column(db.String(20), default="pending")  # pending/adopted/discarded
+    created_at = db.Column(db.String(20), default=now)
+
+
 class CharacterRelation(db.Model):
     """Multi-dimensional character relationship with dynamic evolution."""
     __tablename__ = "character_relations"

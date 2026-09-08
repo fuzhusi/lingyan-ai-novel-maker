@@ -3,6 +3,7 @@ import logging
 
 from app.services.prompt_builder.context import (
     _section, _load_system_prompt, DEFAULT_WRITER_CONSTRAINTS, get_skill_prompt,
+    build_compass_block,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,7 +97,8 @@ def build_summary_prompt(chapter_content="", novel_title="", db=None):
 
 
 def build_rewrite_prompt(original_content="", critic_feedback="", novel_title="",
-                         chapter_title="", outline="", user_directive="", db=None):
+                         chapter_title="", outline="", user_directive="", db=None,
+                         author_intent="", current_focus="", opinions_block=""):
     system_prompt = _load_system_prompt(db, "rewrite", (
         "你是一位专业的小说作家。根据评审意见修改你的作品，"
         "解决指出的问题，同时保持原文的优点。"
@@ -118,7 +120,12 @@ def build_rewrite_prompt(original_content="", critic_feedback="", novel_title=""
 - 只修复评审指出的具体问题，不要"美化"文字
 - 保持原文的人味，不要改得更"流畅优美"
 """
-    skill_prompt = get_skill_prompt("write")
+    # 特别指示里的 @skill-id：临时附加技能（仅本次生效）
+    from app.services.skill_system import parse_directive_skills
+    directive_clean, extra_skills = parse_directive_skills(user_directive)
+    if directive_clean != user_directive:
+        user_directive = directive_clean
+    skill_prompt = get_skill_prompt("write", extra_skills=extra_skills)
     if skill_prompt:
         full_system += "\n\n" + skill_prompt
     # 文风锚例
@@ -134,12 +141,19 @@ def build_rewrite_prompt(original_content="", critic_feedback="", novel_title=""
     blocks = []
     if novel_title:
         blocks.append(_section("小说名称", novel_title))
+    # 创作罗盘：改写也不能偏离全书承诺
+    compass = build_compass_block(author_intent, current_focus, verb="修改时必须保持")
+    if compass:
+        blocks.append(compass)
     if chapter_title:
         blocks.append(_section("章节标题", chapter_title))
     if outline:
         blocks.append(_section("本章大纲", outline))
     if user_directive:
         blocks.append(_section("特别指示", user_directive))
+    # 统一意见 Schema（P1）：勾选的合并意见逐条落实
+    if opinions_block:
+        blocks.append(_section("采纳的评审意见（逐条落实，修完为止）", opinions_block))
     blocks.append(_section("评审意见（务必修改）", critic_feedback))
     blocks.append(_section("原文", original_content))
     blocks.append("\n请根据评审意见输出修改后的完整章节正文。")

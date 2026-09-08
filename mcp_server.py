@@ -25,6 +25,7 @@ from app.models import (
     ChapterMemory, CharacterRelation, StoryState, StoryStateSnapshot,
     ShortStory, Setting,
 )
+from app.services.chapter_approval import approve_chapter_version, EmptyChapterError
 
 app = create_app()
 mcp = FastMCP("灵砚小说系统", instructions="AI小说创作系统的MCP接口，可以管理小说、章节、角色、世界观、伏笔等。")
@@ -174,8 +175,11 @@ def approve_chapter(novel_id: int, chapter_number: int) -> str:
             ChapterVersion.version_number.desc()).first()
         if not ver:
             return f"第{chapter_number}章暂无内容"
-        ver.approved = True
-        db.session.commit()
+        # 审批事务统一走服务层：空内容拒绝，与 Web/CLI 同源
+        try:
+            approve_chapter_version(ver, generate_summary=False)
+        except EmptyChapterError:
+            return f"第{chapter_number}章正文为空，拒绝审批"
         return f"已审批: 第{chapter_number}章 V{ver.version_number}"
 
 
@@ -186,16 +190,10 @@ def save_chapter_content(novel_id: int, chapter_number: int, content: str, sourc
         ch = Chapter.query.filter_by(novel_id=novel_id, chapter_number=chapter_number).first()
         if not ch:
             return f"第{chapter_number}章不存在"
-        max_ver = db.session.query(db.func.max(ChapterVersion.version_number)).filter_by(chapter_id=ch.id).scalar()
-        ver = ChapterVersion(
-            chapter_id=ch.id,
-            version_number=(max_ver or 0) + 1,
-            content=content,
-            source=source,
-        )
-        db.session.add(ver)
-        db.session.commit()
-        return f"已保存: 第{chapter_number}章 V{ver.version_number} ({len(content)}字)"
+        # 版本创建单一入口：清洗 + AI 后处理 + 大纲指纹（与 Web save-version 同源）
+        from app.services.chapter_approval import create_version_record
+        ver = create_version_record(novel_id, chapter_number, content, source)
+        return f"已保存: 第{chapter_number}章 V{ver.version_number} ({len(ver.content or '')}字)"
 
 
 # ---------------------------------------------------------------------------
@@ -502,6 +500,35 @@ def quick_audit(novel_id: int, chapter_number: int) -> str:
             f"字数变化: {stats['reduction_pct']}%\n"
             f"内容已变化: {'是' if original != processed else '否'}"
         )
+
+
+@mcp.tool()
+def run_chapter_pipeline(novel_id: int, chapter_number: int,
+                         user_directive: str = "", auto_save: bool = False) -> str:
+    """一键本章流水线：缺大纲则生成 → 正文 → 门禁 → 去AI味收敛（不升回滚）→ 停在人工审阅。
+
+    auto_save=True 时落 AI 版本（仍不自动审批）。长耗时（整章生成，数十秒级）。
+    """
+    with app.app_context():
+        from app.services.chapter_runner import run_chapter_pipeline
+        result = run_chapter_pipeline(novel_id, chapter_number,
+                                      user_directive=user_directive,
+                                      auto_save=auto_save)
+        if "error" in result:
+            return f"流水线失败：{result['error']}"
+        lines = []
+        for s in result.get("stages", []):
+            mark = "✓" if s.get("ok") else "✗"
+            extra = s.get("skipped") or s.get("action") or s.get("error") or ""
+            lines.append(f"  [{mark}] {s.get('stage', '?')} {extra}")
+        lines.append(f"人味分：{result.get('human_score')}")
+        if result.get("saved_version_id"):
+            lines.append(f"已保存版本 id={result['saved_version_id']}（未审批）")
+        else:
+            lines.append("停在人工闸门：正文已返回，请审阅后保存")
+        lines.append("—— 正文 ——")
+        lines.append(result.get("text", ""))
+        return chr(10).join(lines)
 
 
 # ---------------------------------------------------------------------------

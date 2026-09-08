@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """灵砚 CLI — 命令行操作小说系统。
 
 完整命令列表:
@@ -18,6 +18,12 @@
     约束: constraint show/status/toggle
     优化: optimize diagnose
     系统: sys info/backup/reset
+    罗盘: compass show/set
+    队列: queue list/adopt/discard
+    偏好: preferences show/set
+    去AI味: tone check/converge/radar
+    文风锚例: style-anchor view/set/toggle/preview
+    大纲模板: template-outline list/apply
 
 用法示例:
     python cli.py novel list
@@ -200,6 +206,8 @@ def cmd_novel(args):
             print(f"  类型: {novel.genre or '未设置'}")
             print(f"  简介: {novel.synopsis or '无'}")
             print(f"  世界观: {truncate(novel.world_intro, 80) or '无'}")
+            print(f"  作者意图: {truncate(novel.author_intent, 60) or '无'}")
+            print(f"  当前重心: {truncate(novel.current_focus, 60) or '无'}")
             print(f"  创建时间: {novel.created_at}")
             print(f"  ---")
             print(f"  章节: {ch}")
@@ -213,7 +221,8 @@ def cmd_novel(args):
                 print(f"✗ 小说 {args.id} 不存在")
                 return
             changed = []
-            for field in ["title", "genre", "synopsis", "world_intro"]:
+            for field in ["title", "genre", "synopsis", "world_intro",
+                          "author_intent", "current_focus", "model_override"]:
                 val = getattr(args, field, None)
                 if val is not None and str(val).strip():
                     setattr(novel, field, val)
@@ -425,6 +434,133 @@ def cmd_chapter(args):
             db.session.commit()
             print(f"✓ 已删除第{args.number}章 V{args.version}")
 
+        elif args.action == "stale":
+            chapters = Chapter.query.filter_by(novel_id=args.novel).order_by(Chapter.chapter_number).all()
+            stale = [ch for ch in chapters if ch.outline_stale()]
+            if not stale:
+                print("✓ 没有大纲失配的章节")
+                return
+            rows = []
+            for ch in stale:
+                latest = ChapterVersion.query.filter_by(chapter_id=ch.id).order_by(
+                    ChapterVersion.version_number.desc()).first()
+                rows.append([f"第{ch.chapter_number}章", truncate(ch.title, 24) or "无标题",
+                             f"{len(latest.content) if latest else 0}字", truncate(ch.outline, 30)])
+            print_table(["序号", "标题", "正文字数", "当前大纲（正文基于旧纲）"], rows)
+
+        elif args.action == "pipeline":
+            from app.services.chapter_runner import run_chapter_pipeline
+            print(f"【一键本章流水线】小说#{args.novel} 第{args.number}章")
+            result = run_chapter_pipeline(args.novel, args.number,
+                                          user_directive=args.directive or "",
+                                          auto_save=bool(args.save))
+            if "error" in result:
+                print(f"✗ 失败：{result['error']}")
+                return
+            for s in result.get("stages", []):
+                mark = "✓" if s.get("ok") else "✗"
+                extra = s.get("skipped") or s.get("action") or s.get("error") or ""
+                print(f"  [{mark}] {s.get('stage', '?')} {extra}")
+            print(f"人味分: {result.get('human_score')}")
+            if result.get("saved_version_id"):
+                print(f"✓ 已保存版本 id={result['saved_version_id']}")
+            if args.out:
+                with open(args.out, "w", encoding="utf-8") as fh:
+                    fh.write(result["text"])
+                print(f"✓ 已写出: {args.out}")
+            else:
+                print(result["text"])
+
+        elif args.action == "converge":
+            from app.config_utils import get_effective_config
+            from app.services.tone_convergence import converge_tone
+            ch = Chapter.query.filter_by(novel_id=args.novel, chapter_number=args.number).first()
+            if not ch:
+                print(f"✗ 第{args.number}章不存在")
+                return
+            ver = ChapterVersion.query.filter_by(chapter_id=ch.id).order_by(
+                ChapterVersion.version_number.desc()).first()
+            if not ver or not (ver.content or "").strip():
+                print(f"第{args.number}章暂无内容")
+                return
+            cfg = get_effective_config(ch.novel, agent_type="rewrite")
+            result = converge_tone(ver.content, cfg)
+            verdict = "✓ 已采纳" if result["converged"] else "○ 未提升，保留原稿"
+            print(f"人味分: {result['original_score']} -> {result['final_score']}  {verdict}")
+            for r in result.get("rounds", []):
+                extra = f"（{r['score']}）" if r.get("score") is not None else ""
+                print(f"  · 第{r.get('round')}轮 {r.get('action')}{extra}")
+            if result["converged"] and args.save:
+                from app.services.chapter_approval import create_version_record
+                v = create_version_record(args.novel, args.number, result["text"], source="ai")
+                print(f"✓ 已保存新版本 id={v.id}")
+            if args.out:
+                with open(args.out, "w", encoding="utf-8") as fh:
+                    fh.write(result["text"])
+                print(f"✓ 已写出: {args.out}")
+
+        elif args.action == "condense":
+            from app.config_utils import get_effective_config
+            from app.services.tone_convergence import condense_text
+            ch = Chapter.query.filter_by(novel_id=args.novel, chapter_number=args.number).first()
+            if not ch:
+                print(f"✗ 第{args.number}章不存在")
+                return
+            ver = ChapterVersion.query.filter_by(chapter_id=ch.id).order_by(
+                ChapterVersion.version_number.desc()).first()
+            if not ver or not (ver.content or "").strip():
+                print(f"第{args.number}章暂无内容")
+                return
+            result = condense_text(ver.content, get_effective_config(ch.novel, agent_type="rewrite"),
+                                   target_chars=args.target or 2500)
+            if not result["ok"]:
+                print(f"○ 压缩未执行：{result.get('reason')}")
+                return
+            print(f"【压缩完成】{result['original_chars']} -> {result['condensed_chars']} 字")
+            if args.save:
+                from app.services.chapter_approval import create_version_record
+                v = create_version_record(args.novel, args.number, result["text"], source="ai")
+                print(f"✓ 已保存新版本 id={v.id}")
+            if args.out:
+                with open(args.out, "w", encoding="utf-8") as fh:
+                    fh.write(result["text"])
+                print(f"✓ 已写出: {args.out}")
+
+        elif args.action == "consistency":
+            from app.services.consistency_check import run_consistency_check
+            ch = Chapter.query.filter_by(novel_id=args.novel, chapter_number=args.number).first()
+            if not ch:
+                print(f"✗ 第{args.number}章不存在")
+                return
+            ver = ChapterVersion.query.filter_by(chapter_id=ch.id).order_by(
+                ChapterVersion.version_number.desc()).first()
+            if not ver or not (ver.content or "").strip():
+                print(f"第{args.number}章暂无内容")
+                return
+            report = run_consistency_check(ver.content, args.novel, args.number,
+                                           novel=ch.novel, adjudicate=bool(args.adjudicate))
+            suspects = report.get("suspects", [])
+            verdicts_map = {v.get("kind", "") + "|" + v.get("title", ""): v
+                           for v in report.get("verdicts", [])}
+            print(f"【一致性核查】第{args.number}章 · 疑点 {len(suspects)} 项")
+            for s in suspects:
+                v = verdicts_map.get(s.get("kind", "") + "|" + s.get("title", ""))
+                label = ""
+                if v is not None:
+                    if v.get("is_conflict"):
+                        label = "（✗ 确认矛盾）"
+                    elif v.get("is_conflict") is None:
+                        label = "（裁决失败）"
+                    else:
+                        label = "（✓ 非矛盾）"
+                print(f"  ■ {s.get('title', '')} {label}")
+                print(f"    {s.get('detail', '')}")
+            if not suspects:
+                print("✓ 未发现疑点")
+            elif not args.adjudicate:
+                print("提示：加 --adjudicate 可让 AI 裁决疑点")
+
+
         elif args.action == "deai":
             # 去AI化处理：诊断当前版本（--save 保存为新版本）
             ch = Chapter.query.filter_by(novel_id=args.novel, chapter_number=args.number).first()
@@ -590,9 +726,14 @@ def cmd_character(args):
                 if confirm != "y":
                     print("已取消")
                     return
+            # 级联删角色关系（SQLite 无 FK 级联，残留关系会成"幽灵角色"，对齐 cmd_novel delete）
+            CharacterRelation.query.filter(
+                (CharacterRelation.character_a_id == char.id)
+                | (CharacterRelation.character_b_id == char.id)
+            ).delete()
             db.session.delete(char)
             db.session.commit()
-            print(f"✓ 已删除角色 [{char.id}] {char.name}")
+            print(f"✓ 已删除角色 [{char.id}] {char.name}（含其关系）")
 
 
 # ---------------------------------------------------------------------------
@@ -682,16 +823,37 @@ def cmd_foreshadow(args):
             print_table(["ID", "标题", "状态", "重要度", "埋设"], rows)
 
         elif args.action == "create":
+            # 校验对齐 Web create_foreshadowing：小说存在 + 按重要度计算超时阈值
+            novel = db.session.get(Novel, args.novel)
+            if not novel:
+                print(f"✗ 小说 {args.novel} 不存在")
+                return
+            if not args.title or not str(args.title).strip():
+                print("✗ 需要 --title")
+                return
+            importance = getattr(args, 'importance', None) or 5
+            if not (1 <= importance <= 10):
+                print("✗ importance 需在 1~10 之间")
+                return
+            if importance >= 9:
+                threshold = 30
+            elif importance >= 7:
+                threshold = 20
+            elif importance >= 4:
+                threshold = 15
+            else:
+                threshold = 10
             fs = Foreshadowing(
                 novel_id=args.novel,
-                title=args.title,
+                title=args.title.strip(),
                 description=getattr(args, 'description', '') or '',
-                importance=getattr(args, 'importance', 5) or 5,
+                importance=importance,
+                timeout_threshold=getattr(args, 'threshold', None) or threshold,
                 planted_chapter=getattr(args, 'planted', None),
             )
             db.session.add(fs)
             db.session.commit()
-            print(f"✓ 已创建伏笔: [{fs.id}] {fs.title}")
+            print(f"✓ 已创建伏笔: [{fs.id}] {fs.title}（阈值 {fs.timeout_threshold} 章）")
 
         elif args.action == "status":
             fs = db.session.get(Foreshadowing, args.id)
@@ -701,6 +863,20 @@ def cmd_foreshadow(args):
             if args.status not in VALID_FS_STATUSES:
                 print(f"✗ 无效状态: {args.status}")
                 print(f"  合法状态: {', '.join(VALID_FS_STATUSES)}")
+                return
+            # 状态机校验对齐 Web /advance（防 resolved→open 回退等非法迁移）
+            valid_transitions = {
+                "open": ["planned", "buried"],
+                "planned": ["buried", "abandoned"],
+                "buried": ["advancing", "abandoned"],
+                "advancing": ["reclaimable", "buried", "abandoned"],
+                "reclaimable": ["resolved", "abandoned"],
+                "resolved": [],
+                "abandoned": [],
+            }
+            if args.status not in valid_transitions.get(fs.status, []):
+                print(f"✗ 非法状态迁移: {fs.status} → {args.status}（合法: "
+                      f"{', '.join(valid_transitions.get(fs.status, [])) or '无'}）")
                 return
             old = fs.status
             fs.status = args.status
@@ -718,7 +894,10 @@ def cmd_foreshadow(args):
                 if val is not None and str(val).strip():
                     setattr(fs, field, val)
                     changed.append(field)
-            if getattr(args, "importance", None):
+            if args.importance is not None:
+                if not (1 <= args.importance <= 10):
+                    print("✗ importance 需在 1~10 之间")
+                    return
                 fs.importance = args.importance
                 changed.append("importance")
             if getattr(args, "planted", None):
@@ -730,6 +909,20 @@ def cmd_foreshadow(args):
             if getattr(args, "status", None):
                 if args.status not in VALID_FS_STATUSES:
                     print(f"✗ 无效状态: {args.status}（合法: {', '.join(VALID_FS_STATUSES)}）")
+                    return
+                # 状态机校验对齐 Web /advance
+                valid_transitions = {
+                    "open": ["planned", "buried"],
+                    "planned": ["buried", "abandoned"],
+                    "buried": ["advancing", "abandoned"],
+                    "advancing": ["reclaimable", "buried", "abandoned"],
+                    "reclaimable": ["resolved", "abandoned"],
+                    "resolved": [],
+                    "abandoned": [],
+                }
+                if args.status not in valid_transitions.get(fs.status, []):
+                    print(f"✗ 非法状态迁移: {fs.status} → {args.status}（合法: "
+                          f"{', '.join(valid_transitions.get(fs.status, [])) or '无'}）")
                     return
                 fs.status = args.status
                 changed.append("status")
@@ -747,8 +940,10 @@ def cmd_foreshadow(args):
                 latest = Chapter.query.filter_by(novel_id=args.novel).order_by(
                     Chapter.chapter_number.desc()).first()
                 current_chapter = latest.chapter_number if latest else 0
+            # reclaimable 同样在等回收，超时检测必须包含（对齐 Web 修复）
             active = Foreshadowing.query.filter_by(novel_id=args.novel).filter(
-                Foreshadowing.status.in_(["open", "planned", "buried", "advancing"])
+                Foreshadowing.status.in_(
+                    ["open", "planned", "buried", "advancing", "reclaimable"])
             ).all()
             warnings = []
             for fs in active:
@@ -792,11 +987,23 @@ def cmd_foreshadow(args):
 # ---------------------------------------------------------------------------
 
 def _delete_outline_node(node):
-    """递归删除大纲节点及其子节点（对齐 Web delete_outline_node）。"""
-    for child in OutlineNode.query.filter_by(parent_id=node.id).all():
-        _delete_outline_node(child)
-        db.session.delete(child)
-    db.session.delete(node)
+    """删除大纲节点及其子树（迭代 BFS，对齐 Web：递归在深层大纲上会触发递归上限）。
+
+    node 已加载；整棵子树在内存按 parent_id 闭包收集后统一删除。
+    """
+    all_nodes = OutlineNode.query.filter_by(novel_id=node.novel_id).all()
+    children_map = {}
+    for n in all_nodes:
+        children_map.setdefault(n.parent_id, []).append(n)
+    to_delete = [node]
+    stack = [node.id]
+    while stack:
+        pid = stack.pop()
+        for child in children_map.get(pid, []):
+            to_delete.append(child)
+            stack.append(child.id)
+    for n in to_delete:
+        db.session.delete(n)
 
 
 def cmd_outline(args):
@@ -813,21 +1020,39 @@ def cmd_outline(args):
                 print(f"  {indent}{type_emoji} [{n.id}] [{n.node_type}] {n.title}: {truncate(n.summary or '', 50)}")
 
         elif args.action == "create":
+            # 校验对齐 Web create_outline_node：小说存在 + parent 归属本小说 + sort_order 自增
+            novel = db.session.get(Novel, args.novel)
+            if not novel:
+                print(f"✗ 小说 {args.novel} 不存在")
+                return
+            if not args.title or not str(args.title).strip():
+                print("✗ 需要 --title")
+                return
+            parent_id = getattr(args, 'parent', None) or None
+            if parent_id:
+                parent = db.session.get(OutlineNode, parent_id)
+                if not parent or parent.novel_id != args.novel:
+                    print(f"✗ 父节点 {parent_id} 不存在或不属于本小说")
+                    return
+            max_order = (db.session.query(db.func.max(OutlineNode.sort_order))
+                         .filter_by(novel_id=args.novel, parent_id=parent_id).scalar())
             node = OutlineNode(
                 novel_id=args.novel,
-                title=args.title,
+                title=args.title.strip(),
                 summary=getattr(args, 'summary', '') or '',
                 node_type=getattr(args, 'type', 'chapter') or 'chapter',
-                parent_id=getattr(args, 'parent', None) or None,
+                parent_id=parent_id,
+                sort_order=(max_order or 0) + 1,
             )
             db.session.add(node)
             db.session.commit()
             print(f"✓ 已创建大纲节点: [{node.id}] {node.title}")
 
         elif args.action == "update":
-            node = db.session.get(OutlineNode, args.id)
+            # 按 novel 归属取节点（防止 --novel 与 --id 跨书误改）
+            node = OutlineNode.query.filter_by(id=args.id, novel_id=args.novel).first()
             if not node:
-                print(f"✗ 大纲节点 {args.id} 不存在")
+                print(f"✗ 小说 {args.novel} 无大纲节点 {args.id}")
                 return
             changed = []
             if getattr(args, "title", None) and str(args.title).strip():
@@ -846,9 +1071,9 @@ def cmd_outline(args):
                 print("（未指定要更新的字段）")
 
         elif args.action == "delete":
-            node = db.session.get(OutlineNode, args.id)
+            node = OutlineNode.query.filter_by(id=args.id, novel_id=args.novel).first()
             if not node:
-                print(f"✗ 大纲节点 {args.id} 不存在")
+                print(f"✗ 小说 {args.novel} 无大纲节点 {args.id}")
                 return
             children = OutlineNode.query.filter_by(parent_id=node.id).count()
             if children and not args.yes:
@@ -867,9 +1092,9 @@ def cmd_outline(args):
 
         elif args.action == "create-chapter":
             # 从大纲节点创建章节（标题/大纲预填，子场景并入分幕指引）
-            node = db.session.get(OutlineNode, args.id)
+            node = OutlineNode.query.filter_by(id=args.id, novel_id=args.novel).first()
             if not node:
-                print(f"✗ 大纲节点 {args.id} 不存在")
+                print(f"✗ 小说 {args.novel} 无大纲节点 {args.id}")
                 return
             novel_id = node.novel_id
             scene_lines = []
@@ -909,8 +1134,8 @@ def cmd_relation(args):
                 return
             rows = []
             for r in rels:
-                a = Character.query.get(r.character_a_id)
-                b = Character.query.get(r.character_b_id)
+                a = db.session.get(Character, r.character_a_id)
+                b = db.session.get(Character, r.character_b_id)
                 rows.append([f"[{r.id}]", a.name if a else "?",
                             r.relation_type or "ordinary",
                             b.name if b else "?", f"综合分:{r.overall_score:.1f}"])
@@ -979,6 +1204,10 @@ def cmd_relation(args):
             print(f"  综合评分: {rel.overall_score:.1f} | 关系类型: {old_type} -> {rel.auto_relation_type}")
 
         elif args.action == "delete":
+            rel = db.session.get(CharacterRelation, args.id)
+            if not rel:
+                print(f"✗ 关系 {args.id} 不存在")
+                return
             if not args.yes:
                 confirm = input(f"确定删除关系 [{rel.id}]？(y/N) ").strip().lower()
                 if confirm != "y":
@@ -994,7 +1223,7 @@ def cmd_relation(args):
 # ---------------------------------------------------------------------------
 
 def _serialize_story_state(state):
-    """StoryState -> dict（与 Web _serialize_state 同构）。"""
+    """StoryState -> dict（与 Web _serialize_state 同构，含引擎字段）。"""
     return {
         "mainQuest": state.main_quest,
         "mainQuestProgress": state.main_quest_progress,
@@ -1003,6 +1232,12 @@ def _serialize_story_state(state):
         "arcPhase": state.arc_phase,
         "arcIntensity": state.arc_intensity,
         "riskFlags": json.loads(state.risk_flags or "{}"),
+        # 引擎字段：快照若不序列化，回滚会丢失兴奋度/节奏/章节进度（对齐 Web story_state.py:26-30）
+        "excitementHistory": json.loads(state.excitement_history or "[]"),
+        "lastExcitementChapter": state.last_excitement_chapter,
+        "currentExcitementDensity": state.current_excitement_density,
+        "recentPacing": json.loads(state.recent_pacing or "[]"),
+        "currentChapter": state.current_chapter,
     }
 
 
@@ -1054,8 +1289,8 @@ def cmd_story_state(args):
                 state.arc_phase = args.phase
                 changed.append("arc_phase")
             if getattr(args, "intensity", None) is not None:
-                if not (1 <= args.intensity <= 5):
-                    print("✗ intensity 需在 1 ~ 5 之间")
+                if not (1 <= args.intensity <= 10):
+                    print("✗ intensity 需在 1 ~ 10 之间")
                     return
                 state.arc_intensity = args.intensity
                 changed.append("arc_intensity")
@@ -1144,6 +1379,12 @@ def cmd_story_state(args):
             state.arc_phase = data.get("arcPhase", "setup")
             state.arc_intensity = data.get("arcIntensity", 3)
             state.risk_flags = json.dumps(data.get("riskFlags", {}), ensure_ascii=False)
+            # 引擎字段完整回滚（对齐 Web rollback_state：此前只回滚主线字段导致兴奋度/节奏/进度错位）
+            state.excitement_history = json.dumps(data.get("excitementHistory", []), ensure_ascii=False)
+            state.recent_pacing = json.dumps(data.get("recentPacing", []), ensure_ascii=False)
+            state.last_excitement_chapter = data.get("lastExcitementChapter")
+            state.current_excitement_density = data.get("currentExcitementDensity") or 0.0
+            state.current_chapter = data.get("currentChapter") or 0
             db.session.commit()
             print(f"✓ 已回滚到快照 [{snap.id}]（阶段 {state.arc_phase}, 强度 {state.arc_intensity}）")
 
@@ -1166,8 +1407,9 @@ def cmd_short(args):
             print_table(["ID", "标题", "模式", "状态", "字数", "创建时间"], rows)
 
         elif args.action == "create":
+            # 标题兜底对齐 Web create_story（无题短篇），避免落 None 标题
             story = ShortStory(
-                title=args.title,
+                title=(args.title or "").strip() or "无题短篇",
                 mode=getattr(args, 'mode', 'inspiration') or 'inspiration',
                 inspiration=getattr(args, 'inspiration', '') or '',
                 genre=getattr(args, 'genre', '') or '',
@@ -1189,7 +1431,9 @@ def cmd_short(args):
             changed = []
             for field, arg_name in [("title", "title"), ("genre", "genre"),
                                     ("theme", "theme"), ("tone", "tone"),
-                                    ("inspiration", "inspiration")]:
+                                    ("inspiration", "inspiration"),
+                                    ("character_desc", "character"),
+                                    ("scene_desc", "scene")]:
                 val = getattr(args, arg_name, None)
                 if val is not None and str(val).strip():
                     setattr(story, field, val)
@@ -1281,9 +1525,19 @@ def cmd_short(args):
             if resp.status_code != 200:
                 print(f"✗ 导出失败: HTTP {resp.status_code}")
                 return
+            # docx 依赖缺失时服务端会返回 200 的错误纯文本（见 export.py），需识别
+            text_prefix = (resp.data[:80].decode("utf-8", errors="ignore")
+                           if not fmt.startswith("docx") else "")
+            if "导出失败" in text_prefix:
+                print(f"✗ 导出失败（服务端）: {resp.data[:200].decode('utf-8', errors='ignore')}")
+                return
             output = args.output or f"{story.title}.{fmt}"
-            with open(output, "wb") as f:
-                f.write(resp.data)
+            try:
+                with open(output, "wb") as f:
+                    f.write(resp.data)
+            except OSError as e:
+                print(f"✗ 写入失败: {e}")
+                return
             print(f"✓ 已导出 [{story.id}] {story.title} -> {output} ({len(resp.data)} bytes)")
 
         elif args.action == "content":
@@ -1341,8 +1595,12 @@ def cmd_template(args):
             print_table(["ID", "类型", "名称", "约束"], rows)
 
         elif args.action == "create":
+            # name 非空校验（模型列 NOT NULL，漏传会裸 IntegrityError）
+            if not args.name or not str(args.name).strip():
+                print("✗ 需要 --name")
+                return
             t = PromptTemplate(
-                name=args.name,
+                name=args.name.strip(),
                 template_type=args.type or "writer",
                 template_content=getattr(args, 'content', '') or '',
                 constraints=getattr(args, 'constraints', '') or '',
@@ -1380,6 +1638,8 @@ def cmd_audit(args):
                 print(f"第{args.number}章暂无内容")
                 return
             original = ver.content
+            # 告知去AI开关状态：deai_auto=0 时 deai_process 被短路，审计结果可能恒 0
+            from app.services.deai_agent import deai_enabled
             processed = deai_process(original)
             stats = get_deai_stats(original, processed)
 
@@ -1390,16 +1650,33 @@ def cmd_audit(args):
             print(f"  禁用词库: {stats.get('banned_words_count', 0)} 个")
             print(f"  正则模式: {stats.get('regex_patterns_count', 0)} 个")
             print(f"  口语化规则: {stats.get('colloquial_rules_count', 0)} 个")
+            if not deai_enabled():
+                print("  ⚠ 自动去AI化已停用（deai_auto=0），processed 为原稿、字数变化恒 0——"
+                      "以上为纯检测结果，非处理结果")
             print()
             if args.detailed and stats['patterns_found'] > 0:
                 print("  详细问题:")
-                # 简单列出前10个匹配
-                from app.services.deai_agent import BANNED_REPLACEMENTS
+                # 词库替换命中（BANNED_REPLACEMENTS）
+                from app.services.deai_agent import BANNED_REPLACEMENTS, BANNED_PATTERNS
                 count = 0
                 for pattern, _ in BANNED_REPLACEMENTS:
                     matches = original.count(pattern)
                     if matches > 0:
                         print(f"    - 「{pattern}」: {matches} 处")
+                        count += 1
+                        if count >= 10:
+                            print(f"    ... (更多省略)")
+                            break
+                # 正则模式命中（与 stats['patterns_found'] 口径一致，防止"有统计无明细"矛盾）
+                import re as _re
+                for pat in BANNED_PATTERNS:
+                    try:
+                        ms = list(_re.finditer(pat, original))
+                    except Exception:
+                        continue
+                    if ms:
+                        sample = ms[0].group(0) if ms[0].group(0) else original[ms[0].start():ms[0].start()+20]
+                        print(f"    - [正则] {truncate(sample, 30)}: {len(ms)} 处")
                         count += 1
                         if count >= 10:
                             print(f"    ... (更多省略)")
@@ -1590,15 +1867,17 @@ def cmd_setting(args):
         elif args.action == "clear-agent":
             from app.routes.settings import _save_setting
             count = 0
+            # 含采样惩罚键（对齐 Web clear_agent_settings：漏删会让残留惩罚继续影响生成）
             for agent_type in AGENT_TYPES:
-                for param in ["model_name", "llm_model", "temperature", "max_tokens"]:
+                for param in ["model_name", "llm_model", "temperature", "max_tokens",
+                              "frequency_penalty", "presence_penalty"]:
                     key = f"{param}_{agent_type}"
                     existing = db.session.get(Setting, key)
                     if existing:
                         db.session.delete(existing)
                         count += 1
             db.session.commit()
-            print(f"✓ 已清除 {count} 条 Agent 自定义配置（含 llm_model_*）")
+            print(f"✓ 已清除 {count} 条 Agent 自定义配置（含 llm_model_* / frequency_penalty_* / presence_penalty_*）")
 
 
 # ---------------------------------------------------------------------------
@@ -1776,7 +2055,8 @@ def cmd_llm(args):
             print(f"测试 {p.name} ({p.base_url}) 连接...")
             result = test_provider_connection(p.base_url, p.api_key, p.provider_type)
             if result.get("ok"):
-                print(f"✓ 连接成功" + (f" · {result.get('detail','')}" if result.get('detail') else ""))
+                # test_provider_connection 不返回 detail 键，只报模型数
+                print(f"✓ 连接成功（{result.get('models_count', '?')} 个可用模型）")
             else:
                 print(f"✗ 连接失败: {result.get('error', '未知错误')}")
 
@@ -2177,6 +2457,230 @@ def cmd_optimize(args):
 # 系统管理
 # ---------------------------------------------------------------------------
 
+
+def cmd_compass(args):
+    with app.app_context():
+        novel = Novel.query.get(args.novel)
+        if not novel:
+            print(f"✗ 小说 #{args.novel} 不存在")
+            return
+        if args.action == "show":
+            ai = (novel.author_intent or "").strip()
+            cf = (novel.current_focus or "").strip()
+            print(f"【创作罗盘】《{novel.title}》")
+            print(f"  作者意图: {ai or '(未设定)'}")
+            print(f"  当前重心: {cf or '(未设定)'}")
+        elif args.action == "set":
+            if args.intent is None and args.focus is None:
+                print("（未指定要更新的字段，用 --intent / --focus）")
+                return
+            if args.intent is not None:
+                novel.author_intent = args.intent.strip()[:500]
+            if args.focus is not None:
+                novel.current_focus = args.focus.strip()[:300]
+            db.session.commit()
+            print(f"✓ 罗盘已更新（意图 {len(novel.author_intent)} 字 / 重心 {len(novel.current_focus)} 字）")
+
+
+def cmd_style_anchor(args):
+    with app.app_context():
+        from app.services.style_fingerprint import (
+            save_anchor, load_anchor, anchor_enabled,
+            set_anchor_enabled, format_anchor_for_prompt,
+        )
+        if args.action == "view":
+            text = load_anchor()
+            print("【文风锚例】")
+            print(f"  状态: {'启用' if anchor_enabled() else '关闭'}")
+            if text:
+                print(f"  字数: {len(text)}")
+                print("  --- 内容 ---")
+                print(text)
+            else:
+                print("  （未设置参考文本）")
+                print("  提示: style-anchor set --text '...' 或 --file 稿子.txt")
+
+        elif args.action == "set":
+            text = args.text or ""
+            if args.file:
+                try:
+                    with open(args.file, "r", encoding="utf-8") as fh:
+                        text = fh.read()
+                except OSError as e:
+                    print(f"✗ 读取文件失败: {e}")
+                    return
+            text = text.strip()
+            if not text:
+                print("✗ 需要 --text 或 --file 提供锚例文本")
+                return
+            save_anchor(text)
+            print(f"✓ 文风锚例已保存（{len(text)} 字）")
+
+        elif args.action == "toggle":
+            if args.enabled is None:
+                print(f"当前状态: {'启用' if anchor_enabled() else '关闭'}（用 --enabled on/off 切换）")
+                return
+            flag = args.enabled == "on"
+            set_anchor_enabled(flag)
+            print(f"✓ 文风锚例已{'启用' if flag else '关闭'}")
+
+        elif args.action == "preview":
+            ctx = format_anchor_for_prompt()
+            if not ctx:
+                print("（未启用或未设置——不会注入任何锚例）")
+                return
+            print(f"【注入预览】（{len(ctx)} 字符）")
+            print(ctx)
+
+
+def cmd_template_outline(args):
+    with app.app_context():
+        from app.routes.outline_templates import OUTLINE_TEMPLATES, apply_template
+        from app.models import OutlineNode, Novel
+
+        if args.action == "list":
+            rows = []
+            for key, tmpl in OUTLINE_TEMPLATES.items():
+                rows.append([key, tmpl.get("name", ""),
+                             len(tmpl.get("structure", [])),
+                             tmpl.get("description", "")[:40]])
+            print_table(["Key", "名称", "节点数", "说明"], rows)
+
+        elif args.action == "show":
+            if not args.key:
+                print("✗ show 需要 --key <模板Key>")
+                return
+            tmpl = OUTLINE_TEMPLATES.get(args.key)
+            if not tmpl:
+                print(f"✗ 模板 {args.key} 不存在")
+                return
+            print(f"【{tmpl.get('name', args.key)}】{tmpl.get('description', '')}")
+            for i, node in enumerate(tmpl.get("structure", []), 1):
+                print(f"  {i}. {node.get('title', '')} — {node.get('summary', '')}")
+
+        elif args.action == "apply":
+            if not args.key or not args.novel:
+                print("✗ apply 需要 --key <模板Key> --novel <小说ID>")
+                return
+            novel = db.session.get(Novel, args.novel)
+            if not novel:
+                print(f"✗ 小说 {args.novel} 不存在")
+                return
+            count = apply_template(args.novel, args.key, db, OutlineNode)
+            if count is None:
+                print(f"✗ 模板 {args.key} 不存在")
+                return
+            print(f"✓ 已应用模板「{args.key}」到小说 [{args.novel}]，生成 {len(count) if isinstance(count, list) else count} 个大纲节点")
+
+
+def cmd_queue(args):
+    with app.app_context():
+        from app.services.extraction_queue import list_pending, resolve_extraction
+        if args.action == "list":
+            if not args.novel:
+                print("✗ queue list 需要 --novel <小说ID>（队列按小说隔离）")
+                return
+            items = list_pending(args.novel)
+            if not items:
+                print("待确认队列为空")
+                return
+            rows = []
+            for it in items:
+                pl = it.get("payload", {})
+                rows.append([str(it["id"]), f"第{it.get('chapter_number', '?')}章",
+                             it["kind"],
+                             f"{pl.get('subject', '')}.{pl.get('property', '')}",
+                             (pl.get("value", "") or "")[:40]])
+            print_table(["ID", "来源章", "类型", "属性", "值"], rows)
+        elif args.action in ("adopt", "discard"):
+            if not args.id:
+                print(f"✗ {args.action} 需要 --id <ID>")
+                return
+            ok_flag, msg = resolve_extraction(args.id, adopt=(args.action == "adopt"))
+            print(f"{'✓' if ok_flag else '✗'} {msg}")
+
+
+def cmd_preferences(args):
+    with app.app_context():
+        import json as _json
+        pref = Setting.query.get("creator_preferences")
+        data = {}
+        if pref and (pref.value or "").strip():
+            try:
+                data = _json.loads(pref.value)
+            except Exception:
+                pass
+        if args.action == "show":
+            print("【创作偏好档案】（注入全部写作链，长期有效）")
+            print(f"  文风偏好: {data.get('style') or '(未设定)'}")
+            print(f"  写作禁忌: {data.get('taboos') or '(未设定)'}")
+            print(f"  目标读者: {data.get('audience') or '(未设定)'}")
+        elif args.action == "set":
+            for k, v in [("style", args.style), ("taboos", args.taboos), ("audience", args.audience)]:
+                if v is not None:
+                    data[k] = v.strip()[:500]
+            val = _json.dumps(data, ensure_ascii=False)
+            if pref:
+                pref.value = val
+            else:
+                db.session.add(Setting(key="creator_preferences", value=val))
+            db.session.commit()
+            print("✓ 偏好档案已更新")
+
+
+def cmd_tone(args):
+    with app.app_context():
+        from app.services.ai_metric import analyze_ai_tone
+        from app.config_utils import get_effective_config
+        ch = Chapter.query.filter_by(novel_id=args.novel, chapter_number=args.number).first()
+        if not ch:
+            print(f"✗ 第{args.number}章不存在")
+            return
+        ver = ChapterVersion.query.filter_by(chapter_id=ch.id).order_by(
+            ChapterVersion.version_number.desc()).first()
+        if not ver or not (ver.content or "").strip():
+            print(f"第{args.number}章暂无内容")
+            return
+        text = ver.content
+        if args.action == "check":
+            report = analyze_ai_tone(text)
+            if report.get("skipped"):
+                print(f"○ {report['skipped']}")
+                return
+            print(f"【AI 痕迹检测】第{args.number}章 · 人味分 {report['human_score']}/100")
+            for c in report.get("checks", []):
+                mark = "✗" if c["risk"] == "high" else ("△" if c["risk"] == "mid" else "✓")
+                print(f"  [{mark}] {c['name']}: {c['detail']}")
+        elif args.action == "converge":
+            from app.services.tone_convergence import converge_tone
+            cfg = get_effective_config(ch.novel, agent_type="rewrite")
+            result = converge_tone(text, cfg)
+            verdict = "✓ 已采纳" if result["converged"] else "○ 未提升，保留原稿"
+            print(f"人味分: {result['original_score']} -> {result['final_score']}  {verdict}")
+            for r in result.get("rounds", []):
+                extra = f"（{r['score']}）" if r.get("score") is not None else ""
+                print(f"  · 第{r.get('round')}轮 {r.get('action')}{extra}")
+            if result["converged"] and args.save:
+                from app.services.chapter_approval import create_version_record
+                v = create_version_record(args.novel, args.number, result["text"], source="ai")
+                print(f"✓ 已保存新版本 id={v.id}")
+            if args.out:
+                with open(args.out, "w", encoding="utf-8") as fh:
+                    fh.write(result["text"])
+                print(f"✓ 已写出: {args.out}")
+        elif args.action == "radar":
+            from app.services.perplexity_radar import analyze_perplexity, format_radar_report
+            cfg = get_effective_config(ch.novel, agent_type="summary")
+            print("困惑度雷达：逐字复述→逐句 ppl，定位选词过于可预测的句子…")
+            report = analyze_perplexity(text, cfg)
+            print(format_radar_report(report))
+
+
+def cmd_pipeline(args):
+    args.action = "pipeline"
+    cmd_chapter(args)
+
+
 def cmd_sys(args):
     with app.app_context():
         if args.action == "info":
@@ -2190,7 +2694,8 @@ def cmd_sys(args):
             print(f"  提示模板: {PromptTemplate.query.count()}")
 
             import os
-            db_path = "data.db"
+            # 从 app.config 解析真实 DB 路径（支持 DATABASE_PATH env 覆盖），非硬编码
+            db_path = app.config.get("DATABASE_PATH") or "data.db"
             if os.path.exists(db_path):
                 size_mb = os.path.getsize(db_path) / (1024 * 1024)
                 print(f"  数据库大小: {size_mb:.2f} MB")
@@ -2202,11 +2707,21 @@ def cmd_sys(args):
             print(f"  API 地址: {cfg['base_url']}")
 
         elif args.action == "backup":
-            import shutil
+            import sqlite3
+            db_path = app.config.get("DATABASE_PATH") or "data.db"
+            if not os.path.exists(db_path):
+                print(f"✗ 数据库不存在: {db_path}")
+                return
             if not args.output:
                 args.output = f"data_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
             try:
-                shutil.copy2("data.db", args.output)
+                # 用 SQLite 备份 API 而非裸 copy：WAL/并发写入时裸拷贝会得到撕裂快照
+                src = sqlite3.connect(db_path)
+                dst = sqlite3.connect(args.output)
+                with dst:
+                    src.backup(dst)
+                dst.close()
+                src.close()
                 print(f"✓ 已备份到: {args.output}")
             except Exception as e:
                 print(f"✗ 备份失败: {e}")
@@ -2222,12 +2737,47 @@ def cmd_sys(args):
                 print(f"  [{c.get('id', '?')}] {c.get('title', '?')} ({mark})")
 
         elif args.action == "reset":
-            print("⚠️  危险操作: 这将删除所有数据!")
+            print("⚠️  危险操作: 这将删除所有业务数据（小说/章节/角色/伏笔/短篇/评审/记忆等）！")
+            print("     保留: LLM 厂商/模型配置、全局设置、提示词模板、技巧激活状态")
             if not args.yes and not confirm("确定要重置数据库吗?"):
                 print("已取消")
                 return
-            print("重置功能尚未实现 (出于安全考虑)")
-            print("如需重置，请手动删除 data.db 文件后重启")
+            # 先删子行再删父（Novel.chapters 无 ORM cascade + novel_id NOT NULL，
+            # 直接删 Novel 会 IntegrityError）——对齐 cmd_novel delete-all 的顺序
+            from app.models import (Novel, ShortStory, Character, CharacterRelation,
+                                    WorldSetting, OutlineNode, Foreshadowing,
+                                    StoryState, StoryStateSnapshot, PromptTemplate,
+                                    BlindReview, PlagiarizeTask, PendingExtraction)
+            # 短篇及其版本/评审（级联依赖）
+            for s in ShortStory.query.all():
+                db.session.delete(s)
+            # 长篇：先删章节→版本→评审→摘要→记忆，再删小说
+            for n in Novel.query.all():
+                for ch in Chapter.query.filter_by(novel_id=n.id).all():
+                    for v in ChapterVersion.query.filter_by(chapter_id=ch.id).all():
+                        CriticReview.query.filter_by(version_id=v.id).delete()
+                    ChapterVersion.query.filter_by(chapter_id=ch.id).delete()
+                    ChapterSummary.query.filter_by(chapter_id=ch.id).delete()
+                    ChapterMemory.query.filter_by(chapter_id=ch.id).delete()
+                    db.session.delete(ch)
+                Character.query.filter_by(novel_id=n.id).delete()
+                CharacterRelation.query.filter_by(novel_id=n.id).delete()
+                WorldSetting.query.filter_by(novel_id=n.id).delete()
+                OutlineNode.query.filter_by(novel_id=n.id).delete()
+                Foreshadowing.query.filter_by(novel_id=n.id).delete()
+                StoryState.query.filter_by(novel_id=n.id).delete()
+                StoryStateSnapshot.query.filter_by(novel_id=n.id).delete()
+                db.session.delete(n)
+            # 无外键归属的孤立数据
+            Character.query.filter(Character.novel_id.is_(None)).delete()
+            StoryState.query.delete()
+            StoryStateSnapshot.query.delete()
+            BlindReview.query.delete()
+            PlagiarizeTask.query.delete()
+            PendingExtraction.query.delete()
+            db.session.commit()
+            print("✓ 业务数据已清空（保留配置）")
+            print("  提示: 如需彻底重置含配置，请删除 data.db 后重启")
 
 
 # ---------------------------------------------------------------------------
@@ -2281,47 +2831,48 @@ def cmd_constraint(args):
         assemble_constraints, get_last_assembly, is_constraint_bank_enabled,
     )
 
-    if args.action == "show":
-        result = assemble_constraints(agent_type=args.agent, genre=args.genre)
-        if not result["text"]:
-            print(f"[{args.agent}] 无可用装配（词库为空或已停用），生成时将走兜底常量")
+    with app.app_context():
+        if args.action == "show":
+            result = assemble_constraints(agent_type=args.agent, genre=args.genre)
+            if not result["text"]:
+                print(f"[{args.agent}] 无可用装配（词库为空或已停用），生成时将走兜底常量")
+                return
+            print(f"Agent: {args.agent}   体裁: {args.genre or 'any'}")
+            print(f"装配: {result['total_chars']}/{result['budget']} 字符")
+            for m in result["included"]:
+                print(f"  + {m['id']}  ({m['chars']} 字符)")
+            for d in result["dropped"]:
+                print(f"  - {d}  (超预算裁剪)")
+            if getattr(args, "full", False):
+                print("-" * 46)
+                print(result["text"])
             return
-        print(f"Agent: {args.agent}   体裁: {args.genre or 'any'}")
-        print(f"装配: {result['total_chars']}/{result['budget']} 字符")
-        for m in result["included"]:
-            print(f"  + {m['id']}  ({m['chars']} 字符)")
-        for d in result["dropped"]:
-            print(f"  - {d}  (超预算裁剪)")
-        if getattr(args, "full", False):
-            print("-" * 46)
-            print(result["text"])
-        return
 
-    if args.action == "status":
-        state = "启用" if is_constraint_bank_enabled() else "停用"
-        print(f"约束词库: {state}  (Setting 键 constraint_bank_enabled)")
-        last_all = get_last_assembly()
-        if last_all:
-            print("本进程最近装配（按 Agent 分记）:")
-            for agent, la in sorted(last_all.items()):
-                mods = ", ".join(i["id"] for i in la.get("included", [])) or "-"
-                extra = f"  [{la['reason']}]" if la.get("reason") else ""
-                print(f"  {agent}: [{mods}] "
-                      f"chars={la.get('total_chars')}/{la.get('budget')}{extra}")
+        if args.action == "status":
+            state = "启用" if is_constraint_bank_enabled() else "停用"
+            print(f"约束词库: {state}  (Setting 键 constraint_bank_enabled)")
+            last_all = get_last_assembly()
+            if last_all:
+                print("本进程最近装配（按 Agent 分记）:")
+                for agent, la in sorted(last_all.items()):
+                    mods = ", ".join(i["id"] for i in la.get("included", [])) or "-"
+                    extra = f"  [{la['reason']}]" if la.get("reason") else ""
+                    print(f"  {agent}: [{mods}] "
+                          f"chars={la.get('total_chars')}/{la.get('budget')}{extra}")
+            else:
+                print("本进程最近装配: （暂无记录，生成一次后可见）")
+            return
+
+        # toggle
+        new_value = "0" if is_constraint_bank_enabled() else "1"
+        row = Setting.query.get("constraint_bank_enabled")
+        if row is None:
+            db.session.add(Setting(key="constraint_bank_enabled", value=new_value))
         else:
-            print("本进程最近装配: （暂无记录，生成一次后可见）")
-        return
-
-    # toggle
-    new_value = "0" if is_constraint_bank_enabled() else "1"
-    row = Setting.query.get("constraint_bank_enabled")
-    if row is None:
-        db.session.add(Setting(key="constraint_bank_enabled", value=new_value))
-    else:
-        row.value = new_value
-    db.session.commit()
-    print(f"约束词库已{'启用' if new_value == '1' else '停用'} "
-          f"(constraint_bank_enabled={new_value})")
+            row.value = new_value
+        db.session.commit()
+        print(f"约束词库已{'启用' if new_value == '1' else '停用'} "
+              f"(constraint_bank_enabled={new_value})")
 
 
 def main():
@@ -2336,6 +2887,21 @@ def main():
   python cli.py short list
   python cli.py setting list
   python cli.py sys info
+
+  创作罗盘:
+    python cli.py compass show --novel 1
+    python cli.py compass set --novel 1 --intent ... --focus ...
+
+  一键本章 / AI味收敛 / 一致性核查:
+    python cli.py chapter pipeline --novel 1 --number 5 --save
+    python cli.py chapter converge --novel 1 --number 5
+    python cli.py chapter consistency --novel 1 --number 5 --adjudicate
+    python cli.py tone check --novel 1 --number 5
+    python cli.py tone radar --novel 1 --number 5
+
+  偏好档案 / 待确认队列:
+    python cli.py preferences set --style ... --taboos ...
+    python cli.py queue list --novel 1
 """)
     subparsers = parser.add_subparsers(dest="command")
 
@@ -2361,6 +2927,9 @@ def main():
     p_novel.add_argument("--genre", help="小说类型")
     p_novel.add_argument("--synopsis", help="小说简介")
     p_novel.add_argument("--world-intro", dest="world_intro", help="世界观介绍")
+    p_novel.add_argument("--author-intent", dest="author_intent", help="作者意图（全书承诺，≤500字）")
+    p_novel.add_argument("--current-focus", dest="current_focus", help="当前重心（阶段目标，≤300字）")
+    p_novel.add_argument("--model-override", dest="model_override", help="Per-Novel 模型覆盖（JSON，如 {\"writer\":\"1:model\"}）")
     p_novel.add_argument("--format", help="导出格式 txt/docx/md/html/epub（export 用，默认 txt）")
     p_novel.add_argument("--output", help="导出文件路径（export 用，默认 标题.格式）")
     p_novel.add_argument("-y", "--yes", action="store_true", help="跳过确认")
@@ -2368,7 +2937,7 @@ def main():
     # ========== 章节 ==========
     p_chapter = subparsers.add_parser("chapter", help="章节管理")
     p_chapter.add_argument("action", choices=["list", "create", "content", "approve", "update", "delete",
-                                              "version-list", "version-content", "version-delete", "deai"])
+                                              "version-list", "version-content", "version-delete", "deai", "stale", "pipeline", "converge", "condense", "consistency"])
     p_chapter.add_argument("--novel", type=int, required=True, help="小说 ID")
     p_chapter.add_argument("--number", type=int, help="章节号")
     p_chapter.add_argument("--version", type=int, help="版本号（version-* 用）")
@@ -2377,6 +2946,9 @@ def main():
     p_chapter.add_argument("--outline", help="章节大纲")
     p_chapter.add_argument("--directive", help="用户指示")
     p_chapter.add_argument("--full", action="store_true", help="显示完整内容")
+    p_chapter.add_argument("--out", help="输出正文到文件（pipeline/converge/condense 用）")
+    p_chapter.add_argument("--target", type=int, help="压缩目标字数（condense 用，默认 2500）")
+    p_chapter.add_argument("--adjudicate", action="store_true", help="一致性核查时调用 AI 裁决疑点")
     p_chapter.add_argument("--length", type=int, help="预览长度")
     p_chapter.add_argument("-y", "--yes", action="store_true", help="跳过删除确认")
 
@@ -2414,7 +2986,7 @@ def main():
     p_fs.add_argument("--title", help="伏笔标题")
     p_fs.add_argument("--description", help="伏笔描述")
     p_fs.add_argument("--notes", help="伏笔记注（update 用）")
-    p_fs.add_argument("--importance", type=int, default=5, help="重要度 (1-10)")
+    p_fs.add_argument("--importance", type=int, help="重要度 (1-10)；create 缺省 5，update 未传则保持原值")
     p_fs.add_argument("--planted", type=int, help="埋设章节")
     p_fs.add_argument("--threshold", type=int, help="超时阈值章节数（update 用）")
     p_fs.add_argument("--status", help="新状态")
@@ -2440,7 +3012,7 @@ def main():
     p_rel.add_argument("--id", type=int, help="关系 ID（update/event/delete 用）")
     p_rel.add_argument("--char-a", type=int, help="角色 A 的 ID")
     p_rel.add_argument("--char-b", type=int, help="角色 B 的 ID")
-    p_rel.add_argument("--type", default="ordinary", help="关系类型")
+    p_rel.add_argument("--type", help="关系类型（create 缺省 ordinary；update 未传则保持原值）")
     p_rel.add_argument("--desc", help="关系描述")
     p_rel.add_argument("--event", help="关系事件类型（event 用: battle_together/betrayal/life_saving/conflict/open_talk/public_humiliation）")
     p_rel.add_argument("--intensity", type=float, help="事件强度 0.5~2.0（event 用，默认 1.0）")
@@ -2578,10 +3150,56 @@ def main():
     p_opt.add_argument("--save", action="store_true", help="保存处理后内容为新版本（deai 用）")
 
     # ========== 系统 ==========
+    p_compass = subparsers.add_parser("compass", help="创作罗盘（全书承诺+阶段目标）")
+    p_compass.add_argument("action", choices=["show", "set"], help="操作类型")
+    p_compass.add_argument("--novel", type=int, required=True, help="小说 ID")
+    p_compass.add_argument("--intent", help="作者意图（全书承诺，≤500 字）")
+    p_compass.add_argument("--focus", help="当前重心（阶段目标，≤300 字）")
+
+    p_queue = subparsers.add_parser("queue", help="抽取待确认队列（A4：错抽不落真相库）")
+    p_queue.add_argument("action", choices=["list", "adopt", "discard"], help="操作类型")
+    p_queue.add_argument("--novel", type=int, help="小说 ID（list 用）")
+    p_queue.add_argument("--id", type=int, help="队列条目 ID（adopt/discard 用）")
+
+    p_prefs = subparsers.add_parser("preferences", help="创作偏好档案（P4：长期有效写作约束）")
+    p_prefs.add_argument("action", choices=["show", "set"], help="操作类型")
+    p_prefs.add_argument("--style", help="文风偏好")
+    p_prefs.add_argument("--taboos", help="写作禁忌")
+    p_prefs.add_argument("--audience", help="目标读者")
+
+    p_tone = subparsers.add_parser("tone", help="去AI味检测/收敛（A2 + 困惑度雷达）")
+    p_tone.add_argument("action", choices=["check", "converge", "radar"], help="操作类型")
+    p_tone.add_argument("--novel", type=int, required=True, help="小说 ID")
+    p_tone.add_argument("--number", type=int, required=True, help="章节号")
+    p_tone.add_argument("--save", action="store_true", help="收敛时直接保存为新版本")
+    p_tone.add_argument("--out", help="输出正文到文件")
+
+    # ========== 文风锚例 ==========
+    p_anchor = subparsers.add_parser("style-anchor", help="文风锚例（真人原文直插 prompt 风格锚定）")
+    p_anchor.add_argument("action", choices=["view", "set", "toggle", "preview"], help="操作类型")
+    p_anchor.add_argument("--text", help="锚例文本（set 用；也从 --file 读入）")
+    p_anchor.add_argument("--file", help="从文件读取锚例文本（set 用）")
+    p_anchor.add_argument("--enabled", choices=["on", "off"], help="开关状态（toggle 用）")
+
+    # ========== 大纲模板 ==========
+    p_otpl = subparsers.add_parser("template-outline", help="大纲模板（节拍式/三幕/英雄之旅/四幕）")
+    p_otpl.add_argument("action", choices=["list", "show", "apply"], help="操作类型")
+    p_otpl.add_argument("--key", help="模板 Key（show/apply 用）")
+    p_otpl.add_argument("--novel", type=int, help="小说 ID（apply 用）")
+
     p_sys = subparsers.add_parser("sys", help="系统管理")
     p_sys.add_argument("action", choices=["info", "backup", "reset", "sample-data"], help="操作类型")
     p_sys.add_argument("--output", help="备份输出路径")
     p_sys.add_argument("-y", "--yes", action="store_true", help="跳过确认")
+
+    # ========== 一键本章流水线（转发到 chapter pipeline） ==========
+    p_pipeline = subparsers.add_parser("pipeline", help="一键本章编排器（缺大纲生成→正文→门禁→收敛→人工闸门）")
+    p_pipeline.add_argument("action", choices=["run"], help="操作类型")
+    p_pipeline.add_argument("--novel", type=int, required=True, help="小说 ID")
+    p_pipeline.add_argument("--number", type=int, required=True, help="章节号")
+    p_pipeline.add_argument("--directive", help="用户指示")
+    p_pipeline.add_argument("--out", help="输出正文到文件")
+    p_pipeline.add_argument("--dry-run", action="store_true", help="仅检查流程，不调用 LLM")
 
     args = parser.parse_args()
 
@@ -2615,10 +3233,26 @@ def main():
         "skill": cmd_skill,
         "constraint": cmd_constraint,
         "optimize": cmd_optimize,
+        "compass": cmd_compass,
+        "style-anchor": cmd_style_anchor,
+        "template-outline": cmd_template_outline,
+        "queue": cmd_queue,
+        "preferences": cmd_preferences,
+        "tone": cmd_tone,
+        "pipeline": cmd_pipeline,
         "sys": cmd_sys,
         "whoami": cmd_whoami,
     }
-    handlers[args.command](args)
+    # 全局兜底：任何命令内部的未预期异常都转为友好提示，不吐裸 traceback
+    try:
+        handlers[args.command](args)
+    except KeyboardInterrupt:
+        print("\n已取消")
+    except Exception as e:
+        print(f"✗ 命令执行失败: {e}")
+        if os.environ.get("LINGYAN_CLI_DEBUG"):
+            import traceback
+            traceback.print_exc()
 
 
 if __name__ == "__main__":

@@ -133,6 +133,7 @@
 7. **写作时干预 ＞ 事后改写**：LLM 直接「带着人味写」句长 CV 可达 0.62，事后改写只能到 0.31（humanize-chinese 实证，见 ai-tone-research §3.1）。humanize-writing 系工具全部定位为事后 tone 校正，属于兜底而非主力。
 8. **没有任何来源认为纯负面清单足够**。「正向锚例 ＋ 重写循环 ＋ 确定性检测 ＋ 采样层硬抑制」是共同架构（分层防御）。
 9. **配额悖论**：流传的硬配额（类比≤1 个等）与 novel-writer-cli 的「零配额＋统计目标」方法论冲突——后者用统计指标替代机械禁词计数，避免为满足配额而牺牲表达。采纳流传配额时应降级为软指引。
+10. **「表演不完美」是反向模板**（Anbeeld/WRITING.md 原文已核）：该指南明文禁止编造错别字、俚语、舞台化凌乱——irregularity 只能「当思路本身产生它时」出现，并把「optimize for sounding human」列为 anti-goal。与墨云的「拥抱不完美」并不矛盾但必须分层：墨云的不完美发生在**生成意图层**（叙事者真的不确定），Anbeeld 反对的是**装饰层**表演（往成品上贴毛边）——后者正是「过度去AI制造新AI味」的又一形态。正向注入时须区分这两层。
 
 ---
 
@@ -295,7 +296,19 @@
 
 ---
 
-## 八、来源索引
+## 八、遗留缺口补抓要点回写（2026-09-04，5/5 原文已核）
+
+> 原五个未能提取原文的链接已全部补抓，要点如下；各处正文引用（E6、§四-10、§六-2/3）与原文核对无冲突。
+
+1. **[Anbeeld/WRITING.md](https://github.com/Anbeeld/WRITING.md)** ✅（英文文档，非中文）：六级指令优先级体系 + 14 条编号核心规则 + 14 项 required checks（按长度分档触发）；E6「verified restraint」原文为 "Specificity theater → verified restraint" 修正模式（编不出的里程碑名/精确措辞→整条省略；虚构证据→核实计数或删除）；**明文反对表演性不完美与「为 sounding human 优化」**（见 §四-10）；「修正模式是合成模板不是可插入的事实」——防指南自身成为造假种子。
+2. **[DankerMu/novel-writer-cli anti-ai-polish.md](https://github.com/DankerMu/novel-writer-cli/blob/main/docs/anti-ai-polish.md)** ✅：可量化预算表（体裁感知）——强调词 ≤2/300 字、形容词 ≤6/300 字且禁一名双形容、成语 ≤3/500 字 ≤2/段且禁连用、单句段占比 25-45%（科幻 15-30% / 恐怖 30-50%）且禁 3 连同构段、省略号 ≤1/段 ≤5/章、感叹号 ≤8/章（科幻 5）、「深吸一口气」≤1/章、对话六意图测试（试探/回避/施压/诱导/挑衅/敷衍，每句必占其一）——**正向 lint 的现成指标库**（配额悖论警示仍适用：降级为统计软目标）。
+3. **[miserylee/webnovel-handbook 06 号](https://github.com/miserylee/webnovel-handbook/blob/main/docs/core-writing/06-ai-writing-guidelines.md)** ✅：去AI味是**写中+交付前的质量门**而非终稿润色；先修逻辑连续性与人物因果再修文风（AI 含量≥「高」时禁词级修改强制结构返工）；四级 AI 含量标尺（低/中/高/极高，判定必须引用具体文本现象）；「人味八项」逐章验收（读者承诺/正反三层目标/场景摩擦/幽默拍/情绪触点/进度兑现/章尾外动作+内情绪）；**口味保护模式**——用户认为稿子有人味时目标切换为「保味道只修硬错」；删除测试（删后不影响动作/信息/人物/关系/氛围/节奏/钩子→删）。
+4. **[leenbj/novel-creator-skill humanizer-guide](https://github.com/leenbj/novel-creator-skill/blob/main/references/humanizer-guide.md)** ✅：AI 味成因 = 模型统计性偏好「多数情况都成立」的安全中性表达；两遍工序（一遍按七类模式逐段清理 + 一遍自审必须列出 3-5 个具体问题）；**量化线**——弱副词（微微/淡淡/缓缓） individually 可容、**超 3 个/千字**即判 AI；仿佛/宛如类比喻**每段 1 个即超标**；「不禁/不由自主」的批评角度是**剥夺人物能动性**（不只频率）；带 detect/report/prompt 三命令的 Python 工具链 + 检测结果自动写进校稿报告的门禁形态。
+5. **[masterball-w/Master-humanizer-skill](https://github.com/masterball-w/Master-humanizer-skill/blob/main/SKILL.md)** ✅：**反简洁原则**（「冗余即真实」——重复用词、重申主语是真人标志，刻意保留）；**叙事规则 18 最高优先**（禁压缩叙事：经验须铺陈六要素——时间锚点/工具版本/原话引用/情绪转变/思维流/外部验证）；「先写后检」一次筛选编辑而非两遍重写；模式诊断问题优于词表（「你禁『稳』它写『顺』」）；元警告：**过度口语化适得其反，AI 本就擅长模仿伪口语**；直角引号/破折号清零（比灵砚更激进的标点纪律，体裁差异大，采信需按体裁检验）。
+
+---
+
+## 九、来源索引
 
 ### 中文社交平台 / 传媒
 - [SMZDM·翻了20多篇"去AI味"高赞笔记](https://post.smzdm.com/p/a4qdpzzw/)（片段）｜[同站·老板开始用AI查周报里的AI味](https://post.smzdm.com/p/a6zwenq0/)｜[同站·越改越重](https://post.smzdm.com/p/a26zpo5q/)｜[同站·加噪自保](https://post.smzdm.com/p/aqr0vgrk/)
@@ -316,6 +329,4 @@
 - [lguz/humanize-writing-skill](https://github.com/lguz/humanize-writing-skill)｜[aaaronmiller/humanize-writing](https://github.com/aaaronmiller/humanize-writing)｜[haidrrrry/humanize-ai-writing](https://github.com/haidrrrry/humanize-ai-writing)｜[louisfb01 Anti_Slop_AI_Writing_Guide](https://raw.githubusercontent.com/louisfb01/ai-engineering-cheatsheets/main/Anti_Slop_AI_Writing_Guide.md)｜[jbaruch blog-writer ai-anti-patterns](https://tessl.io/registry/jbaruch/blog-writer/0.18.2/files/references/ai-anti-patterns.md)
 - 否定指令反效果实证：[arXiv 2404.15154（粉红大象）](https://ar5iv.labs.arxiv.org/html/2404.15154)、[Semantic Gravity Wells](https://ar5iv.labs.arxiv.org/html/2601.08070)、[diglot·完整禁词表及其为何失败](https://diglot.ai/blog/chatgpt-words-to-avoid)
 
-### 调研遗留缺口
-以下文件的 ❌/✅ 对照示例与完整词表因沙箱网络限制未能提取原文，后续可在有外网的终端补抓（均为 raw URL，一次 curl 即可）：
-`miserylee/webnovel-handbook 06-ai-writing-guidelines.md`、`DankerMu/novel-writer-cli docs/anti-ai-polish.md`、`leenbj/novel-creator-skill references/humanizer-guide.md`、`Anbeeld/WRITING.md WRITING.md 全文`、`Master-humanizer-skill SKILL.md`。
+### 调研遗留缺口（✅ 已于 2026-09-04 全部补抓，要点见 §八）

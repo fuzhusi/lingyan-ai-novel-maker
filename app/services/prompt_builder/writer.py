@@ -3,7 +3,7 @@ import logging
 
 from app.services.prompt_builder.context import (
     _section, _load_system_prompt, _load_constraints, DEFAULT_WRITER_CONSTRAINTS,
-    get_skill_prompt,
+    get_skill_prompt, build_compass_block,
 )
 
 logger = logging.getLogger(__name__)
@@ -13,8 +13,10 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
                         characters=None, world_settings=None, summaries=None,
                         foreshadowing_items=None, synopsis="", world_intro="",
                         outline_node_context=None, causal_chain="", memory_context="",
+                        boundary_context="",
                         prev_ending="", earlier_summaries="", genre="", db=None,
-                        tone_instructions=""):
+                        tone_instructions="", author_intent="", current_focus="",
+                        style_memo="", creator_preferences=""):
     system_prompt = _load_system_prompt(db, "writer", (
         "你是一位专业的小说作家，擅长用生动的语言和细腻的描写创作引人入胜的故事。"
         "根据提供的创作指引，写出高质量的小说章节内容。严格遵守世界观设定和人物设定，"
@@ -38,7 +40,12 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
         constraints = DEFAULT_WRITER_CONSTRAINTS
 
     # 技能提示注入到 system message（而非 memory_context）
-    skill_prompt = get_skill_prompt("write")
+    # 特别指示里的 @skill-id 语法：临时附加技能（仅本次生效）
+    from app.services.skill_system import parse_directive_skills
+    directive_clean, extra_skills = parse_directive_skills(user_directive)
+    if directive_clean != user_directive:
+        user_directive = directive_clean
+    skill_prompt = get_skill_prompt("write", extra_skills=extra_skills)
 
     # 去AI化约束放在 system message 最前面（最高优先级）
     full_system = constraints
@@ -53,6 +60,21 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
         blocks.append(_section("小说类型", genre))
     if synopsis:
         blocks.append(_section("小说简介", synopsis))
+
+    # 创作罗盘（借鉴 OpenWrite）：位于上下文最高优先位置，永不因 token 预算被裁
+    compass = build_compass_block(author_intent, current_focus, verb="写作时必须兑现")
+    if compass:
+        blocks.append(compass)
+
+    # P4 创作偏好档案：长期有效的结构化约束（文风/禁忌/受众）
+    if creator_preferences and creator_preferences.strip():
+        blocks.append(_section("创作偏好档案（长期有效，最高优先约束）",
+                               creator_preferences.strip()))
+    # P4 风格备忘录（B3）：审批时逐章累积的文体要点
+    if style_memo and style_memo.strip():
+        blocks.append(_section("近期文体备忘（延续已建立的文体走向）",
+                               style_memo.strip()))
+
     if world_intro:
         blocks.append(_section("世界观设定", world_intro))
 
@@ -130,6 +152,10 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
     if memory_context:
         blocks.append(_section("相关记忆（语义检索结果）", memory_context))
 
+    # 信息边界 + 时序真相：一致性红线，独立段落且不在上下文预算压缩范围
+    if boundary_context:
+        blocks.append(_section("信息边界与既定事实（一致性红线，必须遵守）", boundary_context))
+
     if chapter_title:
         blocks.append(_section("章节标题", chapter_title))
     if outline:
@@ -156,7 +182,8 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
 
 def build_outline_prompt(novel_title="", genre="", synopsis="", world_intro="",
                          chapter_title="", chapter_number=1, characters=None,
-                         summaries=None, foreshadowing_items=None, db=None):
+                         summaries=None, foreshadowing_items=None, db=None,
+                         author_intent="", current_focus=""):
     system_prompt = _load_system_prompt(db, "outline", (
         "你是一位资深小说大纲策划师，擅长根据小说的设定和背景，为章节制定详细的大纲。"
         "请输出一份结构清晰的章节大纲，包含以下部分："
@@ -179,6 +206,12 @@ def build_outline_prompt(novel_title="", genre="", synopsis="", world_intro="",
         blocks.append(_section("小说类型", genre))
     if synopsis:
         blocks.append(_section("小说简介", synopsis))
+
+    # 创作罗盘：大纲更不能写歪
+    compass = build_compass_block(author_intent, current_focus, verb="大纲必须服务于此")
+    if compass:
+        blocks.append(compass)
+
     if world_intro:
         blocks.append(_section("世界观设定", world_intro))
     if chapter_title:

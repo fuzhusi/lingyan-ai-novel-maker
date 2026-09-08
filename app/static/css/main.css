@@ -26,8 +26,8 @@
     /* 文本 — 绢纸暖白 */
     --text:         #ecdfcd;
     --text-bright:  #faf1de;
-    --text-dim:     #b3a189;
-    --text-faint:   #7d6c58;
+    --text-dim:     #7d7062;
+    --text-faint:   #9a8e7e;
 
     /* 主强调 — 朱砂 */
     --accent:        #ef6a48;
@@ -1980,11 +1980,11 @@ pre.t-content {
 .gate-report,
 .output-area,
 #add-provider-modal > div {
-    /* 纸上墨色 */
+    /* 纸上墨色：统一用字面量，不依赖变量链——浏览器深色模式重绘会把变量链解析为淡色（看不清） */
     --text:        #33291d;
     --text-bright: #241c11;
-    --text-dim:    #6f6455;
-    --text-faint:  #97896f;
+    --text-dim:    #3a3028;
+    --text-faint:  #5a4f43;
     /* 纸上面色 */
     --bg:           #f7f1e3;
     --bg-elevated:  #fcf8ee;
@@ -2010,6 +2010,50 @@ pre.t-content {
     --azure-light:  #3f6080;
     color: var(--text);
 }
+
+/* ── 纸面文字色：独立选择器强制覆盖（防止浏览器深色模式重绘） ── */
+.card, .novel-card, .chapter-card, .card-item, .outline-item,
+.sidebar-card, .mode-card, .skill-card, .review-comment,
+.gate-report, .output-area, #add-provider-modal > div {
+    color-scheme: light;
+}
+.card a, .novel-card a, .chapter-card a, .card-item a,
+.outline-item a, .sidebar-card a, .mode-card a, .skill-card a,
+.review-comment a, .gate-report a, #add-provider-modal a {
+    color: #241c11 !important;
+    text-decoration: none;
+}
+.card a:visited, .novel-card a:visited, .chapter-card a:visited {
+    color: #3a3028 !important;
+}
+.card a:hover, .novel-card a:hover, .chapter-card a:hover {
+    color: #1a1410 !important;
+    text-decoration: underline;
+}
+.card h2, .novel-card h2, .chapter-card h2, .card-item h2,
+.outline-item h2, .sidebar-card h2, .mode-card h2, .skill-card h2,
+.review-comment h2, .gate-report h2, #add-provider-modal h2,
+.card h3, .card h4, .card h5, .card h6,
+.novel-card h3, .chapter-card h3 {
+    color: #1a1410 !important;
+}
+.card h2 a, .novel-card h2 a, .chapter-card h2 a,
+.card-item h2 a, .outline-item h2 a, .sidebar-card h2 a,
+.review-comment h2 a, .gate-report h2 a {
+    color: #1a1410 !important;
+}
+.card h2 a:hover, .novel-card h2 a:hover, .chapter-card h2 a:hover {
+    color: #0d0b09 !important;
+}
+.card summary, .novel-card summary, .chapter-card summary,
+.sidebar-card summary, .gate-report summary, .outline-item summary {
+    color: #3a3028 !important;
+    cursor: pointer;
+}
+.card summary:hover, .novel-card summary:hover {
+    color: #1a1410 !important;
+}
+
 
 /* 纸上选区：金晕 + 墨字 */
 .card ::selection,
@@ -2080,7 +2124,10 @@ pre.t-content {
     width: 100%;
     min-height: 520px;
     padding: 2.5rem 3rem;
-    background-color: var(--bg-elevated);
+    /* 纸面用字面量色而非变量链：变量任一环失效/浏览器自动深色重绘
+       都会把稿纸变成深底淡字（不可读）。color-scheme:light 锁死原生控件。 */
+    color-scheme: light;
+    background-color: #fdfaf3;
     background-image:
         repeating-linear-gradient(
             to bottom,
@@ -2092,7 +2139,9 @@ pre.t-content {
         linear-gradient(180deg, #fdfaf3 0%, rgba(246, 239, 221, 0.96) 100%);
     border: 1px solid var(--border-light);
     border-radius: var(--radius-lg);
-    color: var(--text-bright);
+    color: #241c11;
+    font-weight: 400;
+    caret-color: #93321f;
     font-size: 1.08rem;
     line-height: 2.1;
     font-family: var(--font-body);

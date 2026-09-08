@@ -6,6 +6,7 @@
 import json
 import logging
 import os
+import ssl
 from typing import Generator
 from urllib.parse import urlsplit
 
@@ -40,6 +41,22 @@ def _ssl_verify_for(base_url: str) -> bool:
     if len(parts) == 4 and parts[0] == "172" and parts[1].isdigit() and 16 <= int(parts[1]) <= 31:
         return False
     return True
+
+
+def _ssl_context_for(base_url: str) -> ssl.SSLContext:
+    """构建 httpx 用的 SSL 上下文：校验策略同 _ssl_verify_for。
+
+    LINGYAN_TLS_MAX=1.2 时强制 TLS<=1.2 —— 绕过本机安全软件/加速器破坏
+    Python TLS1.3 记录导致的 SSLV3_ALERT_BAD_RECORD_MAC（症状：GET 可过、
+    带请求体的 POST 必挂且秒失败；curl 不受影响）。
+    """
+    ctx = ssl.create_default_context()
+    if not _ssl_verify_for(base_url):
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    if os.getenv("LINGYAN_TLS_MAX", "").strip() == "1.2":
+        ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+    return ctx
 
 
 class LLMError(Exception):
@@ -91,7 +108,7 @@ def fetch_models_from_provider(base_url: str, api_key: str, provider_type: str =
     last_err = None
     for attempt in range(3):
         try:
-            resp = httpx.get(url, headers=headers, timeout=30.0, verify=_ssl_verify_for(base_url))
+            resp = httpx.get(url, headers=headers, timeout=30.0, verify=_ssl_context_for(base_url))
             resp.raise_for_status()
             data = resp.json()
             break
@@ -135,7 +152,7 @@ def test_provider_connection(base_url: str, api_key: str, provider_type: str = "
 
 def _build_http_client(base_url: str = "") -> httpx.Client:
     """构建 httpx 客户端（共享配置）。证书校验策略见 _ssl_verify_for。"""
-    return httpx.Client(verify=_ssl_verify_for(base_url), timeout=httpx.Timeout(300.0, connect=10.0))
+    return httpx.Client(verify=_ssl_context_for(base_url), timeout=httpx.Timeout(300.0, connect=10.0))
 
 
 def get_llm(
@@ -148,6 +165,7 @@ def get_llm(
     streaming: bool = True,
     frequency_penalty: float | None = None,
     presence_penalty: float | None = None,
+    logprobs: bool = False,
 ) -> ChatOpenAI:
     """构建 ChatOpenAI 实例。
 
@@ -161,6 +179,7 @@ def get_llm(
         streaming: 是否流式
         frequency_penalty: 频率惩罚（-2~2，惩罚已出现 token，抑制重复措辞/构式指纹）
         presence_penalty: 存在惩罚（-2~2，鼓励引入新内容）
+        logprobs: 请求逐 token 对数概率（诊断用，需厂商支持，不支持会报错）
     """
     kwargs = {
         "model": model,
@@ -173,6 +192,8 @@ def get_llm(
         kwargs["frequency_penalty"] = frequency_penalty
     if presence_penalty is not None:
         kwargs["presence_penalty"] = presence_penalty
+    if logprobs:
+        kwargs["logprobs"] = True
 
     if base_url:
         kwargs["base_url"] = base_url.rstrip("/")
@@ -262,6 +283,57 @@ def stream_llm_tokens(
         raise
     except Exception as e:
         logger.error("stream_llm_tokens failed: %s", e)
+        raise LLMError(_friendly_error(e)) from e
+    finally:
+        if llm and hasattr(llm, "http_client") and llm.http_client:
+            try:
+                llm.http_client.close()
+            except Exception:
+                pass
+
+
+def call_llm_with_logprobs(
+    model: str,
+    messages: list[dict],
+    api_key: str = "",
+    base_url: str = "",
+    provider_type: str = "custom",
+    temperature: float = 0.0,
+    max_tokens: int = 4096,
+) -> tuple[str, list[tuple[str, float]]]:
+    """非流式调用并返回 (回复文本, [(token, logprob), ...])。
+
+    供困惑度雷达等需要逐 token 对数概率的诊断场景。要求厂商支持
+    OpenAI 兼容的 logprobs 参数；厂商不支持/未返回时抛 LLMError，
+    由调用方降级（雷达功能自动隐身，不影响主链路）。
+    """
+    llm = None
+    try:
+        llm = get_llm(
+            model=model, api_key=api_key, base_url=base_url,
+            provider_type=provider_type, temperature=temperature,
+            max_tokens=max_tokens, streaming=False, logprobs=True,
+        )
+        lc_messages = _messages_to_langchain(messages)
+        result = llm.invoke(lc_messages)
+        content = result.content
+        if isinstance(content, list):
+            content = "".join(
+                p.get("text", "") for p in content if isinstance(p, dict)
+            )
+        content = content if isinstance(content, str) else str(content)
+
+        lp_data = (result.additional_kwargs or {}).get("logprobs") or {}
+        items = lp_data.get("content") or []
+        tokens = [(it.get("token", ""), float(it.get("logprob", 0.0)))
+                  for it in items if isinstance(it, dict)]
+        if not tokens:
+            raise LLMError("厂商未返回 logprobs（可能不支持该参数）")
+        return content, tokens
+    except LLMError:
+        raise
+    except Exception as e:
+        logger.error("call_llm_with_logprobs failed: %s", e)
         raise LLMError(_friendly_error(e)) from e
     finally:
         if llm and hasattr(llm, "http_client") and llm.http_client:

@@ -28,6 +28,10 @@
             <span class="sep">|</span>
             <button id="btn-audit" class="btn-sm btn-edit" disabled title="两位毒舌编辑零上下文盲审">双盲审</button>
             <button id="btn-diff" class="btn-sm btn-edit" disabled>版本对比</button>
+            <button id="btn-converge" class="btn-sm btn-edit" disabled title="检测 AI 痕迹 → 定向重写 → 复测；人味分不升自动回滚保留原稿">AI味收敛</button>
+            <button id="btn-condense" class="btn-sm btn-edit" disabled title="超字数时压缩：保留情节节拍/对话/因果，压描写冗余">压缩超标</button>
+            <button id="btn-pipeline" class="btn-sm btn-edit" title="一键流水线：缺大纲生成 → 正文 → 门禁 → AI味收敛，停在人工审阅">一键本章</button>
+            <button id="btn-consistency" class="btn-sm btn-edit" disabled title="确定性交叉核对（时序真相/伏笔排期），疑点可交 AI 裁决">一致性核查</button>
         </div>
 
         <div id="error-box" class="error-box" style="display:none"></div>
@@ -65,7 +69,7 @@
             </details>
             {% endif %}
             <details id="outline-details"{% if chapter.outline and not outline_context %} open{% endif %}>
-                <summary>本章大纲 <span id="outline-status" style="font-size:0.78rem;color:var(--text-dim)"></span></summary>
+                <summary>本章大纲 <span id="outline-status" style="font-size:0.78rem;color:var(--text-dim)"></span>{% if chapter.outline_stale() %} <span style="font-size:0.78rem;color:#c9862b">&#x26A0; 大纲已变更，当前正文基于旧大纲生成</span>{% endif %}</summary>
                 <div id="outline-content" class="meta-block">{% if chapter.outline %}{{ chapter.outline }}{% else %}<span class="empty">暂无大纲，点击「AI 生成本章」将先生成大纲</span>{% endif %}</div>
             </details>
             <details>
@@ -109,6 +113,7 @@
             <div id="review-comment" class="review-comment"></div>
             <h4>段落标注</h4>
             <div id="review-annotations"></div>
+            <div id="opinions-box" style="margin:0.6rem 0"></div>
             <h4>我的意见 <span id="feedback-saved" style="display:none;font-size:0.75rem;color:var(--success);font-weight:400">已保存</span></h4>
             <textarea id="user-feedback" class="user-feedback" rows="3"
                 placeholder="对评审结果有什么补充意见？重写时这些意见会和 Critic 的评审一起送给 AI..."></textarea>
@@ -123,6 +128,10 @@
         </div>
 
         <!-- Diff Panel -->
+        <div id="consistency-panel" class="review-panel" style="display:none">
+            <h3>一致性核查 <span id="consistency-verdict" class="review-score"></span></h3>
+            <div id="consistency-body"></div>
+        </div>
         <div id="diff-panel" class="diff-panel" style="display:none">
             <h3>版本对比 <span id="diff-vlabel"></span></h3>
             <div style="margin-bottom:0.75rem;display:flex;gap:0.5rem;align-items:center">
@@ -174,6 +183,10 @@
     const btnRewrite = $('btn-rewrite');
     const btnDiff = $('btn-diff');
     const btnAudit = $('btn-audit');
+    const btnConverge = $('btn-converge');
+    const btnCondense = $('btn-condense');
+    const btnPipeline = $('btn-pipeline');
+    const btnConsistency = $('btn-consistency');
     const outputArea = $('output-area');
     const streamInd = $('streaming-indicator');
     const errorBox = $('error-box');
@@ -196,6 +209,10 @@
         btnApprove.disabled = !currentVersionId;
         btnRewrite.disabled = !currentVersionId;
         btnDiff.disabled = versions.length < 2;
+        btnConverge.disabled = !has || generating;
+        btnCondense.disabled = !has || generating;
+        btnPipeline.disabled = generating;
+        btnConsistency.disabled = !has || generating;
     }
 
     function renderVersions() {
@@ -303,6 +320,7 @@
     // === 统一评审报告渲染 ===
     function renderUnifiedReport(report) {
         $('review-panel').style.display = 'block';
+        window._mergedOpinions = report.merged_opinions || [];
 
         // 综合评分 + 等级（critic 未产出评分时如实显示 —，不造 0 分）
         const hasScore = typeof report.overall_score === 'number';
@@ -362,6 +380,24 @@
             issuesHtml += `<div style="color:var(--text-faint);font-size:0.78rem;text-align:center;padding:0.4rem">...还有 ${report.issues.length - 8} 个问题</div>`;
         }
         $('review-annotations').innerHTML = issuesHtml || '<div style="color:var(--success)">未发现明显问题</div>';
+
+        // 统一意见勾选（P1）：勾选后「重写」会把意见逐条注入改写链
+        const opinions = window._mergedOpinions || [];
+        if (opinions.length) {
+            let opHtml = '<div style="font-weight:600;color:var(--accent);margin-bottom:0.3rem">评审意见勾选（勾选后点「重写」逐条落实）</div>';
+            opinions.forEach(op => {
+                const sevColor = op.severity === 'high' ? 'var(--danger)' : 'var(--accent)';
+                opHtml += `<label style="display:flex;gap:0.45rem;align-items:flex-start;padding:0.35rem 0.5rem;margin-bottom:0.3rem;background:var(--bg);border-radius:4px;cursor:pointer">
+                    <input type="checkbox" class="opinion-cb" value="${escapeHtml(op.id)}" style="margin-top:0.2rem">
+                    <span style="font-size:0.82rem;line-height:1.5;color:var(--text-bright)">
+                        <span style="color:${sevColor};font-weight:600">${escapeHtml(op.source)}</span>
+                        · ${escapeHtml((op.issue || '').slice(0, 120))}</span>
+                </label>`;
+            });
+            $('opinions-box').innerHTML = opHtml;
+        } else {
+            $('opinions-box').innerHTML = '';
+        }
 
         // 自动改写（如果有）
         if (report.rewrite && report.rewrite.rewritten_content) {
@@ -469,6 +505,133 @@
             renderVersions(); updateButtons();
         } catch(e) { alert('保存失败: ' + e.message); }
     }
+
+    // === AI味收敛 / 字数超标压缩（merge-assessment A2/A5） ===
+    btnConverge.onclick = async function() {
+        if (generating) return;
+        const text = (outputArea.value || '').trim();
+        if (!text) return alert('没有可收敛的内容');
+        btnConverge.disabled = true; btnConverge.innerHTML = '收敛中...';
+        try {
+            const resp = await fetch('/api/tone-converge', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text, novel_id: NOVEL_ID })
+            });
+            const data = await resp.json();
+            if (data.error) { alert('收敛失败: ' + data.error); return; }
+            if (data.converged) {
+                fullText = data.text;
+                outputArea.value = data.text;
+                runSkillGate(data.text);
+                alert('收敛完成：人味分 ' + data.original_score + ' → ' + data.final_score +
+                    '。尚未保存，请点「保存版本」落库。');
+            } else {
+                const trail = (data.rounds || []).map(r => r.action).join('；');
+                alert('本轮未能提升人味分（' + (data.original_score ?? '-') + '），已保留原稿。' +
+                    (data.reason ? '\n原因：' + data.reason : (trail ? '\n' + trail : '')));
+            }
+        } catch(e) { alert('收敛失败: ' + e.message); }
+        finally { btnConverge.innerHTML = 'AI味收敛'; updateButtons(); }
+    };
+
+    btnCondense.onclick = async function() {
+        if (generating) return;
+        const text = (outputArea.value || '').trim();
+        if (text.length <= 3250) return alert('当前约 ' + text.length + ' 字，未超过压缩阈值（3250 字），无需压缩');
+        if (!confirm('当前约 ' + text.length + ' 字，压缩到约 2500 字？\n保留情节节拍/对话/因果，压缩描写冗余。')) return;
+        btnCondense.disabled = true; btnCondense.innerHTML = '压缩中...';
+        try {
+            const resp = await fetch('/api/condense', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text, novel_id: NOVEL_ID })
+            });
+            const data = await resp.json();
+            if (data.error) { alert('压缩失败: ' + data.error); return; }
+            if (data.ok) {
+                fullText = data.text;
+                outputArea.value = data.text;
+                runSkillGate(data.text);
+                alert('压缩完成：' + data.original_chars + ' → ' + data.condensed_chars +
+                    ' 字。尚未保存，请点「保存版本」落库。');
+            } else {
+                alert('压缩未执行：' + (data.reason || '未知原因'));
+            }
+        } catch(e) { alert('压缩失败: ' + e.message); }
+        finally { btnCondense.innerHTML = '压缩超标'; updateButtons(); }
+    };
+
+    // === 一键本章流水线（P3） / 一致性核查（P2） ===
+    btnPipeline.onclick = async function() {
+        if (generating) return;
+        if (!confirm('一键流水线：生成大纲（如缺）→ 正文 → 门禁 → AI味收敛（人味分不升自动回滚）。\n完成后停在人工审阅，不自动保存。继续？')) return;
+        generating = true; btnPipeline.innerHTML = '流水线中...'; btnPipeline.disabled = true;
+        streamInd.style.display = 'block'; errorBox.style.display = 'none';
+        try {
+            const resp = await fetch('/api/chapter-pipeline', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ novel_id: NOVEL_ID, chapter_number: CHAPTER_NUM })
+            });
+            const data = await resp.json();
+            if (data.error) {
+                errorBox.textContent = '流水线失败: ' + data.error;
+                errorBox.style.display = 'block';
+            } else {
+                fullText = data.text;
+                outputArea.value = data.text;
+                if (data.outline) outlineContent.textContent = data.outline;
+                runSkillGate(data.text);
+                const stages = (data.stages || []).map(s => s.stage).join(' → ');
+                alert('流水线完成：' + stages + '\n人味分 ' + (data.human_score ?? '-') +
+                    '。正文未保存，请审阅后点「保存版本」。');
+            }
+        } catch(e) { alert('流水线失败: ' + e.message); }
+        finally {
+            generating = false; btnPipeline.innerHTML = '一键本章';
+            streamInd.style.display = 'none'; updateButtons();
+        }
+    };
+
+    btnConsistency.onclick = async function() {
+        if (generating) return;
+        const text = (outputArea.value || '').trim();
+        if (!text) return alert('没有可核查的内容');
+        const adjudicate = confirm('确定性核对完成后，是否调用 AI 裁决疑点？\n（取消 = 只出疑点清单）');
+        btnConsistency.disabled = true; btnConsistency.innerHTML = '核查中...';
+        const panel = $('consistency-panel'), body = $('consistency-body');
+        panel.style.display = 'block';
+        body.innerHTML = '<div style="color:var(--text-dim)">核查中…</div>';
+        try {
+            const resp = await fetch('/api/consistency-check', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ novel_id: NOVEL_ID, chapter_number: CHAPTER_NUM,
+                                       text: text, adjudicate: adjudicate })
+            });
+            const data = await resp.json();
+            if (data.error) { body.innerHTML = '核查失败: ' + escapeHtml(data.error); return; }
+            $('consistency-verdict').innerHTML = data.passed
+                ? '<span style="color:var(--success)">未发现疑点</span>'
+                : '<span style="color:var(--danger)">疑点 ' + (data.suspects || []).length + ' 项</span>';
+            let h = '';
+            const verdictById = {};
+            (data.verdicts || []).forEach(v => verdictById[v.kind + '|' + v.title] = v);
+            (data.suspects || []).forEach(s => {
+                const v = verdictById[s.kind + '|' + s.title];
+                let tail = '';
+                if (v) {
+                    const color = v.is_conflict ? 'var(--danger)' : 'var(--success)';
+                    const label = v.is_conflict === null ? '裁决失败' : (v.is_conflict ? '确认矛盾' : '非矛盾');
+                    tail = `<div style="color:${color};font-size:0.8rem;margin-top:0.2rem">AI 裁决：${escapeHtml(label)}` +
+                        (v.reason ? ` — ${escapeHtml(v.reason)}` : '') +
+                        (v.suggestion ? `（${escapeHtml(v.suggestion)}）` : '') + '</div>';
+                }
+                h += `<div style="padding:0.5rem 0.7rem;margin-bottom:0.4rem;background:var(--bg);border-left:3px solid var(--accent);border-radius:0 4px 4px 0">
+                    <b style="color:var(--accent);font-size:0.85rem">${escapeHtml(s.title || '')}</b>
+                    <div style="font-size:0.82rem;color:var(--text-bright);margin-top:0.2rem">${escapeHtml(s.detail || '')}</div>${tail}</div>`;
+            });
+            body.innerHTML = h || '<div style="color:var(--success)">未发现疑点</div>';
+        } catch(e) { body.innerHTML = '核查失败: ' + escapeHtml(e.message); }
+        finally { btnConsistency.innerHTML = '一致性核查'; updateButtons(); }
+    };
 
     // === 本章出场角色勾选（生成时只注入选中角色的档案） ===
     const CHAR_STORE_KEY = 'lingyan_chars_' + NOVEL_ID + '_' + CHAPTER_NUM;
@@ -649,6 +812,22 @@
                 const v = versions.find(v => v.id === currentVersionId);
                 if (v) v.approved = true;
                 renderVersions();
+                // 人工版本 → 反向提取文风锚例候选（用户改过的段落 = 最真人语料）
+                if (data.anchor_candidate) {
+                    const preview = data.anchor_candidate.slice(0, 150);
+                    if (confirm('检测到人工撰写的段落，提取为文风锚例（注入后续生成）？\n\n' + preview + '…')) {
+                        try {
+                            const r2 = await fetch('/api/style-anchor', {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ text: data.anchor_candidate })
+                            });
+                            if (r2.ok) alert('已保存为文风锚例（可在设置页查看/启停）。');
+                        } catch(e2) { alert('锚例保存失败: ' + e2.message); }
+                    }
+                }
+            } else {
+                // 服务端拒绝（如空正文 400）：必须给出可见反馈，不能静默吞掉
+                alert('批准失败: ' + (data.error || ('HTTP ' + resp.status)));
             }
         } catch(e) { alert('批准失败: ' + e.message); }
     };
@@ -668,6 +847,13 @@
         const formData = new URLSearchParams();
         formData.append('version_id', rewriteFromId);
         formData.append('novel_title', {{ novel.title|tojson|safe }});
+        // P1：带上评审面板勾选的统一意见
+        const checked = Array.from(document.querySelectorAll('.opinion-cb:checked'))
+            .map(cb => cb.value);
+        if (checked.length && (window._mergedOpinions || []).length) {
+            const selected = window._mergedOpinions.filter(op => checked.includes(op.id));
+            if (selected.length) formData.append('opinions', JSON.stringify(selected));
+        }
 
         try {
             await streamFetch('/api/rewrite-stream', formData, function(token) {

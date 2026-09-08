@@ -1,5 +1,12 @@
 """核心小说结构模型：小说、章节、版本、评审、模板、设置。"""
+import hashlib
+
 from app.models.base import db, now
+
+
+def outline_hash_of(text):
+    """大纲内容指纹（MD5 足够——用途是变更检测，非安全）。"""
+    return hashlib.md5((text or "").encode("utf-8")).hexdigest()
 
 
 class Novel(db.Model):
@@ -9,6 +16,11 @@ class Novel(db.Model):
     genre = db.Column(db.String(100), default="")
     synopsis = db.Column(db.Text, default="")
     world_intro = db.Column(db.Text, default="")
+    # 创作罗盘（借鉴 OpenWrite）：全书长期承诺 + 当前阶段目标
+    author_intent = db.Column(db.Text, default="")   # 作者意图：写这本书要兑现的承诺，永不被上下文压缩裁掉
+    current_focus = db.Column(db.Text, default="")   # 当前重心：近几章的最高优先级目标，可随阶段更新
+    # P4 风格备忘录（B3）：审批时逐章累积的文体要点，写作包注入后续章节
+    style_memo_json = db.Column(db.Text, default="[]")
     model_override = db.Column(db.Text, default="{}")
     created_at = db.Column(db.String(20), default=now)
 
@@ -24,6 +36,9 @@ class Chapter(db.Model):
     outline = db.Column(db.Text, default="")
     user_directive = db.Column(db.Text, default="")
     outline_node_id = db.Column(db.Integer, db.ForeignKey("outline_nodes.id"), nullable=True)
+    # 生成/保存正文时所依据的大纲指纹（借鉴 jarvis-write 大纲级联引擎的失配标记思路）
+    # 大纲事后变更时指纹不更新 → outline_stale() 为真，提示正文与大纲已脱节
+    outline_hash = db.Column(db.String(64), default="")
     created_at = db.Column(db.String(20), default=now)
 
     novel = db.relationship("Novel", back_populates="chapters")
@@ -33,6 +48,11 @@ class Chapter(db.Model):
     outline_node = db.relationship("OutlineNode", backref="linked_chapter", uselist=False)
 
     __table_args__ = (db.UniqueConstraint("novel_id", "chapter_number", name="uq_chapter_number"),)
+
+    def outline_stale(self):
+        """正文生成后大纲又被改动（失配）。从未据大纲生成过（无指纹）不算失配。"""
+        return bool(self.outline and self.outline_hash
+                    and self.outline_hash != outline_hash_of(self.outline))
 
 
 class ChapterVersion(db.Model):

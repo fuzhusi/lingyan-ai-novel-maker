@@ -237,6 +237,35 @@ def anchor_enabled():
     return setting is not None and str(setting.value).strip() == "1"
 
 
+def extract_anchor_candidate(text, min_len=300, max_len=1200):
+    """从人工撰写/修改的文本中提取文风锚例候选（启发式，零 LLM 成本）。
+
+    来源：merge-assessment A3——用户改过的段落就是最真人语料（平台要求
+    人工改写 ≥30% 的现实让"已接受版本"天然带有人的笔触）。
+    策略：在含对话、长度适中的连续段落窗口里选一个最优候选；
+    提取结果只是"候选"，是否入库由用户在前端确认。
+    """
+    paras = [p.strip() for p in (text or "").split("\n")
+             if len(p.strip()) >= 40]
+    best, best_score = None, 0
+    for i in range(len(paras)):
+        window = paras[i]
+        j = i
+        while len(window) < min_len and j + 1 < len(paras):
+            j += 1
+            window += "\n" + paras[j]
+        if len(window) > max_len:
+            continue
+        score = 1
+        if "「" in window or "『" in window or '"' in window:
+            score += 2  # 含对话的段落文风信息量最高
+        if len(window) >= min_len:
+            score += 1
+        if score > best_score:
+            best, best_score = window, score
+    return best
+
+
 def set_anchor_enabled(flag):
     """设置锚例开关。"""
     setting = Setting.query.get("style_anchor_enabled")

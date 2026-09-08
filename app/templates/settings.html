@@ -72,6 +72,51 @@
         </div>
     </div>
 
+    <!-- 创作偏好档案 (P4) -->
+    <div class="card">
+        <h2 style="margin:0 0 0.6rem">创作偏好档案</h2>
+        <p style="color:var(--text-dim);font-size:0.85rem;margin-bottom:0.8rem">
+            长期有效的结构化写作约束，注入全部写作链（与每章的「特别指示」不同：这里是全书级偏好）。
+        </p>
+        <div style="display:grid;gap:0.6rem">
+            <label style="font-size:0.85rem;color:var(--text-dim)">文风偏好
+                <input id="pref-style" placeholder="例如：冷峻克制、短句为主、少用成语" style="width:100%;font-size:0.85rem;font-family:inherit;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+            </label>
+            <label style="font-size:0.85rem;color:var(--text-dim)">写作禁忌
+                <input id="pref-taboos" placeholder="例如：不写床戏；不出现真实品牌；反派不得洗白" style="width:100%;font-size:0.85rem;font-family:inherit;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+            </label>
+            <label style="font-size:0.85rem;color:var(--text-dim)">目标读者
+                <input id="pref-audience" placeholder="例如：男频 18-35 岁，偏好爽感节奏" style="width:100%;font-size:0.85rem;font-family:inherit;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+            </label>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.5rem">
+            <span id="pref-status" style="font-size:0.78rem;color:var(--text-faint)"></span>
+            <button id="btn-save-prefs" class="btn-primary btn-sm">保存偏好档案</button>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        const $p = id => document.getElementById(id);
+        fetch('/settings/api/creator-preferences').then(r=>r.json()).then(d=>{
+            $p('pref-style').value = d.style || '';
+            $p('pref-taboos').value = d.taboos || '';
+            $p('pref-audience').value = d.audience || '';
+        }).catch(()=>{});
+        $p('btn-save-prefs').onclick = async function() {
+            const body = { style: $p('pref-style').value, taboos: $p('pref-taboos').value, audience: $p('pref-audience').value };
+            try {
+                const resp = await fetch('/settings/api/creator-preferences', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                if (resp.ok) { $p('pref-status').textContent = '✓ 已保存'; $p('pref-status').style.color = 'var(--success)'; }
+                else { $p('pref-status').textContent = '保存失败'; $p('pref-status').style.color = 'var(--danger)'; }
+            } catch(e) { $p('pref-status').textContent = '保存失败: ' + e.message; }
+        };
+    })();
+    </script>
+
     <!-- Per-Agent Model Config -->
     <div class="card">
         <h2>按 Agent 类型配置模型</h2>

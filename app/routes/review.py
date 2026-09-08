@@ -1,67 +1,23 @@
 import json
 import difflib
+import logging
 from flask import Blueprint, request, Response, jsonify, current_app
-from app.models import (db, ChapterVersion, CriticReview, ChapterSummary, ChapterMemory,
-                        Foreshadowing, Novel, Character)
-from app.services.prompt_builder import (build_critic_prompt, build_summary_prompt,
+from app.models import db, Chapter, ChapterVersion, CriticReview, Novel
+from app.services.prompt_builder import (build_critic_prompt,
                                           build_rewrite_prompt, assemble_chapter_context)
-from app.services.llm import stream_llm_tokens, call_llm_sync, LLMError
+from app.services.llm import stream_llm_tokens, LLMError
+from app.services.chapter_approval import (approve_chapter_version, EmptyChapterError,
+                                           extract_json_dict as _extract_json_dict)
 from app.config_utils import get_effective_config
 
 
 review_bp = Blueprint("review", __name__, url_prefix="/api")
 
-
-def _build_memory_prompt(chapter_content="", chapter_number=0, novel_title="", characters=None):
-    """Build prompt for structured chapter memory generation."""
-    char_names = ", ".join(c.name for c in characters) if characters else ""
-
-    system_prompt = (
-        "你是一位小说分析专家。请分析章节内容，提取结构化记忆信息。"
-        "输出严格的JSON格式，不要输出其他内容。"
-    )
-    user_prompt = (
-        f"小说：{novel_title}\n"
-        f"第{chapter_number}章\n"
-        f"已知角色：{char_names}\n\n"
-        f"章节正文：\n{chapter_content}\n\n"
-        "请提取以下信息并输出JSON：\n"
-        '{"summary": "200字以内章节摘要", '
-        '"key_events": ["事件1", "事件2", ...], '
-        '"character_changes": {"角色名": "变化描述", ...}, '
-        '"foreshadow_events": [{"description": "伏笔相关事件", "foreshadow_id": null}], '
-        '"new_characters": ["新出场角色名", ...], '
-        '"scenes": [{"setting": "场景地点", "characters": ["角色1"], "summary": "50字场景摘要"}, ...]}'
-    )
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
+logger = logging.getLogger(__name__)
 
 
 def _sse_event(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
-def _extract_json_dict(text):
-    """从 LLM 输出中提取 JSON 对象：剥 ```json 围栏 → json.loads → 校验为 dict。
-
-    全库统一的解析入口（此前 4 处各自实现且口径不一）。
-    Returns:
-        dict 或 None（非对象/解析失败）
-    """
-    if not text:
-        return None
-    t = text.strip()
-    if t.startswith("```"):
-        lines = t.split("\n")
-        inner = [l for l in lines[1:] if not l.strip().startswith("```")]
-        t = "\n".join(inner)
-    try:
-        data = json.loads(t)
-    except (json.JSONDecodeError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
 
 
 def _stream_chat(messages, cfg):
@@ -208,89 +164,79 @@ def save_feedback():
 def approve_version():
     version_id = request.form.get("version_id", type=int)
     version = ChapterVersion.query.get_or_404(version_id)
-    version.approved = True
-
-    # Generate chapter summary automatically
-    chapter = version.chapter
+    # 审批事务统一走服务层（空内容 400 / 摘要兜底 / 结构化记忆），与 MCP/CLI 同源
     try:
-        cfg = get_effective_config(chapter.novel, agent_type="summary")
-        messages = build_summary_prompt(
-            chapter_content=version.content,
-            novel_title=chapter.novel.title,
-            db=db,
-        )
-        summary_text = call_llm_sync(
-            model=cfg["model_name"], messages=messages,
-            api_key=cfg.get("api_key", ""), base_url=cfg.get("base_url", ""),
-            provider_type=cfg.get("provider_type", "deepseek"),
-            temperature=cfg.get("temperature", 0.5), max_tokens=cfg.get("max_tokens", 1024),
-        )
-    except LLMError:
-        summary_text = ""
-    except Exception:
-        summary_text = ""
+        result = approve_chapter_version(version, generate_summary=True)
+    except EmptyChapterError:
+        return jsonify({"error": "正文为空，无法审批"}), 400
+    return jsonify(result)
 
-    if summary_text:
-        cs = ChapterSummary.query.filter_by(chapter_id=chapter.id).first()
-        if cs:
-            cs.summary = summary_text
-        else:
-            cs = ChapterSummary(chapter_id=chapter.id, summary=summary_text)
-            db.session.add(cs)
 
-    # Generate structured chapter memory
-    try:
-        memory_cfg = get_effective_config(chapter.novel, agent_type="memory")
-        memory_prompt = _build_memory_prompt(
-            chapter_content=version.content,
-            chapter_number=chapter.chapter_number,
-            novel_title=chapter.novel.title,
-            characters=Character.query.filter_by(novel_id=chapter.novel_id).all(),
-        )
-        memory_text = call_llm_sync(
-            model=memory_cfg["model_name"], messages=memory_prompt,
-            api_key=memory_cfg.get("api_key", ""), base_url=memory_cfg.get("base_url", ""),
-            provider_type=memory_cfg.get("provider_type", "deepseek"),
-            temperature=memory_cfg.get("temperature", 0.5), max_tokens=memory_cfg.get("max_tokens", 1024),
-        )
-        memory_data = _extract_json_dict(memory_text) or {}
-    except LLMError:
-        memory_data = {}
-    except Exception:
-        memory_data = {}
+@review_bp.route("/tone-converge", methods=["POST"])
+def tone_converge():
+    """去AI味收敛回滚环：检测 → 定向重写 → 复测，人味分不升自动回滚保留原稿。
 
-    if memory_data:
-        cm = ChapterMemory.query.filter_by(chapter_id=chapter.id).first()
-        if cm:
-            # 防空串覆盖：结构化记忆缺 summary 键时保留既有摘要
-            cm.summary = memory_data.get("summary") or cm.summary or summary_text
-            cm.key_events_json = json.dumps(memory_data.get("key_events", []), ensure_ascii=False)
-            cm.character_changes_json = json.dumps(memory_data.get("character_changes", {}), ensure_ascii=False)
-            cm.foreshadow_events_json = json.dumps(memory_data.get("foreshadow_events", []), ensure_ascii=False)
-            cm.new_characters_json = json.dumps(memory_data.get("new_characters", []), ensure_ascii=False)
-            cm.scenes_json = json.dumps(memory_data.get("scenes", []), ensure_ascii=False)
-        else:
-            cm = ChapterMemory(
-                novel_id=chapter.novel_id,
-                chapter_id=chapter.id,
-                chapter_number=chapter.chapter_number,
-                summary=memory_data.get("summary", summary_text),
-                key_events_json=json.dumps(memory_data.get("key_events", []), ensure_ascii=False),
-                character_changes_json=json.dumps(memory_data.get("character_changes", {}), ensure_ascii=False),
-                foreshadow_events_json=json.dumps(memory_data.get("foreshadow_events", []), ensure_ascii=False),
-                new_characters_json=json.dumps(memory_data.get("new_characters", []), ensure_ascii=False),
-                scenes_json=json.dumps(memory_data.get("scenes", []), ensure_ascii=False),
-            )
-            db.session.add(cm)
+    Body: JSON {"text": "...", "novel_id": int?}
+    """
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or request.form.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text required"}), 400
+    novel_id = data.get("novel_id") or request.form.get("novel_id", type=int)
+    novel = Novel.query.get(novel_id) if novel_id else None
+    cfg = get_effective_config(novel, agent_type="rewrite")
+    from app.services.tone_convergence import converge_tone
+    return jsonify(converge_tone(text, cfg))
 
-    # Update story state chapter counter
-    from app.models import StoryState
-    story_state = StoryState.query.filter_by(novel_id=chapter.novel_id).first()
-    if story_state:
-        story_state.current_chapter = max(story_state.current_chapter or 0, chapter.chapter_number)
 
-    db.session.commit()
-    return jsonify({"approved": True, "summary": summary_text})
+@review_bp.route("/condense", methods=["POST"])
+def condense():
+    """字数超标压缩：保留情节节拍/对话/因果，压描写冗余（目标默认 2500 字）。
+
+    Body: JSON {"text": "...", "novel_id": int?, "target_chars": int?}
+    """
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or request.form.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text required"}), 400
+    novel_id = data.get("novel_id") or request.form.get("novel_id", type=int)
+    novel = Novel.query.get(novel_id) if novel_id else None
+    cfg = get_effective_config(novel, agent_type="rewrite")
+    target = data.get("target_chars") or request.form.get("target_chars", type=int) or 2500
+    from app.services.tone_convergence import condense_text
+    return jsonify(condense_text(text, cfg, target_chars=int(target)))
+
+
+@review_bp.route("/consistency-check", methods=["POST"])
+def consistency_check_api():
+    """一致性链（P2）：确定性交叉核对 → 可选 Keepers 裁决。
+
+    Body: JSON {"novel_id", "chapter_number", "text"?, "adjudicate": bool}
+    text 缺省取该章最新版本正文。
+    """
+    data = request.get_json(silent=True) or {}
+    novel_id = data.get("novel_id") or request.form.get("novel_id", type=int)
+    chapter_number = (data.get("chapter_number")
+                      or request.form.get("chapter_number", type=int))
+    if not novel_id or not chapter_number:
+        return jsonify({"error": "novel_id / chapter_number required"}), 400
+
+    text = (data.get("text") or "").strip()
+    if not text:
+        chapter = Chapter.query.filter_by(novel_id=novel_id,
+                                          chapter_number=chapter_number).first()
+        version = (ChapterVersion.query.filter_by(chapter_id=chapter.id)
+                   .order_by(ChapterVersion.version_number.desc()).first()) if chapter else None
+        if not version:
+            return jsonify({"error": "该章暂无正文"}), 400
+        text = version.content or ""
+
+    novel = Novel.query.get(novel_id)
+    from app.services.consistency_check import run_consistency_check
+    report = run_consistency_check(
+        text, novel_id, chapter_number, novel=novel,
+        adjudicate=bool(data.get("adjudicate") or request.form.get("adjudicate")))
+    return jsonify(report)
 
 
 @review_bp.route("/diff")
@@ -333,6 +279,20 @@ def rewrite_stream():
     if review and review.user_feedback and review.user_feedback.strip():
         critic_feedback += "\n\n【用户补充意见】\n" + review.user_feedback.strip()
 
+    # 统一意见 Schema（P1）：前端勾选的合并意见逐条注入
+    opinions_block = ""
+    opinions_raw = request.form.get("opinions", "")
+    if opinions_raw:
+        try:
+            import json as _json
+            from app.services.opinions import format_opinions_block
+            items = _json.loads(opinions_raw)
+            if isinstance(items, list):
+                opinions_block = format_opinions_block(
+                    [o for o in items if isinstance(o, dict)])
+        except Exception:
+            logger.warning("opinions 解析失败，忽略勾选意见", exc_info=True)
+
     messages = build_rewrite_prompt(
         original_content=version.content,
         critic_feedback=critic_feedback,
@@ -341,6 +301,9 @@ def rewrite_stream():
         outline=chapter.outline,
         user_directive=chapter.user_directive,
         db=db,
+        author_intent=(chapter.novel.author_intent or "") if chapter.novel else "",
+        current_focus=(chapter.novel.current_focus or "") if chapter.novel else "",
+        opinions_block=opinions_block,
     )
 
     cfg = get_effective_config(chapter.novel, agent_type="rewrite")

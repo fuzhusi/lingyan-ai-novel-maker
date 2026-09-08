@@ -61,3 +61,9 @@ logs/
 *.bak
 .tmp*
 tests/.tmp*/
+
+# ===== ZCode 工具内部文件（不共享） =====
+.zcode/
+
+# ===== ZCode 工具内部文件（不共享） =====
+.zcode/

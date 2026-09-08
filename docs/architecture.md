@@ -5,11 +5,11 @@
 
 ## 1. 概述
 
-**灵砚 (LingYan)** — AI 小说创作系统。支持长篇和短篇创作，多 Agent 协作，双盲审两角色审评，按 Agent 类型配置模型，**单用户免登录**。
+**灵砚 (LingYan)** — AI 小说创作系统。支持长篇和短篇创作，双盲审两角色审评（统一评审 = Critic 结构化评分 + 阎浮×白骨并行盲审），按 Agent 类型配置模型，**单用户免登录**。
 
 ### 核心能力
 
-- **Writer + Critic + 4 Keeper + Editor** 多 Agent 协作
+- **统一评审**：Critic 结构化评分 + 阎浮×白骨双盲审并行，可勾选意见自动改写（旧多 Agent 流水线已停用保留，见 6.1）
 - **双盲审两角色审评** — 阎浮×白骨零上下文盲审（替代旧 17 维审计）
 - **因果链 + 向量记忆 + 信息边界** 长篇一致性保障
 - **去 AI 化 + 风格指纹 + Skill 系统** 文字质量控制
@@ -60,7 +60,7 @@ Ai novel system/
     │   ├── knowledge.py            # 知识库 CRUD + 角色模板 + AI生成
     │   ├── review.py               # 评审 + 审批 + 改写
     │   ├── short_story.py          # 短篇 (3 模式 + 版本 + 评审)
-    │   ├── pipeline.py             # 多 Agent 并行检查
+    │   ├── pipeline.py             # 多 Agent 并行检查（保留停用：无任何入口调用）
     │   ├── blind_review.py         # 双盲审工作台 + 通用 API
     │   ├── story_state.py          # 故事状态引擎
     │   ├── relations.py            # 角色关系
@@ -70,7 +70,7 @@ Ai novel system/
     │   ├── export.py               # TXT/DOCX/MD/HTML/EPUB 导出
     │   └── dashboard.py            # 仪表盘 (含趋势图)
     │
-    ├── services/                   # 业务逻辑 (12 + 6 独立蓝图)
+    ├── services/                   # 业务逻辑 (18 + 6 独立蓝图)
     │   ├── prompt_builder.py       # 提示词组装 + 约束
     │   ├── blind_review.py        # 双盲审引擎（阎浮×白骨）
     │   ├── causal_chain.py         # 因果链引擎 (蓝)
@@ -178,9 +178,14 @@ Ai novel system/
 
 ---
 
-## 6. 多 Agent 架构
+## 6. 评审架构
 
-### 6.1 长篇生成流水线
+### 6.1 多 Agent 流水线（⚠ 已停用保留）
+
+> 状态：代码与端点保留（`/api/pipeline/check`、`/api/pipeline/check-stream`，blueprint 仍注册），
+> 但前端 / CLI / MCP / 测试零调用。现行评审链路见 6.2 与统一评审（`/api/unified-review`）。
+> 如需恢复须先重新接线。
+
 
 ```text
 Writer (V4 Flash)
@@ -211,7 +216,7 @@ Writer (V4 Flash)
 
 - 审评可返还 Writer 生成第二稿，循环「盲审 → 重写 → 再盲审」
 - 引擎 `services/blind_review.py`；工作台 `/blind/`；API `/api/blind-review/*`
-- 持久化独立 `BlindReview` 表；职责边界：一致性/伏笔逻辑由 Keepers 流水线负责
+- 持久化独立 `BlindReview` 表；职责边界：盲审只管文笔与市场层，一致性/伏笔逻辑由生成链路的上下文注入保障（因果链 + 伏笔状态注入 + 信息边界 + 时序真相）
 
 ### 6.3 短篇 3+1 阶段策划流程（Inspiration / Setting 模式）
 

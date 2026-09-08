@@ -103,6 +103,17 @@ def unified_review(novel_id, chapter_number, version_id=None, include_rewrite=Fa
     # 5. Step 3: 合并报告（critic 结构化评分 + 双盲审文本报告）
     report = _merge_report(critic_result, blind_result)
 
+    # 5.5 统一意见 Schema（P1）：三个意见源降维合并，供前端勾选后喂给改写链
+    try:
+        from app.services.opinions import build_merged_opinions
+        report["merged_opinions"] = build_merged_opinions(
+            critic_issues=report.get("issues"),
+            critic_comment=report.get("critic_comment", ""),
+            blind_reviews=report.get("blind_reviews"),
+        )
+    except Exception:
+        report["merged_opinions"] = []
+
     # 6. Step 4 (可选): 自动改写
     if include_rewrite and report.get("total_issue_count", 0) > 0:
         rewrite_cfg = get_effective_config(novel, agent_type="rewrite")
@@ -114,6 +125,8 @@ def unified_review(novel_id, chapter_number, version_id=None, include_rewrite=Fa
             outline=chapter.outline or "",
             user_directive=chapter.user_directive or "",
             cfg=rewrite_cfg,
+            author_intent=(novel.author_intent or "") if novel else "",
+            current_focus=(novel.current_focus or "") if novel else "",
         )
         report["rewrite"] = rewrite_result
     else:
@@ -294,7 +307,8 @@ def _generate_summary(score, high_count, total_count):
     return " | ".join(parts)
 
 
-def _auto_rewrite(content, issues, novel_title, chapter_title, outline, user_directive, cfg):
+def _auto_rewrite(content, issues, novel_title, chapter_title, outline, user_directive, cfg,
+                  author_intent="", current_focus=""):
     """基于问题清单自动改写。"""
     issue_descriptions = []
     for issue in issues[:10]:  # 最多取 10 个问题
@@ -311,6 +325,8 @@ def _auto_rewrite(content, issues, novel_title, chapter_title, outline, user_dir
         outline=outline,
         user_directive=user_directive,
         db=db,  # 不传会导致用户自定义 rewrite 模板被静默忽略
+        author_intent=author_intent,
+        current_focus=current_focus,
     )
 
     try:

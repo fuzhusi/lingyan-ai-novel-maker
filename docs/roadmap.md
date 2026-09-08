@@ -190,6 +190,49 @@
 
 ---
 
+## V3.6 - 长篇创作罗盘与上下文工程 (2026-08) ✅
+
+> 借鉴 LiPu-jpg/OpenWrite（本地长篇小说 AI 工作台，L 站社区项目）的四项核心机制，去其糟粕取其精华。
+> 不复刻：文件系统真源（SQLite 是灵砚根基）、LightRAG（FTS5 零依赖够用）、37 维审稿（与双盲审定位重叠）。
+
+### 创作罗盘 ✅
+- [x] **Novel.author_intent / current_focus 字段** — 全书承诺（长期不变，≤500 字）+ 阶段目标（手动更新，≤300 字）；SQLite 自动迁移；罗盘注入每次生成且豁免压缩，必须限长防 prompt 膨胀
+- [x] **注入四条生成链路** — writer / outline / rewrite / focus 聚焦生成，位于上下文最高优先位置；`build_compass_block()` 单点拼装防文案漂移；路由级接线测试锚定（`test_generate_stream_wires_compass`，writer 主链路曾漏接罗盘）
+- [x] **永不压缩** — 罗盘在上下文预算收缩中豁免
+- [x] **章节列表页「创作罗盘」编辑卡** — `POST /novel/<id>/compass`，未设定时提示防写歪
+
+### 上下文预算渐进压缩 ✅
+- [x] **apply_context_budget(kw, budget=14000)** — 超预算按稳定优先级收缩：远章概要 → 近章摘要逐章降级 → 世界观补充截断 → 检索记忆截半 → 角色次要字段；罗盘/boundary_context(信息边界+时序真相)/上章结尾/本章大纲/特别指示/伏笔/因果链永不压缩
+- [x] **信息边界独立注入** — 信息边界+时序真相拆入 `boundary_context` 独立字段（原混入 memory_context 会被截半拦腰，破坏一致性红线）
+
+### 写章事务保护 ✅
+- [x] **审批空内容拒绝** — `chapter_approval.approve_chapter_version()` 单一真源，Web / MCP / CLI 三入口统一防护；Web 空 version 返回 400，前端提示错误（不再静默）
+- [x] **摘要兜底** — 审批时 LLM 摘要失败自动截取正文开头 300 字粗摘要，前情提要链路不断
+
+### @skill-id 按需启用 ✅
+- [x] **特别指示临时附加技能** — `@chapter_hook` 语法仅本次调用生效，不改全局激活状态；只摘除已注册技能 id，未知 @词（如社交 handle）原样保留；邮箱类不误判；writer/rewrite 链路支持
+- [x] **测试** — 149 个用例全过（test_compass_budget.py 20 含路由级接线；test_perplexity_radar.py 9；test_merge_writes.py 12；test_agent_collab.py 13 覆盖意见契约/一致性链/编排器/写作包）
+
+---
+
+## V3.7 - 检测与协同强化 (2026-09-04) ✅
+
+> OpenWrite 集成收尾修复 + 融合评估（[merge-assessment.md](merge-assessment.md)）快赢四项 + 困惑度雷达。
+> Agent 协同 P1-P4 见上方 V4.0 段与 [agent-collaboration.md](agent-collaboration.md)。
+
+### 检测层
+- [x] **困惑度雷达 (perplexity_radar)** — 厂商 logprobs 逐 token 对数概率 → 逐句 ppl，定位「选词过于可预测」的句子（选词分布层，ai_metric 构式层不覆盖）；gate-check `with_ppl=1` 可选开启，厂商不支持自动降级；阈值待朱雀分回填校准
+- [x] **去AI味收敛回滚环 (tone_convergence)** — 检测 → 违规指令定向重写 → 复测 → 人味分不升自动回滚保留原稿；`POST /api/tone-converge` + 写作页「AI味收敛」按钮
+- [x] **字数超标压缩** — `POST /api/condense` + 写作页「压缩超标」按钮（超目标 1.3 倍触发，与「不足续写」对偶成字数双向保障）
+
+### 协同与一致性
+- [x] **大纲失配标记** — `chapters.outline_hash` 记录生成正文时的大纲指纹（Web/MCP 双入口打点），改纲后 `outline_stale()` 失配、双页徽标提示
+- [x] **锚例反向提取** — 人工版本审批时提取文风锚例候选（含对话段落优先），前端确认入库
+- [x] **抽取待确认队列** — `PendingExtraction` 表 + truths/extract `queue=1` 模式，错抽不落真源
+- [x] **测试** — 149 个用例全过（本版净增 41：雷达 9 / 快赢 12 / 协同 13 / V3.6 修复 7）
+
+---
+
 ## Tech Stack
 
 | 层 | 选型 |
@@ -210,12 +253,12 @@
 
 | 项目 | 数量 |
 |------|------|
-| 数据库模型 | 18 |
+| 数据库模型 | 23 |
 | Flask Blueprint | 22 (含 6 个服务蓝图) |
 | 路由模块 | 16 |
 | 业务服务 | 12 + 通用 HTTP 客户端 |
-| MCP 工具 | 26 |
-| CLI 命令组 | 18 (含 auth/whoami/state) |
+| MCP 工具 | 27 |
+| CLI 命令组 | 27 |
 | 禁用模式 (De-AI) | 120+ (8 大类) |
 | 双盲审角色 | 2（阎浮/白骨，追读-弃稿判决） |
 | Agent 类型 | 16 |
@@ -228,6 +271,14 @@
 ---
 
 ## V4.0 - 未来规划
+
+### Agent 协同编排 (2026-09) ✅
+- [x] 统一意见 Schema + rewrite 按勾选注入合并意见（P1，`opinions.py`）
+- [x] 一致性链：确定性交叉核对（时序回潮/伏笔排期/复现）+ Keepers 复活为裁决者 + 抽取待确认队列（P2，`consistency_check.py` + `PendingExtraction`）
+- [x] chapter_runner 编排器：写作链自动化到人工闸门 + MCP `run_chapter_pipeline`（P3，`writer_chain.py` 公共层）
+- [x] 写作包契约 + 风格备忘录（B3）+ 创作偏好档案设置卡（P4）
+- [ ] 观察项：长篇场景节拍生成、评分收敛环
+- 完整设计见 [Agent 协同方案](agent-collaboration.md)
 
 ### 多用户协作 (3 个月)
 - [ ] 用户注册/登录

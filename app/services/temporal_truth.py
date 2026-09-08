@@ -147,8 +147,13 @@ def format_truths_for_prompt(novel_id, chapter_number):
     return "【当前真相状态】\n" + "\n".join(lines)
 
 
-def extract_truths_from_chapter(chapter_content, chapter_number, novel_id, cfg=None):
-    """Use AI to extract truth changes from a chapter."""
+def extract_truths_from_chapter(chapter_content, chapter_number, novel_id, cfg=None,
+                                auto_apply=True):
+    """Use AI to extract truth changes from a chapter.
+
+    auto_apply=False 时不直接 add_truth（抽取待确认队列模式），只返回 changes，
+    由调用方入队等人工核验（A4：错抽不落真源）。
+    """
     if cfg is None:
         from app.config_utils import get_model_config
         cfg = get_model_config(agent_type="temporal_truth")
@@ -184,13 +189,14 @@ def extract_truths_from_chapter(chapter_content, chapter_number, novel_id, cfg=N
         if isinstance(changes, list):
             for change in changes:
                 change["from_chapter"] = chapter_number
-                add_truth(
-                    novel_id,
-                    change.get("subject", ""),
-                    change.get("property", "status"),
-                    change.get("value", ""),
-                    chapter_number,
-                )
+                if auto_apply:
+                    add_truth(
+                        novel_id,
+                        change.get("subject", ""),
+                        change.get("property", "status"),
+                        change.get("value", ""),
+                        chapter_number,
+                    )
             return changes
     except LLMError as e:
         return [{"error": str(e)}]
@@ -229,6 +235,24 @@ def add_truth_api(novel_id):
     return jsonify({"ok": True})
 
 
+@truth_bp.route("/novels/<int:novel_id>/pending-extractions")
+def pending_extractions_api(novel_id):
+    """待确认抽取列表（A4：人工核验后才写回真相库）。"""
+    from app.services.extraction_queue import list_pending
+    kind = request.args.get("kind")
+    return jsonify(list_pending(novel_id, kind=kind))
+
+
+@truth_bp.route("/pending-extractions/<int:item_id>/resolve", methods=["POST"])
+def resolve_extraction_api(item_id):
+    """核验一条抽取：adopt=true 写回真相库，false 丢弃。"""
+    data = request.get_json(silent=True) or {}
+    adopt = bool(data.get("adopt"))
+    from app.services.extraction_queue import resolve_extraction
+    ok, message = resolve_extraction(item_id, adopt=adopt)
+    return jsonify({"ok": ok, "message": message}), (200 if ok else 400)
+
+
 @truth_bp.route("/novels/<int:novel_id>/truths/extract", methods=["POST"])
 def extract_truths(novel_id):
     """Extract truth changes from a chapter using AI."""
@@ -245,7 +269,17 @@ def extract_truths(novel_id):
 
     from app.config_utils import get_model_config
     cfg = get_model_config(agent_type="temporal_truth")
-    changes = extract_truths_from_chapter(version.content, chapter_number, novel_id, cfg)
+    # queue=1：抽取结果进「待确认队列」而非直接落真相库（A4，人工核验后采纳）
+    queue = (request.args.get("queue") in ("1", "true")
+             or request.form.get("queue") in ("1", "true"))
+    changes = extract_truths_from_chapter(version.content, chapter_number, novel_id, cfg,
+                                          auto_apply=not queue)
+    if queue:
+        from app.services.extraction_queue import queue_extractions
+        queued = queue_extractions(novel_id, "truth",
+                                   [c for c in changes if isinstance(c, dict) and "error" not in c],
+                                   chapter_number)
+        return jsonify({"queued": queued, "changes": changes})
     return jsonify(changes)
 
 
