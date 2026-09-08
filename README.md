@@ -5,6 +5,26 @@
 
 Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI / Kimi / 智谱 / Ollama 等 11 家 OpenAI 兼容厂商，按 Agent 类型配置不同模型。
 
+## 📑 目录
+
+- [功能特性](#-功能特性)
+- [Web 端使用](#-web-端使用)
+- [长篇完整工作流](#-长篇完整工作流)
+- [短篇创作流程](#-短篇创作流程)
+- [MCP / AI IDE 接入](#-mcp--ai-ide-接入)
+- [CLI 快速上手](#-cli-快速上手)
+- [项目结构](#-项目结构)
+- [技术栈](#-技术栈)
+- [快速开始](#-快速开始)
+- [配置](#️-配置)
+- [环境变量](#-环境变量)
+- [数据与备份](#-数据与备份)
+- [安全说明](#-安全说明)
+- [测试](#-测试)
+- [文档](#-文档)
+- [常见问题 FAQ](#-常见问题-faq)
+- [开源协议](#-开源协议)
+
 ---
 
 ## ✨ 功能特性
@@ -84,6 +104,118 @@ Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI /
 
 ---
 
+## 🖥️ Web 端使用
+
+启动后访问 http://127.0.0.1:5000（免登录），核心页面：
+
+| 页面 | 路径 | 说明 |
+|------|------|------|
+| 网关首页 | `/` | 功能导航卡、示例数据、快捷入口 |
+| 小说列表 | `/novel/` | 长篇列表 + 创作罗盘卡 + 导出 |
+| 写作页 | `/novel/<id>/chapter/<n>/write` | 核心：生成 / 门禁 / 全面评审 / 双盲审 / 批准 / AI味收敛 / 一致性核查 |
+| 章节列表 | `/novel/<id>/` | 章节网格 + 大纲失配徽标 |
+| 知识库 | `/novel/<id>/characters` `/world` `/outline` `/foreshadowing` | 角色 / 世界观 / 大纲树 / 伏笔 |
+| 双盲审工作台 | `/blind/` | 任意文本 / 短篇 / 章节开审，结果存档回看 |
+| 设置 | `/settings/` | 厂商 / Per-Agent 模型 / 文风锚例 / 创作偏好档案 |
+| 短篇工坊 | `/short/` 及子页 | 三模式创作、逐节点多轮、评审卡 |
+
+**写作页一个完整的章**：`AI 生成本章` → 看门禁报告与 AI 痕迹人味分 → `全面评审`（Critic + 双盲审并行）→ 勾选意见 → `重写` → `批准`（自动生成摘要 + 结构化记忆）。需要深度打磨时用顶部 `AI味收敛`（人味分不升自动回滚）和 `一致性核查`（确定性三查）。
+
+---
+
+## 🎯 长篇完整工作流
+
+```
+1. 新建小说           novel create → 填类型 / 简介 / 世界观
+2. 设定创作罗盘       章节列表页「创作罗盘」卡：全书承诺 + 阶段目标（防写歪的锚）
+3. 搭知识库           角色（可模板/AI生成）→ 世界观 → 大纲树（卷/章/场）→ 伏笔
+4. 生成正文           「AI 生成本章」→ SSE 流式 → 门禁束自动检测 AI 痕迹
+5. 打磨               人味分不达标 → AI味收敛；超字数 → 压缩超标；改大纲 → 失配标记提示
+6. 评审               「全面评审」= Critic 结构化评分 + 阎浮×白骨双盲审并行
+7. 修订               勾选评审意见 → 重写 → 复评（至多一轮，分数不升回滚）
+8. 定稿               批准 → 摘要 / 结构化记忆 / 故事状态推进 / 风格备忘录累积
+9. 一致性保障          审批时事实入队（queue 采纳）→ 后续章节一致性链三查
+10. 导出              TXT / DOCX / MD / HTML / EPUB
+```
+
+每一步既可用 Web 也可用 CLI（复用同一服务层），全自动批量的新章用 `chapter pipeline`：
+
+```bash
+python cli.py chapter pipeline --novel 1 --number 5 --save
+```
+
+---
+
+## 🎬 短篇创作流程
+
+1. 选模式：**灵感模式**（发散 → 逐节点多轮生成）/ **设定模式**（先设定后生成）/ **细心模式**（单轮直出）
+2. 三阶段策划：角色 → 大纲 → 主题（可编辑，AI 生成后手动调整）
+3. 逐节点生成 → 断点续写 / 单节点重写 / 选中扩写
+4. 评审卡直出阎浮×白骨判决 → 勾选意见返还 Writer 生成第二稿 → 存档后在 `/blind/` 工作台循环打磨
+5. 批准 / 导出（TXT/DOCX/MD/HTML/EPUB）
+
+---
+
+## 🤖 MCP / AI IDE 接入
+
+MCP Server 走 stdio 协议，27 个工具覆盖小说/章节/角色/世界观/伏笔/大纲/短篇/设置/审计 + 一键本章编排。在 Claude Code 的 `~/.claude/settings.json` 添加：
+
+```json
+{
+  "mcpServers": {
+    "lingyan": {
+      "command": "python",
+      "args": ["/绝对路径/到/mcp_server.py"],
+      "env": {}
+    }
+  }
+}
+```
+
+Cursor 等其他支持 MCP 的 IDE 同理。典型用法（Claude Code 里）：
+
+```
+用 mcp__lingyan__list_novels 看有哪些小说
+用 mcp__lingyan__run_chapter_pipeline 给第 1 本小说生成第 5 章（缺大纲自动补）
+用 mcp__lingyan__approve_chapter 审批最新版本（空内容会被拒绝）
+```
+
+---
+
+## 🏗️ 项目结构
+
+```text
+lingyan/
+├── run.py / cli.py / mcp_server.py   # 三个入口（Web / CLI 27 命令组 / MCP 27 工具）
+├── app/
+│   ├── __init__.py                   # Flask app 工厂，注册 25 个蓝图
+│   ├── config.py / config_utils.py   # 配置加载与解析
+│   ├── models/                       # 23 个 SQLAlchemy 模型（按领域拆分）
+│   ├── routes/                       # 20 个路由蓝图（novel/chapter/generate/review/blind/...）
+│   ├── services/                     # 24 个业务模块（writer_chain/chapter_runner/ai_metric/...）
+│   ├── templates/                    # 23 个 Jinja2 模板
+│   └── static/                       # 主题 CSS + 月夜氛围 JS
+├── docs/                             # 架构/设计/路线/方法论文档（见文末索引）
+└── tests/                            # 151 个用例（独立临时库，不碰开发数据）
+```
+
+---
+
+## 🧱 技术栈
+
+| 层 | 选型 |
+|----|------|
+| 后端 | Python 3.14, Flask（app factory） |
+| ORM | Flask-SQLAlchemy（SQLite 单文件 + FTS5 全文检索） |
+| AI 接口 | langchain-openai，OpenAI 兼容协议（11 家厂商） |
+| 流式 | SSE（`text/event-stream`） |
+| 前端 | Jinja2 + 原生 JS + 响应式 CSS（朱金·玄漆主题） |
+| 视觉 | Three.js 月夜氛围层（WebGL + 降级 CSS） |
+| MCP | `mcp` Python SDK（stdio） |
+| 检测 | 零 LLM 成本确定性规则（正则 + 统计特征） |
+
+---
+
 ## ⌨️ CLI 快速上手
 
 CLI 与 Web 复用同一套服务层，行为一致（不是各写一套）。27 个命令组：
@@ -146,6 +278,32 @@ uv run python run.py          # 打开 http://127.0.0.1:5000（免登录）
 
 ---
 
+## 🌐 环境变量
+
+`.env` 全部可选（见 `.env.example`），是**最低优先级**兜底——应用没有它也能跑，真正的配置在数据库（设置页）。运行参数：
+
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `DEEPSEEK_API_KEY` | — | DeepSeek key（仅免配置快速体验用） |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | DeepSeek 接口地址 |
+| `MODEL_NAME` | `deepseek-v4-pro` | 兜底模型 |
+| `SECRET_KEY` | 随机 | Flask session 密钥（单用户场景可忽略） |
+| `LINGYAN_DEBUG` | `0` | 调试模式（仅显式 =1 开启） |
+| `LINGYAN_INSECURE_SSL` | `0` | =1 时跳过 LLM 接口证书校验（仅公网自签域需要） |
+| `MAX_UPLOAD_MB` | `50` | 上传文件大小上限 |
+| `DATABASE_PATH` | `data.db` | 数据库文件路径（支持覆盖，测试/多实例用） |
+
+---
+
+## 💾 数据与备份
+
+- 全部数据（小说/章节/记忆/配置/厂商）都在 `data.db` 单文件里，直接拷贝即备份
+- CLI 提供安全备份：`python cli.py sys backup`（走 SQLite 备份 API，WAL/并发下也是完整快照，优于裸文件拷贝）
+- 开发库与测试库隔离：测试自动用 `.tmp-test/test.db`，`pytest` 永远不碰你的写作数据
+- 数据库可随时重建（应用启动时自动建表 + 自动迁移旧库）
+
+---
+
 ## 🔒 安全说明
 
 本项目定位为**本机单人使用**的工具：
@@ -185,6 +343,31 @@ uv run pytest            # tests/ 目录（151 例），独立临时数据库，
 | [docs/code-review.md](docs/code-review.md) | 全面代码审查报告（120+ 发现）|
 | [docs/fix-report.md](docs/fix-report.md) | 上述审查的修复报告（47 文件，含验证记录）|
 | [CLAUDE.md](CLAUDE.md) | 开发者速查：架构总览、开发规范、常用操作 |
+
+---
+
+## ❓ 常见问题 FAQ
+
+**Q：需要先注册/登录吗？**
+A：不需要。设计为**本机单人使用**，免登录直接可用；Web / CLI / MCP 三端都免登录。
+
+**Q：生成了「AI 味」很重的文字怎么办？**
+A：三连招：① 顶部「AI味收敛」——检测→定向重写→复测，人味分不升自动回滚原稿；② 设置页贴「文风锚例」（你的真人文字，越像越好）并开启；③ 检查采样惩罚（writer 默认 0.5/0.5）。方法论见 [docs/ai-tone-research.md](docs/ai-tone-research.md)。
+
+**Q：长篇越写越乱、设定前后矛盾怎么办？**
+A：一致性链四件套：① 写前「创作罗盘」定承诺；② 审批时事实入「待确认队列」人工采纳；③ 每章生成后跑「一致性核查」（时序真相回潮/伏笔排期/已回收复现）；④ 改大纲后看「失配标记」并按新纲重生成。
+
+**Q：生成很慢？**
+A：`chapter pipeline` 或「AI 生成本章」是串行多次大 LLM 调用（大纲→正文→门禁→收敛），分钟级属正常。要快：先用已有大纲（跳过大纲生成）、收敛可稍后再点、`--no-converge` 场景在 CLI 用 `tone check` 只查不改。
+
+**Q：模型怎么配？**
+A：设置 → 模型配置 → 添加厂商（11 家预设）→ 填 key → 拉取模型 → 勾选启用。未显式配置的 Agent 自动匹配已勾选模型，通常加一个厂商勾几个模型就能用。
+
+**Q：CLI 和 Web 行为会不一致吗？**
+A：不会。CLI 复用 Web 同一套服务层（`app/services/`），不是各写一套；Web/MCP/CLI 三入口共用审批、抽取、门禁等核心逻辑。
+
+**Q：数据会丢吗？**
+A：开发库是 `data.db`，测试永远不碰它；建议每天 `python cli.py sys backup`。数据库可重建（自动建表 + 迁移），但写作数据不可再生——备份习惯要养。
 
 ---
 
