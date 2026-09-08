@@ -165,6 +165,9 @@ def test_runner_full_pipeline_with_auto_save(app, monkeypatch):
                         lambda messages, cfg, word_target=None: body)
     monkeypatch.setattr("app.services.ai_metric.analyze_ai_tone",
                         lambda text: {"passed": True, "human_score": 95})
+    # mock 门禁通过：测试验证编排器流程，不应依赖真实 skill_gate 对 mock 文本的判定
+    monkeypatch.setattr("app.services.skill_gate.run_gate",
+                        lambda text, active_skills=None: {"passed": True, "checks": []})
 
     result = runner.run_chapter_pipeline(n.id, 1, auto_save=True)
     assert "error" not in result
@@ -198,6 +201,11 @@ def test_runner_generates_missing_outline(app, monkeypatch):
         return "正文若干。" * 40
 
     monkeypatch.setattr(runner, "collect_full_text", fake_collect)
+    # mock 门禁与检测通过：测试验证编排器流程，不依赖真实规则对 mock 文本的判定
+    monkeypatch.setattr("app.services.skill_gate.run_gate",
+                        lambda text, active_skills=None: {"passed": True, "checks": []})
+    monkeypatch.setattr("app.services.ai_metric.analyze_ai_tone",
+                        lambda text: {"passed": True, "human_score": 95})
     result = runner.run_chapter_pipeline(n.id, 1)
     assert calls["outline"] is True
     assert result["stages"][0]["stage"] == "outline"
