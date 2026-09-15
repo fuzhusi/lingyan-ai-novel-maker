@@ -1,310 +1,622 @@
-﻿{% extends "base.html" %}
-{% block title %}任务详情 — 借鉴改写{% endblock %}
+{% extends "base.html" %}
+{% block title %}拆书工作台 — {{ task.title }}{% endblock %}
 
 {% block content %}
-<div class="container" style="max-width:1400px; margin:2rem auto; padding:0 1.5rem;">
+<div class="container" style="max-width:1500px; margin:2rem auto; padding:0 1.5rem;">
     <div style="margin-bottom:1.5rem;">
         <a href="/plagiarize/" style="color:var(--text-dim); text-decoration:none;">&larr; 返回列表</a>
     </div>
 
+    <div style="background:var(--accent-dim); border-radius:6px; padding:0.55rem 0.9rem; font-size:0.8rem; color:var(--text-dim); margin-bottom:1rem; line-height:1.6;">
+        ⚖ 本功能借鉴对标书的<b style="color:var(--text-bright);">结构与节奏</b>；人名/设定/情节必须经差异化改写更换后再采纳入库。发布平台有 AI 检测与抄袭鉴定，请负责任地使用与发布。
+    </div>
+
+    <!-- 步骤条(使用者审查修复:信息架构主线) -->
+    <div style="display:flex; gap:0.4rem; margin-bottom:1rem; flex-wrap:wrap; align-items:center;">
+        {% for st in steps %}
+        <span style="padding:0.3rem 0.7rem; border-radius:14px; font-size:0.78rem; {% if st.active %}background:var(--accent); color:var(--bg); font-weight:600;{% elif st.done %}border:1px solid var(--success); color:var(--success);{% else %}border:1px solid var(--border); color:var(--text-faint);{% endif %}">
+            {{ st.label }}{% if st.done %} ✓{% endif %}
+        </span>
+        {% if not loop.last %}<span style="color:var(--text-faint);">→</span>{% endif %}
+        {% endfor %}
+        {% if task.status == 'failed' %}
+        <span style="padding:0.3rem 0.7rem; border-radius:14px; font-size:0.78rem; background:var(--danger); color:var(--bg);">✗ 拆解失败——修正问题后点「重新拆书」重试（断点续用）</span>
+        {% endif %}
+        <span style="flex:1;"></span>
+        <span style="font-size:0.75rem; color:var(--text-faint);">拆解产物参考原书结构；人名/情节经改写更换后才是你的新书</span>
+    </div>
+
     <!-- 任务信息 -->
     <div class="card" style="padding:1.25rem; margin-bottom:1.5rem;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
             <div>
-                <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem;">
-                    <span style="background:{% if task.mode == 'style' %}var(--accent){% elif task.mode == 'plot' %}var(--success){% else %}var(--text-dim){% endif %};color:var(--bg);padding:0.15rem 0.5rem;border-radius:4px;font-size:0.82rem;font-weight:600;">
-                        {% if task.mode == 'style' %}风格模仿{% elif task.mode == 'plot' %}情节借鉴{% else %}改写洗稿{% endif %}
+                <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem; flex-wrap:wrap;">
+                    <span style="background:var(--accent); color:var(--bg); padding:0.15rem 0.5rem; border-radius:4px; font-size:0.82rem; font-weight:600;">
+                        {{ mode_label }}
                     </span>
-                    <span style="color:{% if task.status == 'done' %}var(--success){% elif task.status == 'generating' %}var(--accent){% elif task.status == 'failed' %}var(--danger){% else %}var(--text-dim){% endif %};font-size:0.85rem;">
-                        {% if task.status == 'done' %}已完成{% elif task.status == 'generating' %}生成中...{% elif task.status == 'failed' %}失败: {{ task.error_message }}{% else %}待处理{% endif %}
+                    <span style="color:{% if task.status == 'done' %}var(--success){% elif task.status in ('summarizing','deconstructing') %}var(--accent){% elif task.status == 'failed' %}var(--danger){% else %}var(--text-dim){% endif %};font-size:0.85rem;">
+                        {% if task.status == 'done' %}✓ 拆解完成{% elif task.status == 'summarizing' %}摘要压缩中...{% elif task.status == 'deconstructing' %}拆解中...{% elif task.status == 'failed' %}失败: {{ task.error_message }}{% elif task.error_message %}已取消/中断：{{ task.error_message }}{% else %}待拆解{% endif %}
                     </span>
+                    {% if task.target_novel_id %}
+                    <a href="/novel/{{ task.target_novel_id }}/" class="btn btn-sm" style="text-decoration:none;">→ 目标长篇 #{{ task.target_novel_id }}</a>
+                    {% endif %}
+                    {% if task.target_short_story_id %}
+                    <a href="/short/{{ task.target_short_story_id }}" class="btn btn-sm" style="text-decoration:none;">→ 目标短篇 #{{ task.target_short_story_id }}</a>
+                    {% endif %}
+                </div>
+                <div style="font-size:1.1rem; font-weight:600; color:var(--text-bright); margin-bottom:0.3rem;">
+                    {{ task.title or '未命名对标书' }}
                 </div>
                 <div style="font-size:0.82rem; color:var(--text-dim);">
                     创建于 {{ task.created_at[:16].replace('T', ' ') }}
                     {% if task.source_filename %} · 来源：{{ task.source_filename }}{% endif %}
+                    · 源文本 {{ task.source_text|length }} 字
                 </div>
             </div>
-            <div style="display:flex; gap:0.5rem;">
-                {% if task.result_content %}
-                <button onclick="saveToChapter()" class="btn btn-secondary btn-sm">保存为长篇章节</button>
-                <button onclick="saveToShort()" class="btn btn-secondary btn-sm">保存为短篇</button>
+            <div style="display:flex; gap:0.5rem; align-items:center;">
+                {% if task.mode != 'deconstruct' %}
+                <span style="color:var(--danger); font-size:0.78rem;">旧版「{{ mode_label }}」功能已由拆书复刻覆盖并下线，数据仅保留</span>
                 {% endif %}
+                <button id="btn-deconstruct" class="btn btn-primary" onclick="runDeconstruct()">
+                    {% if task.elements_json and task.elements_json != '[]' %}重新拆书{% else %}开始拆书{% endif %}
+                </button>
                 <form method="POST" action="/plagiarize/{{ task.id }}/delete" style="display:inline;"
-                      onsubmit="return confirm('确定删除此任务？')">
+                      onsubmit="return confirm('确定删除此任务及所有待确认条目？')">
                     <button type="submit" class="btn btn-sm btn-danger">删除</button>
                 </form>
             </div>
         </div>
-    </div>
-
-    <!-- 操作按钮区 -->
-    <div style="display:flex; gap:0.5rem; margin-bottom:1.5rem; flex-wrap:wrap;">
-        {% if task.mode == 'style' %}
-            {% if not task.style_report %}
-            <button id="btn-analyze" class="btn btn-primary" onclick="analyzeStyle()">分析风格</button>
-            {% else %}
-            <button id="btn-analyze" class="btn btn-secondary" onclick="analyzeStyle()">重新分析</button>
-            <button id="btn-generate" class="btn btn-primary" onclick="generateStyle()">生成新内容</button>
-            {% endif %}
-            {% if task.style_report %}
-            <button class="btn btn-secondary" onclick="saveAsSkill()">保存为 Skill</button>
-            {% endif %}
-        {% elif task.mode == 'plot' %}
-            {% if not task.style_report %}
-            <button id="btn-analyze" class="btn btn-primary" onclick="extractPlot()">提取情节骨架</button>
-            {% else %}
-            <button id="btn-analyze" class="btn btn-secondary" onclick="extractPlot()">重新提取</button>
-            <button id="btn-generate" class="btn btn-primary" onclick="generatePlot()">生成新故事</button>
-            {% endif %}
-        {% else %}
-            <!-- 改写洗稿：程度选择按钮 -->
-            <div style="display:flex; gap:0.3rem; align-items:center;">
-                <span style="color:var(--text-dim); font-size:0.85rem; margin-right:0.5rem;">改写程度：</span>
-                <button class="btn btn-sm {% if task.rewrite_level == 'light' %}btn-primary{% else %}btn-secondary{% endif %}" 
-                        onclick="setLevel('light')">轻度</button>
-                <button class="btn btn-sm {% if task.rewrite_level == 'medium' %}btn-primary{% else %}btn-secondary{% endif %}" 
-                        onclick="setLevel('medium')">中度</button>
-                <button class="btn btn-sm {% if task.rewrite_level == 'heavy' %}btn-primary{% else %}btn-secondary{% endif %}" 
-                        onclick="setLevel('heavy')">重度</button>
-            </div>
-            <button id="btn-rewrite" class="btn btn-primary" onclick="rewriteText()">开始改写</button>
+        {% if task.modifications_text %}
+        <div style="margin-top:0.75rem; padding:0.6rem 0.9rem; background:var(--accent-dim); border-radius:6px; font-size:0.85rem; color:var(--text-bright);">
+            微创新方向：{{ task.modifications_text }}
+        </div>
         {% endif %}
     </div>
 
-    <!-- 左右对比视图 -->
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem;">
-        <!-- 左侧：原文 -->
-        <div>
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
-                <h3 style="font-size:1rem; color:var(--text-bright); margin:0;">原文</h3>
-                <span style="font-size:0.78rem; color:var(--text-dim);">{{ task.source_text|length }} 字</span>
-            </div>
-            <div id="source-content" style="background:var(--bg-card); border:1px solid var(--border); border-radius:8px; padding:1.5rem; min-height:400px; max-height:600px; overflow-y:auto; font-size:0.92rem; line-height:1.8; white-space:pre-wrap;">{{ task.source_text or '无原文' }}</div>
+    <!-- 拆书流式输出 -->
+    <div id="stream-panel" class="card" style="padding:1.25rem; margin-bottom:1.5rem; {% if task.status in ('deconstructing','summarizing') %}display:block;{% else %}display:none;{% endif %}">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+            <h3 style="font-size:1rem; color:var(--text-bright); margin:0;">拆书进度</h3>
+            <button id="btn-cancel-task" class="btn btn-sm btn-danger" style="display:none;" onclick="cancelTask()">取消任务</button>
         </div>
+        <div id="stream-output" style="background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:1.25rem; min-height:200px; max-height:420px; overflow-y:auto; font-size:0.9rem; line-height:1.7; white-space:pre-wrap;"></div>
+        <p style="font-size:0.75rem; color:var(--text-faint); margin:0.4rem 0 0;">关闭页面任务照常运行，回到本页可查看进度；已完成阶段断点续用。</p>
+    </div>
 
-        <!-- 右侧：分析报告/改写结果 -->
-        <div>
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
-                <h3 style="font-size:1rem; color:var(--text-bright); margin:0;">
-                    {% if task.mode == 'style' %}风格分析{% elif task.mode == 'plot' %}情节骨架{% else %}改写结果{% endif %}
-                </h3>
-                {% if task.result_content %}
-                <span style="font-size:0.78rem; color:var(--text-dim);">{{ task.result_content|length }} 字</span>
-                {% endif %}
+    <!-- 主工作区：左主区（报告/微创新/生成） + 右侧边栏（待确认条目页签） -->
+    <div class="wb-grid" style="display:grid; grid-template-columns:minmax(0,1.25fr) 420px; gap:1.25rem; align-items:start;">
+
+        <!-- 左：主区 -->
+        <div style="display:flex; flex-direction:column; gap:1.5rem; min-width:0;">
+            <div class="card" style="padding:1.25rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+                    <h3 style="font-size:1rem; color:var(--text-bright); margin:0;">拆书报告（六维蓝图，可编辑）</h3>
+                    <button class="btn btn-sm btn-primary" onclick="saveReport()">保存报告</button>
+                </div>
+                <textarea id="report-text" rows="26"
+                          style="width:100%; box-sizing:border-box; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; padding:0.9rem; font-size:0.88rem; line-height:1.7; color:var(--text-bright);">{{ task.report_text or '（尚未拆解——点击右上角「开始拆书」，流式输出六维拆解结果）' }}</textarea>
             </div>
-            
-            {% if task.style_report and task.mode in ['style', 'plot'] %}
-            <!-- 分析报告 -->
-            <div id="report-content" style="background:var(--bg-card); border:1px solid var(--border); border-radius:8px; padding:1.5rem; min-height:200px; max-height:300px; overflow-y:auto; font-size:0.88rem; line-height:1.7; white-space:pre-wrap; margin-bottom:1rem;">{{ task.style_report }}</div>
-            {% endif %}
-            
-            {% if task.result_content %}
-            <!-- 生成结果 -->
-            <div id="result-content" style="background:var(--bg-card); border:1px solid var(--accent-dim); border-radius:8px; padding:1.5rem; min-height:400px; max-height:600px; overflow-y:auto; font-size:0.92rem; line-height:1.8; white-space:pre-wrap;">{{ task.result_content }}</div>
-            {% else %}
-            <div id="result-content" style="background:var(--bg-card); border:1px solid var(--border); border-radius:8px; padding:1.5rem; min-height:400px; display:flex; align-items:center; justify-content:center;">
-                <div id="stream-target" style="width:100%; font-size:0.92rem; line-height:1.8; white-space:pre-wrap;">
-                    <span style="color:var(--text-faint); letter-spacing:0.06em;">点击上方按钮开始生成...</span>
+
+            <div class="card" style="padding:1.25rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+                    <h3 style="font-size:1rem; color:var(--text-bright); margin:0;">微创新指令（生成时注入）</h3>
+                    <button class="btn btn-sm" onclick="saveReport()">保存</button>
+                </div>
+                <textarea id="modifications-text" rows="6"
+                          placeholder="题材换什么？金手指怎么调？加什么情节/人物？删什么？&#10;例如：把修仙换成都市异能；金手指从系统改成血脉觉醒，加代价设定；新增一条复仇线…"
+                          style="width:100%; box-sizing:border-box; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; padding:0.9rem; font-size:0.88rem; line-height:1.6; color:var(--text-bright);">{{ task.modifications_text }}</textarea>
+            </div>
+
+            <!-- 生成区 -->
+            <div class="card" style="padding:1.25rem;">
+                <h3 style="font-size:1rem; color:var(--text-bright); margin:0 0 0.75rem;">复刻生成</h3>
+                <p style="font-size:0.82rem; color:var(--text-dim); margin:0 0 1rem;">
+                    已采纳 <b id="adopted-count" style="color:var(--accent);">{{ adopted_count }}</b> 条（人物/世界观/大纲）。没采纳的不会进入你的新书。
+                </p>
+                <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+                    <button class="btn btn-primary" onclick="openGenLong()">复刻为长篇</button>
+                    <button class="btn btn-secondary" onclick="openGenShort()">复刻为短篇</button>
                 </div>
             </div>
-            {% endif %}
+        </div>
+
+        <!-- 右：待确认条目侧边栏（页签切换，不堆叠） -->
+        <aside class="card wb-sidebar" style="padding:1.1rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem; gap:0.4rem;">
+                <h3 style="font-size:1rem; color:var(--text-bright); margin:0;">待确认条目</h3>
+                <div style="display:flex; gap:0.3rem;">
+                    <button class="btn btn-sm btn-secondary" onclick="reworkAll(this)">AI 全部改写</button>
+                    <button class="btn btn-sm btn-secondary" onclick="adoptAll()">全部采纳</button>
+                </div>
+            </div>
+            <div id="rework-progress" style="display:none; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:0.6rem; max-height:180px; overflow-y:auto; font-size:0.78rem; white-space:pre-wrap; color:var(--text-bright); margin-bottom:0.5rem;"></div>
+            <p style="font-size:0.76rem; color:var(--text-dim); margin:0 0 0.7rem;">
+                逐条编辑确认后再采纳；没采纳的不会进入你的新书。点击「展开编辑」查看/修改完整字段。
+            </p>
+
+            <div class="wb-tabs" role="tablist">
+                {% set sections = [('character', '人物'), ('world', '世界观'), ('outline', '大纲'), ('foreshadow', '伏笔')] %}
+                {% for kind, label in sections %}
+                {% set kind_items = items|selectattr('kind', 'equalto', kind)|list %}
+                <button type="button" class="wb-tab {% if loop.first %}active{% endif %}"
+                        data-kind="{{ kind }}" onclick="switchKind('{{ kind }}', this)">
+                    {{ label }}<span class="wb-count">{{ kind_items|length }}</span>
+                </button>
+                {% endfor %}
+            </div>
+
+            <div class="wb-body">
+                {% for kind, label in sections %}
+                {% set kind_items = items|selectattr('kind', 'equalto', kind)|list %}
+                <div class="kind-section" data-kind="{{ kind }}" style="{% if not loop.first %}display:none;{% endif %}">
+                    {% if not kind_items %}
+                    <p style="font-size:0.8rem; color:var(--text-faint); margin:0.5rem 0;">（无）</p>
+                    {% endif %}
+                    {% for item in kind_items %}
+                    <div class="item-card" id="item-{{ item.id }}" data-status="{{ item.status }}"
+                         style="border:1px solid {% if item.status == 'adopted' %}var(--success){% else %}var(--border){% endif %}; border-radius:8px; padding:0.8rem; margin-bottom:0.6rem; {% if item.status == 'adopted' %}opacity:0.75;{% elif item.status == 'discarded' %}opacity:0.4;{% endif %}">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem; flex-wrap:wrap; gap:0.4rem;">
+                            <span style="font-weight:600; font-size:0.85rem; color:var(--text-bright);">
+                                {{ item.title }}
+                                {% if item.status == 'adopted' %}<span style="color:var(--success); font-size:0.72rem; margin-left:0.4rem;">已入库 #{{ item.target_id }}</span>
+                                {% elif item.status == 'discarded' %}<span style="color:var(--text-faint); font-size:0.72rem; margin-left:0.4rem;">已丢弃</span>{% endif %}
+                                {% if item.modified_content and item.kind == 'character' and item.display_data.get('name','') == item.content.get('name','') %}
+                                <span style="color:var(--danger); font-size:0.72rem; margin-left:0.3rem;" title="AI 改写后名称与原书相同">⚠ 名称未改</span>
+                                {% elif item.modified_content and item.kind == 'world' and item.display_data.get('title','') == item.content.get('title','') %}
+                                <span style="color:var(--danger); font-size:0.72rem; margin-left:0.3rem;" title="AI 改写后名称与原书相同">⚠ 名称未改</span>
+                                {% endif %}
+                            </span>
+                            {% if item.status == 'pending' or (item.status == 'adopted' and not item.target_id) %}
+                            <div class="card-actions" style="display:flex; gap:0.35rem;">
+                                <button class="btn btn-sm btn-secondary" onclick="toggleFields({{ item.id }}, this)">展开编辑 ▾</button>
+                                <button class="btn btn-sm btn-secondary" onclick="reworkItem({{ item.id }}, this)">AI 改写</button>
+                                {% if item.modified_content %}
+                                <button class="btn btn-sm btn-secondary" onclick="resetItem({{ item.id }})">还原</button>
+                                {% endif %}
+                                <button class="btn btn-sm btn-primary" onclick="adoptItem({{ item.id }})">{% if item.status == 'adopted' %}重新采纳{% else %}采纳{% endif %}</button>
+                                <button class="btn btn-sm btn-secondary" onclick="discardItem({{ item.id }})">丢弃</button>
+                            </div>
+                            {% elif item.status == 'discarded' %}
+                            <button class="btn btn-sm btn-secondary" onclick="restoreItem({{ item.id }})">恢复</button>
+                            {% endif %}
+                        </div>
+                        {# 档1+卡片折叠:默认收起(渐进披露,13 字段卡不再滚动地狱),有修改稿的自动展开 #}
+                        <div class="item-fields" id="fields-{{ item.id }}"
+                             style="display: {% if item.modified_content %}grid{% else %}none{% endif %}; margin-top:0.4rem;">
+                            {% if item.kind == 'character' %}
+                            <label>姓名 <input class="f-field" data-key="name" value="{{ item.display_data.get('name','') }}"></label>
+                            <label>定位 <input class="f-field" data-key="role" value="{{ item.display_data.get('role','') }}"></label>
+                            <label>性格 <textarea class="f-field" data-key="personality" rows="2">{{ item.display_data.get('personality','') }}</textarea></label>
+                            <label>说话风格 <input class="f-field" data-key="speaking_style" value="{{ item.display_data.get('speaking_style','') }}"></label>
+                            <label>外貌 <input class="f-field" data-key="appearance" value="{{ item.display_data.get('appearance','') }}"></label>
+                            <label>背景 <input class="f-field" data-key="background" value="{{ item.display_data.get('background','') }}"></label>
+                            <label>动机 <input class="f-field" data-key="motivation" value="{{ item.display_data.get('motivation','') }}"></label>
+                            <label>弧光 <textarea class="f-field" data-key="arc_direction" rows="2">{{ item.display_data.get('arc_direction','') }}</textarea></label>
+                            <label>人物关系 <textarea class="f-field" data-key="relationships" rows="2">{{ item.display_data.get('relationships','') }}</textarea></label>
+                            <label>塑造方法（可迁移点） <textarea class="f-field" data-key="migratable_methods" rows="2">{{ item.display_data.get('migratable_methods','') }}</textarea></label>
+                            <label>首现事件 <input class="f-field" data-key="first_event" value="{{ item.display_data.get('first_event','') }}"></label>
+                            <label>退场事件 <input class="f-field" data-key="exit_event" value="{{ item.display_data.get('exit_event','') }}"></label>
+                            <label>退场方式 <input class="f-field" data-key="exit_mode" value="{{ item.display_data.get('exit_mode','') }}"></label>
+                            {% elif item.kind == 'world' %}
+                            <label>分类 <input class="f-field" data-key="category" value="{{ item.display_data.get('category','') }}"></label>
+                            <label>名称 <input class="f-field" data-key="title" value="{{ item.display_data.get('title','') }}"></label>
+                            <label>内容 <textarea class="f-field" data-key="content" rows="3">{{ item.display_data.get('content','') }}</textarea></label>
+                            {% elif item.kind == 'foreshadow' %}
+                            <label>标题 <input class="f-field" data-key="title" value="{{ item.display_data.get('title','') }}"></label>
+                            <label>描述（埋了什么、如何收） <textarea class="f-field" data-key="description" rows="3">{{ item.display_data.get('description','') }}</textarea></label>
+                            <label>埋设事件 <input class="f-field" data-key="planted_event" value="{{ item.display_data.get('planted_event','') }}"></label>
+                            <label>回收事件 <input class="f-field" data-key="resolve_event" value="{{ item.display_data.get('resolve_event','') }}"></label>
+                            <label>重要度（1-10） <input class="f-field" data-key="importance" type="number" min="1" max="10" value="{{ item.display_data.get('importance',5) }}"></label>
+                            {% else %}
+                            <label>阶段/卷 <input class="f-field" data-key="phase" value="{{ item.display_data.get('phase','') }}"></label>
+                            <label>章节名 <input class="f-field" data-key="title" value="{{ item.display_data.get('title','') }}"></label>
+                            <label>章节大纲 <textarea class="f-field" data-key="summary" rows="3">{{ item.display_data.get('summary','') }}</textarea></label>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            </div>
+        </aside>
+    </div>
+</div>
+
+<!-- 复刻为长篇 弹窗 -->
+<div id="modal-long" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:100; align-items:center; justify-content:center;">
+    <div class="card" style="width:min(520px,92vw); padding:1.5rem;">
+        <h3 style="font-size:1.05rem; color:var(--text-bright); margin:0 0 1rem;">复刻为长篇</h3>
+        <div class="form-stack" style="display:flex; flex-direction:column; gap:0.75rem;">
+            <div class="form-row">
+                <label>目标书</label>
+                <select id="gl-target">
+                    <option value="" {% if not task.target_novel_id %}selected{% endif %}>
+                        {% if task.target_novel_id %}自动：追加到已绑定的长篇 #{{ task.target_novel_id }}{% else %}自动：新建一本小说{% endif %}
+                    </option>
+                    {% for novel in novels %}
+                    {% if novel.id != task.target_novel_id %}
+                    <option value="{{ novel.id }}">已有：{{ novel.title }}</option>
+                    {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-row">
+                <label>新书标题</label>
+                <input id="gl-title" placeholder="默认：{{ task.title }}">
+            </div>
+            <div class="form-row">
+                <label>题材</label>
+                <input id="gl-genre" placeholder="如：都市异能 / 玄幻">
+            </div>
+            <div class="form-row">
+                <label>开篇章节数</label>
+                <input id="gl-chapters" type="number" value="5" min="1" max="200">
+            </div>
+            <div class="form-row">
+                <label style="display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
+                    <input type="checkbox" id="gl-run"> 生成正文（串行跑章节流水线：门禁+AI味收敛，较慢）
+                </label>
+            </div>
+            <div id="gl-progress" style="display:none; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:0.75rem; max-height:200px; overflow-y:auto; font-size:0.85rem; white-space:pre-wrap; color:var(--text-bright);"></div>
+            <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:0.5rem;">
+                <button class="btn btn-secondary" onclick="closeModal('modal-long')">取消</button>
+                <button class="btn btn-primary" id="gl-btn" onclick="genLong()">生成</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 复刻为短篇 弹窗 -->
+<div id="modal-short" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:100; align-items:center; justify-content:center;">
+    <div class="card" style="width:min(460px,92vw); padding:1.5rem;">
+        <h3 style="font-size:1.05rem; color:var(--text-bright); margin:0 0 1rem;">复刻为短篇</h3>
+        <div class="form-stack" style="display:flex; flex-direction:column; gap:0.75rem;">
+            <div class="form-row">
+                <label>短篇标题</label>
+                <input id="gs-title" placeholder="默认：{{ task.title }}">
+            </div>
+            <div class="form-row">
+                <label>题材</label>
+                <input id="gs-genre" placeholder="如：都市异能 / 悬疑">
+            </div>
+            <div class="form-row">
+                <label>目标字数</label>
+                <input id="gs-words" type="number" value="3000" min="500" max="50000">
+            </div>
+            <div id="gs-msg" style="font-size:0.85rem; color:var(--text-dim);"></div>
+            <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:0.5rem;">
+                <button class="btn btn-secondary" onclick="closeModal('modal-short')">取消</button>
+                <button class="btn btn-primary" id="gs-btn" onclick="genShort()">生成</button>
+            </div>
         </div>
     </div>
 </div>
 
 <script>
 const taskId = {{ task.id }};
-const mode = "{{ task.mode }}";
 
-// 记录操作按钮初始文案，流式读取中断后恢复
-const actionButtons = ['btn-analyze', 'btn-generate', 'btn-rewrite']
-    .map(id => document.getElementById(id))
-    .filter(Boolean)
-    .map(b => ({ el: b, text: b.textContent }));
+function $(id) { return document.getElementById(id); }
 
-function resetActionButtons() {
-    actionButtons.forEach(b => {
-        if (b.el.disabled) { b.el.disabled = false; b.el.textContent = b.text; }
-    });
+// ===== 反馈与状态（使用者审查修复：告别 alert+整页刷新） =====
+function toast(msg, ok) {
+    let box = $('toast-box');
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'toast-box';
+        box.style.cssText = 'position:fixed;top:1rem;right:1rem;z-index:200;display:flex;flex-direction:column;gap:0.4rem;';
+        document.body.appendChild(box);
+    }
+    const t = document.createElement('div');
+    t.style.cssText = 'background:var(--bg-card);border:1px solid ' + (ok === false ? 'var(--danger)' : 'var(--success)')
+        + ';border-radius:6px;padding:0.55rem 0.9rem;font-size:0.85rem;color:var(--text-bright);max-width:320px;box-shadow:0 4px 14px rgba(0,0,0,0.4);';
+    t.textContent = msg;
+    box.appendChild(t);
+    setTimeout(() => t.remove(), 3200);
 }
 
-function streamToElement(url, body, targetEl, onDone) {
-    targetEl.innerHTML = '';
-    const textNode = document.createTextNode('');
-    const cursor = document.createElement('span');
-    cursor.className = 'typing-cursor';
-    cursor.textContent = '|';
-    targetEl.appendChild(textNode);
-    targetEl.appendChild(cursor);
+let _dirty = false;
+let _currentPollLt = null;
 
-    fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: body || ''
-    }).then(resp => {
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let fullText = '';
+function markAdoptedCard(itemId, targetId) {
+    const card = $('item-' + itemId);
+    if (!card) return;
+    card.style.borderColor = 'var(--success)';
+    card.style.opacity = '0.75';
+    const actions = card.querySelector('.card-actions');
+    if (actions) actions.innerHTML = '<span style="color:var(--success);font-size:0.75rem;">已采纳' + (targetId ? ' · 已入库 #' + targetId : '') + '</span>';
+    const cnt = $('adopted-count');
+    if (cnt) cnt.textContent = (parseInt(cnt.textContent || '0', 10) + 1) + '';
+}
+document.addEventListener('input', e => {
+    if (e.target.closest && (e.target.closest('.item-fields') || ['modifications-text', 'report-text'].includes(e.target.id))) _dirty = true;
+});
+window.addEventListener('beforeunload', e => {
+    if (_dirty) { e.preventDefault(); e.returnValue = ''; }
+});
 
-        function read() {
-            reader.read().then(({ done, value }) => {
-                if (done) {
-                    cursor.remove();
-                    if (onDone) onDone(fullText);
-                    return;
-                }
-                const chunk = decoder.decode(value, { stream: true });
-                fullText += chunk;
-                textNode.textContent = fullText;
-                targetEl.scrollTop = targetEl.scrollHeight;
-                read();
-            }).catch(err => {
-                console.error('流式读取中断:', err);
-                cursor.remove();
-                resetActionButtons();
-                const errSpan = document.createElement('span');
-                errSpan.style.color = 'var(--danger)';
-                errSpan.textContent = '连接中断';
-                targetEl.appendChild(errSpan);
-            });
+function switchKind(kind, btn) {
+    document.querySelectorAll('.wb-tab').forEach(t => t.classList.toggle('active', t === btn));
+    document.querySelectorAll('.kind-section').forEach(s => {
+        s.style.display = s.dataset.kind === kind ? 'block' : 'none';
+    });
+    // 记住当前页签：采纳/丢弃后 reload 不再弹回「人物」
+    try { localStorage.setItem('wb-tab-{{ task.id }}', kind); } catch (e) {}
+}
+// 恢复上次所在页签
+try {
+    const saved = localStorage.getItem('wb-tab-{{ task.id }}');
+    if (saved) {
+        const btn = document.querySelector(`.wb-tab[data-kind="${saved}"]`);
+        if (btn) switchKind(saved, btn);
+    }
+} catch (e) {}
+
+// 使用者审查修复:关页再回来,自动恢复进行中任务的进度显示(P0-3 配套)
+{% if running_lt %}
+(function () {
+    $('stream-panel').style.display = 'block';
+    const btn = $('btn-deconstruct');
+    btn.disabled = true;
+    btn.textContent = '任务进行中…';
+    toast('检测到进行中的任务，已恢复进度显示');
+    pollTask({{ running_lt.id }}, $('stream-output'), function (d) {
+        btn.disabled = false;
+        btn.textContent = '重新拆书';
+        if (d.status === 'done') location.reload();
+    });
+})();
+{% endif %}
+
+function toggleFields(itemId, btn) {
+    const box = document.querySelector(`#item-${itemId} .item-fields`);
+    const open = box.style.display !== 'none';
+    box.style.display = open ? 'none' : 'grid';
+    btn.textContent = open ? '展开编辑 ▾' : '收起 ▴';
+}
+
+// 后台任务模式(P0-3):POST 启动 → 轮询进度(关页/重开可回看进度)
+async function startTask(url, body, panel, onDone, btn) {
+    panel.innerHTML = '';
+    let resp, data;
+    try {
+        resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body || '' });
+        data = await resp.json();
+    } catch (err) {
+        panel.innerHTML = `<span style="color:var(--danger)">失败: ${err.message}</span>`;
+        if (btn) { btn.disabled = false; }
+        return;
+    }
+    if (!resp.ok || !data.ok) {
+        panel.innerHTML = `<span style="color:var(--danger)">${(data.message || ('HTTP ' + resp.status)).trim()}</span>`;
+        if (btn) { btn.disabled = false; }
+        return;
+    }
+    pollTask(data.long_task_id, panel, onDone, btn);
+}
+
+function pollTask(ltId, panel, onDone, btn) {
+    _currentPollLt = ltId;
+    const cancelBtn = $('btn-cancel-task');
+    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+    fetch(`/plagiarize/long-tasks/${ltId}`).then(r => r.json()).then(d => {
+        pollTask._retry = 0;  // 成功收到响应即复位网络重试计数
+        panel.textContent = d.progress || '';
+        panel.scrollTop = panel.scrollHeight;
+        if (d.status === 'running') {
+            setTimeout(() => pollTask(ltId, panel, onDone, btn), 1500);
+            return;
         }
-        read();
-    }).catch(err => {
-        console.error('流式请求失败:', err);
-        resetActionButtons();
-        targetEl.innerHTML = `<span style="color:var(--danger)">失败: ${err.message}</span>`;
+        if (btn) { btn.disabled = false; }
+        if (cancelBtn) cancelBtn.style.display = 'none';
+        if (d.status === 'failed') {
+            panel.textContent += '\n✗ 任务失败——点击上方启动按钮可重试（已完成的阶段断点续用，不会重头再来）';
+        }
+        if (d.status === 'cancelled') {
+            panel.textContent += '\n■ 已取消——已完成的部分保留，随时可重新开始';
+        }
+        onDone(d);
+    }).catch(() => {
+        // 网络抖动 ≠ 任务失败:重试若干次;任务本身在服务端照跑,回来刷新即可恢复
+        pollTask._retry = (pollTask._retry || 0) + 1;
+        if (pollTask._retry > 10) {
+            panel.textContent += '\n■ 网络长时间不可达，已停止轮询。任务仍在服务端运行，刷新本页即可恢复进度显示。';
+            if (btn) btn.disabled = false;
+            return;
+        }
+        panel.textContent += '\n…[网络波动，继续轮询中]';
+        setTimeout(() => pollTask(ltId, panel, onDone, btn), 3000);
     });
 }
 
-function analyzeStyle() {
-    const btn = document.getElementById('btn-analyze');
+async function cancelTask() {
+    if (!_currentPollLt) return;
+    if (!confirm('确定取消当前任务？已完成的部分会保留（拆书摘要断点续用）。')) return;
+    const resp = await fetch(`/plagiarize/long-tasks/${_currentPollLt}/cancel`, { method: 'POST' });
+    const data = await resp.json();
+    toast(data.message, data.ok);
+}
+
+function runDeconstruct() {
+    const btn = $('btn-deconstruct');
     btn.disabled = true;
-    btn.textContent = '分析中...';
-    
-    const target = document.getElementById('report-content') || document.getElementById('stream-target');
-    target.innerHTML = '';
-    target.style.display = 'block';
-    
-    streamToElement(`/plagiarize/${taskId}/analyze-style`, '', target, function() {
-        location.reload();
-    });
+    btn.textContent = '拆解中...';
+    $('stream-panel').style.display = 'block';
+    startTask(`/plagiarize/${taskId}/deconstruct`, '', $('stream-output'), function (d) {
+        btn.textContent = '重新拆书';
+        if (d.status === 'done') location.reload();
+    }, btn);
 }
 
-function extractPlot() {
-    const btn = document.getElementById('btn-analyze');
-    btn.disabled = true;
-    btn.textContent = '提取中...';
-    
-    const target = document.getElementById('report-content') || document.getElementById('stream-target');
-    target.innerHTML = '';
-    target.style.display = 'block';
-    
-    streamToElement(`/plagiarize/${taskId}/extract-plot`, '', target, function() {
-        location.reload();
-    });
-}
-
-function generateStyle() {
-    const btn = document.getElementById('btn-generate');
-    btn.disabled = true;
-    btn.textContent = '生成中...';
-    
-    const target = document.getElementById('result-content') || document.getElementById('stream-target');
-    target.innerHTML = '';
-    target.style.display = 'block';
-    
-    streamToElement(`/plagiarize/${taskId}/generate-style`, '', target, function() {
-        location.reload();
-    });
-}
-
-function generatePlot() {
-    const btn = document.getElementById('btn-generate');
-    btn.disabled = true;
-    btn.textContent = '生成中...';
-    
-    const target = document.getElementById('result-content') || document.getElementById('stream-target');
-    target.innerHTML = '';
-    target.style.display = 'block';
-    
-    streamToElement(`/plagiarize/${taskId}/generate-plot`, '', target, function() {
-        location.reload();
-    });
-}
-
-function setLevel(level) {
-    // 更新 URL 参数并刷新
-    const url = new URL(window.location);
-    url.searchParams.set('level', level);
-    window.location.href = url;
-}
-
-function rewriteText() {
-    const btn = document.getElementById('btn-rewrite');
-    btn.disabled = true;
-    btn.textContent = '改写中...';
-    
-    const target = document.getElementById('result-content') || document.getElementById('stream-target');
-    target.innerHTML = '';
-    target.style.display = 'block';
-    
-    const level = new URLSearchParams(window.location.search).get('level') || '{{ task.rewrite_level }}';
-    streamToElement(`/plagiarize/${taskId}/rewrite`, `level=${level}`, target, function() {
-        location.reload();
-    });
-}
-
-async function saveToChapter() {
-    const novelId = prompt('输入目标小说ID：');
-    if (!novelId) return;
-    
+function saveReport() {
     const fd = new FormData();
-    fd.append('novel_id', novelId);
-    
-    const resp = await fetch(`/plagiarize/${taskId}/save-to-chapter`, { method: 'POST', body: fd });
+    fd.append('report_text', $('report-text').value);
+    fd.append('modifications_text', $('modifications-text').value);
+    fetch(`/plagiarize/${taskId}/save-report`, { method: 'POST', body: fd })
+        .then(r => r.json()).then(d => {
+            if (d.ok) { toast('已保存'); _dirty = false; }
+            else toast('保存失败', false);
+        });
+}
+
+async function adoptItem(itemId) {
+    const card = $(`item-${itemId}`);
+    const fd = new FormData();
+    card.querySelectorAll('.f-field').forEach(f => fd.append(f.dataset.key, f.value));
+    const resp = await fetch(`/plagiarize/items/${itemId}/adopt`, { method: 'POST', body: fd });
     const data = await resp.json();
     if (data.ok) {
-        alert('已保存为第 ' + data.chapter_id + ' 章');
-        window.location.href = `/novel/${novelId}/`;
+        // 局部更新:不整页刷新,不丢其它卡片的未保存编辑
+        markAdoptedCard(itemId, data.target_id);
+        toast(data.message);
+        _dirty = false;
     } else {
-        alert(data.error || '保存失败');
+        toast(data.message, false);
     }
 }
 
-async function saveToShort() {
-    const resp = await fetch(`/plagiarize/${taskId}/save-to-short`, { method: 'POST' });
+async function discardItem(itemId) {
+    if (!confirm('确定丢弃该条目？（可随时点「恢复」反悔）')) return;
+    const resp = await fetch(`/plagiarize/items/${itemId}/discard`, { method: 'POST' });
     const data = await resp.json();
     if (data.ok) {
-        alert('已保存为短篇');
-        window.location.href = `/short/${data.story_id}`;
+        const card = $(`item-${itemId}`);
+        if (card) {
+            card.style.opacity = '0.4';
+            const actions = card.querySelector('.card-actions');
+            if (actions) actions.innerHTML = '<span style="color:var(--text-faint);font-size:0.75rem;">已丢弃</span>'
+                + '<button class="btn btn-sm btn-secondary" onclick="restoreItem(' + itemId + ')">恢复</button>';
+        }
+        toast(data.message);
     } else {
-        alert(data.error || '保存失败');
+        toast(data.message || '操作失败', false);
     }
 }
 
-async function saveAsSkill() {
-    const skillName = prompt('输入技能名称（如：某作者风格）：');
-    if (!skillName) return;
-    
-    const fd = new FormData();
-    fd.append('skill_name', skillName);
-    
-    const resp = await fetch(`/plagiarize/${taskId}/save-as-skill`, { method: 'POST', body: fd });
+async function restoreItem(itemId) {
+    const resp = await fetch(`/plagiarize/items/${itemId}/restore`, { method: 'POST' });
+    const data = await resp.json();
+    if (data.ok) location.reload();
+    else toast(data.message, false);
+}
+
+async function adoptAll() {
+    // 合规差异化门槛(PM C2):微创新为空 = 条目仍与原书高度相似
+    if (!$('modifications-text').value.trim()
+        && !confirm('未填写「微创新方向」：采纳的条目（人物名/设定/情节）将与原书高度相似，\n有被平台判定抄袭的风险。建议先「AI 全部改写」或填写微创新方向。\n\n确认仍要全部采纳？')) return;
+    if (!confirm('将全部待确认条目按当前内容（含 AI 改写稿）标记采纳？')) return;
+    const resp = await fetch(`/plagiarize/${taskId}/items/adopt-all`, { method: 'POST' });
     const data = await resp.json();
     if (data.ok) {
-        alert('已保存为自定义技能，可在技能管理页面查看');
+        toast(data.message + '，正在刷新…');
+        setTimeout(() => location.reload(), 900);
     } else {
-        alert(data.error || '保存失败');
+        toast(data.message, false);
+    }
+}
+
+async function reworkItem(itemId, btn) {
+    btn.disabled = true;
+    btn.textContent = '改写中…';
+    const resp = await fetch(`/plagiarize/items/${itemId}/rework`, { method: 'POST' });
+    const data = await resp.json();
+    if (data.ok) {
+        toast(data.message + '，正在刷新…');
+        setTimeout(() => location.reload(), 900);
+    } else {
+        toast(data.message, false);
+        btn.disabled = false; btn.textContent = 'AI 改写';
+    }
+}
+
+async function resetItem(itemId) {
+    if (!confirm('确定还原为拆解原稿？当前修改稿（含 AI 改写稿）将被丢弃。')) return;
+    const resp = await fetch(`/plagiarize/items/${itemId}/reset`, { method: 'POST' });
+    const data = await resp.json();
+    if (data.ok) {
+        toast(data.message + '，正在刷新…');
+        setTimeout(() => location.reload(), 900);
+    } else {
+        toast(data.message, false);
+    }
+}
+
+function reworkAll(btn) {
+    if (!confirm('AI 将按微创新方向成套改写全部待确认条目（先生成全员改名映射表保证关系一致）。\n改写稿只进「修改稿」，原稿可还原，改完逐条审阅采纳。继续？')) return;
+    btn.disabled = true;
+    const panel = $('rework-progress');
+    panel.style.display = 'block';
+    startTask(`/plagiarize/${taskId}/items/rework-all`, '', panel, function (d) {
+        if (d.status === 'done') location.reload();
+    }, btn);
+}
+
+function openModal(id) {
+    $(id).style.display = 'flex';
+}
+function closeModal(id) {
+    $(id).style.display = 'none';
+}
+function openGenLong() { openModal('modal-long'); }
+function openGenShort() { openModal('modal-short'); }
+
+function genLong() {
+    const btn = $('gl-btn');
+    btn.disabled = true;
+    $('gl-progress').style.display = 'block';
+    startTask(`/plagiarize/${taskId}/generate-long`, new URLSearchParams(
+        [['title', $('gl-title').value.trim()], ['genre', $('gl-genre').value.trim()],
+         ['chapters', $('gl-chapters').value || 5],
+         ['target_novel_id', $('gl-target').value || ''], ['run', $('gl-run').checked ? '1' : '0']]
+    ).toString(), $('gl-progress'), function (d) {
+        if (d.status === 'done' && d.result) {
+            toast('复刻落地完成！正在跳转…');
+            setTimeout(() => { window.location.href = `/novel/${d.result}/`; }, 800);
+        }
+    }, btn);
+}
+
+async function genShort() {
+    const fd = new FormData();
+    fd.append('title', $('gs-title').value.trim());
+    fd.append('genre', $('gs-genre').value.trim());
+    fd.append('word_target', $('gs-words').value || 3000);
+    const btn = $('gs-btn');
+    btn.disabled = true;
+    const resp = await fetch(`/plagiarize/${taskId}/generate-short`, { method: 'POST', body: fd });
+    const data = await resp.json();
+    btn.disabled = false;
+    if (data.ok) {
+        toast(data.message + '，正在跳转…');
+        setTimeout(() => { window.location.href = `/short/${data.story_id}`; }, 800);
+    } else {
+        $('gs-msg').textContent = data.message || '生成失败';
     }
 }
 </script>
 
 <style>
-.typing-cursor {
-    animation: blink 1s step-end infinite;
-    color: var(--accent);
-    font-weight: bold;
-}
+.typing-cursor { animation: blink 1s step-end infinite; color: var(--accent); font-weight: bold; }
 @keyframes blink { 50% { opacity: 0; } }
+.f-field { width: 100%; box-sizing: border-box; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.3rem 0.4rem; font-size: 0.8rem; color: var(--text-bright); }
+.f-field:focus { outline: none; border-color: var(--accent); }
+.item-card textarea.f-field { resize: vertical; }
+
+/* 侧边栏：页签 + 独立滚动 */
+.wb-sidebar { position: sticky; top: 1rem; }
+.wb-tabs { display: flex; gap: 0.4rem; margin-bottom: 0.7rem; }
+.wb-tab { flex: 1; padding: 0.45rem 0.2rem; font-size: 0.85rem; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); border-radius: 6px; cursor: pointer; transition: all 0.15s; }
+.wb-tab:hover { border-color: var(--accent); color: var(--text-bright); }
+.wb-tab.active { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
+.wb-count { opacity: 0.75; font-size: 0.75rem; margin-left: 0.25rem; }
+.wb-body { max-height: calc(100vh - 240px); overflow-y: auto; padding-right: 0.25rem; }
+.item-fields { display: grid; grid-template-columns: 1fr; gap: 0.45rem; font-size: 0.78rem; color: var(--text-dim); }
+.item-fields label { display: block; }
+.item-fields .f-field { margin-top: 0.15rem; }
+
+@media (max-width: 1100px) {
+    .wb-grid { grid-template-columns: 1fr !important; }
+    .wb-sidebar { position: static; }
+    .wb-body { max-height: 60vh; }
+}
 </style>
 {% endblock %}

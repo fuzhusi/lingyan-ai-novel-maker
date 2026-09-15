@@ -42,6 +42,8 @@
                     <select name="provider_type" class="form-control" onchange="onProviderTypeChange(this)">
                         <option value="deepseek">DeepSeek</option>
                         <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic Claude</option>
+                        <option value="gemini">Google Gemini</option>
                         <option value="moonshot">月之暗面 Kimi</option>
                         <option value="zhipu">智谱 GLM</option>
                         <option value="qwen">阿里通义千问</option>
@@ -76,7 +78,7 @@
         <div class="provider-card" data-pid="{{ p.id }}" style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin-bottom:1rem">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem">
                 <div style="display:flex;align-items:center;gap:0.8rem">
-                    <span class="provider-dot" style="background:{% if p.provider_type == 'deepseek' %}#5dd3f1{% elif p.provider_type == 'openai' %}#45d6a0{% elif p.provider_type == 'ollama' %}#f2c979{% elif p.provider_type == 'moonshot' %}#9cc3ec{% elif p.provider_type == 'zhipu' %}#6ea8dd{% elif p.provider_type == 'qwen' %}#c9b8fc{% elif p.provider_type == 'siliconflow' %}#7fe6bd{% elif p.provider_type == 'volcengine' %}#f87c9b{% elif p.provider_type == 'openrouter' %}#ef9db8{% elif p.provider_type == 'groq' %}#a5e8fa{% else %}var(--text-faint){% endif %}"></span>
+                    <span class="provider-dot" style="background:{% if p.provider_type == 'deepseek' %}#5dd3f1{% elif p.provider_type == 'openai' %}#45d6a0{% elif p.provider_type == 'anthropic' %}#d97757{% elif p.provider_type == 'gemini' %}#5b8def{% elif p.provider_type == 'ollama' %}#f2c979{% elif p.provider_type == 'moonshot' %}#9cc3ec{% elif p.provider_type == 'zhipu' %}#6ea8dd{% elif p.provider_type == 'qwen' %}#c9b8fc{% elif p.provider_type == 'siliconflow' %}#7fe6bd{% elif p.provider_type == 'volcengine' %}#f87c9b{% elif p.provider_type == 'openrouter' %}#ef9db8{% elif p.provider_type == 'groq' %}#a5e8fa{% else %}var(--text-faint){% endif %}"></span>
                     <strong style="font-size:1.1rem">{{ p.name }}</strong>
                     <span style="font-size:0.75rem;color:var(--text-faint)">{{ p.provider_type }}</span>
                 </div>
@@ -155,6 +157,8 @@
 const PROVIDER_URLS = {
     deepseek: 'https://api.deepseek.com',
     openai: 'https://api.openai.com/v1',
+    anthropic: 'https://api.anthropic.com/v1',
+    gemini: 'https://generativelanguage.googleapis.com/v1beta/openai',
     moonshot: 'https://api.moonshot.cn/v1',
     zhipu: 'https://open.bigmodel.cn/api/paas/v4',
     qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',

@@ -80,6 +80,10 @@
                     {% if c.arc_direction %}
                     <div class="kb-field"><strong>角色弧光：</strong>{{ c.arc_direction }}</div>
                     {% endif %}
+                    {% set ps = c.status_json | plan_summary %}
+                    {% if ps %}
+                    <div class="kb-field" style="color:var(--accent);" title="来自拆书复刻的生命周期计划，生成时自动注入对应章节"><strong>📖 拆书计划：</strong>{{ ps }}</div>
+                    {% endif %}
                 </div>
                 <div style="display:flex;gap:0.3rem;flex-shrink:0;margin-left:1rem">
                     <button class="btn-sm" onclick="document.getElementById('edit-form-{{ c.id }}').style.display='block'">编辑</button>

@@ -53,6 +53,7 @@
                     <div class="meta-info">
                         {% if f.planted_chapter %}埋于第 {{ f.planted_chapter }} 章{% endif %}
                         {% if f.resolve_chapter %} &middot; 计划第 {{ f.resolve_chapter }} 章回收{% endif %}
+                        {% if f.expected_resolve_chapter and not f.resolve_chapter %} &middot; <span style="color:var(--accent);">排程：第 {{ f.expected_resolve_chapter }} 章回收{% if f.earliest_resolve_chapter %}（不早于第 {{ f.earliest_resolve_chapter }} 章）{% endif %}</span>{% endif %}
                         &middot; 创建于 {{ f.created_at[:10] }}
                     </div>
                 </div>

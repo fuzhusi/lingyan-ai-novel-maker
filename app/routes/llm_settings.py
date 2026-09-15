@@ -7,13 +7,19 @@ from app.services.llm import fetch_models_from_provider, test_provider_connectio
 llm_settings_bp = Blueprint("llm_settings", __name__)
 
 
-# ---- 常用厂商预设表（OpenAI 兼容协议，选预设填 key 即用）----
+# ---- 常用厂商预设表（选预设填 key 即用）----
+# 除 anthropic（原生 /v1/messages 协议）外均为 OpenAI 兼容协议；
+# gemini 走 Google 官方 OpenAI 兼容端点，无需单独适配。
 
 PRESET_PROVIDERS = [
     {"type": "deepseek", "name": "DeepSeek（深度求索）", "base_url": "https://api.deepseek.com",
      "key_url": "https://platform.deepseek.com/api_keys", "hint": "国内直连，性价比高"},
     {"type": "openai", "name": "OpenAI", "base_url": "https://api.openai.com/v1",
-     "key_url": "https://platform.openai.com/api-keys", "hint": "GPT 系列"},
+     "key_url": "https://platform.openai.com/api-keys", "hint": "GPT 系列，国内需代理"},
+    {"type": "anthropic", "name": "Anthropic Claude", "base_url": "https://api.anthropic.com/v1",
+     "key_url": "https://console.anthropic.com/settings/keys", "hint": "Claude 系列，国内需代理"},
+    {"type": "gemini", "name": "Google Gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+     "key_url": "https://aistudio.google.com/apikey", "hint": "Gemini 系列，国内需代理"},
     {"type": "moonshot", "name": "月之暗面 Kimi", "base_url": "https://api.moonshot.cn/v1",
      "key_url": "https://platform.moonshot.cn/console/api-keys", "hint": "长上下文"},
     {"type": "zhipu", "name": "智谱 GLM", "base_url": "https://open.bigmodel.cn/api/paas/v4",

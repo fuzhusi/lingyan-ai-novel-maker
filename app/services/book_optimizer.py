@@ -8,11 +8,8 @@ Inspired by show-me-the-story's full-book optimization:
 
 This is meant to be run after all chapters are written/approved.
 """
-import json
-import concurrent.futures
-from app.models import (db, Novel, Chapter, ChapterVersion, ChapterSummary,
-                        Character, WorldSetting, Foreshadowing, StoryState)
-from app.services.llm import call_llm_sync, stream_llm_tokens, LLMError
+from app.models import (Novel, Chapter, ChapterVersion)
+from app.services.llm import call_llm_sync, LLMError
 from app.services.ai_metric import analyze_ai_tone
 from app.services.deai_agent import deai_process
 
@@ -154,7 +151,7 @@ def auto_revise_chapter(chapter_id, novel_id, chapter_number, issues, cfg):
         "输出修改后的完整章节正文，不要输出其他内容。"
     )
     user = (
-        f"【问题清单】\n" + "\n".join(issue_descriptions) + "\n\n"
+        "【问题清单】\n" + "\n".join(issue_descriptions) + "\n\n"
         f"【原文】\n{content}"
     )
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]

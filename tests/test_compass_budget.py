@@ -86,6 +86,9 @@ def test_generate_stream_wires_compass(app, client, monkeypatch):
         "novel_title": n.title, "chapter_title": "第一章", "outline": "大纲",
     })
     assert resp.status_code == 200
+    # SSE 响应是惰性生成：测试客户端 post() 只拉第一帧（现为 stream_start
+    # 进度帧）。必须读完响应体，generation_tokens 才会真正执行到 fake_stream。
+    resp.get_data(as_text=True)
     user = captured["messages"][1]["content"]
     assert "创作罗盘" in user
     assert "意图必须直达prompt" in user
@@ -250,7 +253,7 @@ def test_outline_stream_wires_compass(app, client, monkeypatch):
 
     captured = {}
 
-    def fake_tokens(messages, cfg, word_target=None):
+    def fake_tokens(messages, cfg, word_target=None, on_event=None):
         captured["messages"] = messages
         yield "大纲：主角进入北境。"
 
@@ -260,6 +263,7 @@ def test_outline_stream_wires_compass(app, client, monkeypatch):
         "novel_title": n.title, "chapter_title": "第一章",
     })
     assert resp.status_code == 200
+    resp.get_data(as_text=True)  # 读完惰性 SSE 体，fake_tokens 才会执行（同上）
     user = captured["messages"][1]["content"]
     assert "创作罗盘" in user
     assert "大纲必须服务此承诺" in user

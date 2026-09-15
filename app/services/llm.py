@@ -3,10 +3,12 @@
 替代散落在各处的内联 httpx 调用，支持多 Provider（DeepSeek / OpenAI / Ollama / 自定义）。
 所有 AI 调用通过此模块进行，统一错误处理和流式输出。
 """
-import json
 import logging
 import os
+import re
+import time
 import ssl
+import threading
 from typing import Generator
 from urllib.parse import urlsplit
 
@@ -75,6 +77,14 @@ PROVIDER_DEFAULTS = {
         "base_url": "https://api.openai.com/v1",
         "model": "gpt-4o",
     },
+    "anthropic": {
+        "base_url": "https://api.anthropic.com/v1",
+        "model": "claude-sonnet-4-5",
+    },
+    "gemini": {
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "model": "gemini-2.5-pro",
+    },
     "ollama": {
         "base_url": "http://localhost:11434/v1",
         "model": "llama3",
@@ -87,22 +97,31 @@ PROVIDER_DEFAULTS = {
 
 
 def fetch_models_from_provider(base_url: str, api_key: str, provider_type: str = "custom") -> list[dict]:
-    """调用 GET /v1/models 拉取厂商可用模型列表。
+    """调用 GET {base_url}/models 拉取厂商可用模型列表。
 
     对间歇性网络/SSL 错误（TLS 记录损坏 BAD_RECORD_MAC、连接抖动、超时）
     自动重试最多 3 次（间隔 1 秒）；HTTP 状态错误（401 无效 key 等）
     重试无意义，直接抛出。
 
+    Anthropic 走原生协议：x-api-key + anthropic-version 头认证（非 Bearer），
+    响应同为 {"data": [...]} 结构，与下方解析兼容。
+
     Returns:
         [{"id": "model-id", "owned_by": "provider"}, ...] 或抛出异常
     """
-    import time
 
     url = base_url.rstrip("/") + "/models"
-    # Ollama 不需要 Bearer token
     headers = {}
-    if api_key and provider_type != "ollama":
-        headers["Authorization"] = f"Bearer {api_key}"
+    if provider_type == "anthropic":
+        # Anthropic 原生 /v1/models：x-api-key 认证 + 版本头；limit 上限调大一次拉全
+        url += "?limit=1000"
+        if api_key:
+            headers["x-api-key"] = api_key
+        headers["anthropic-version"] = "2023-06-01"
+    else:
+        # Ollama 不需要 Bearer token
+        if api_key and provider_type != "ollama":
+            headers["Authorization"] = f"Bearer {api_key}"
 
     data = None
     last_err = None
@@ -150,9 +169,26 @@ def test_provider_connection(base_url: str, api_key: str, provider_type: str = "
         return {"ok": False, "error": str(e)[:200]}
 
 
+# 共享 HTTP 连接池：按 (SSL 校验策略, TLS 上限) 缓存 httpx.Client。
+# 串行多轮生成（大纲→正文→续写补足）复用同一连接，省去每轮 TCP+TLS
+# 握手（海外厂商经代理可达 1-3s/次）。httpx.Client 线程安全；
+# 进程生命周期内持有，调用结束不再逐次关闭。
+_HTTP_CLIENT_CACHE: dict = {}
+_HTTP_CLIENT_LOCK = threading.Lock()
+
+
 def _build_http_client(base_url: str = "") -> httpx.Client:
-    """构建 httpx 客户端（共享配置）。证书校验策略见 _ssl_verify_for。"""
-    return httpx.Client(verify=_ssl_context_for(base_url), timeout=httpx.Timeout(300.0, connect=10.0))
+    """构建/复用 httpx 客户端。证书校验策略见 _ssl_verify_for。"""
+    key = (_ssl_verify_for(base_url), os.getenv("LINGYAN_TLS_MAX", "").strip() == "1.2")
+    with _HTTP_CLIENT_LOCK:
+        client = _HTTP_CLIENT_CACHE.get(key)
+        if client is None or client.is_closed:
+            client = httpx.Client(
+                verify=_ssl_context_for(base_url),
+                timeout=httpx.Timeout(300.0, connect=10.0),
+            )
+            _HTTP_CLIENT_CACHE[key] = client
+        return client
 
 
 def get_llm(
@@ -173,7 +209,7 @@ def get_llm(
         model: 模型标识
         api_key: API 密钥
         base_url: API 地址
-        provider_type: 厂商类型（deepseek/openai/ollama/custom）
+        provider_type: 厂商类型（deepseek/openai/anthropic/gemini/ollama/custom）
         temperature: 温度
         max_tokens: 最大 tokens
         streaming: 是否流式
@@ -181,6 +217,37 @@ def get_llm(
         presence_penalty: 存在惩罚（-2~2，鼓励引入新内容）
         logprobs: 请求逐 token 对数概率（诊断用，需厂商支持，不支持会报错）
     """
+    # Anthropic 原生协议（/v1/messages，非 OpenAI 兼容）：走 langchain-anthropic。
+    # 与 ChatOpenAI 同为 BaseChatModel，调用方的 .stream()/.invoke() 无需感知差异；
+    # 采样惩罚与 logprobs 原生 API 不支持——惩罚静默忽略，logprobs 显式报错
+    # 让困惑度雷达按既有约定自动隐身。
+    if provider_type == "anthropic":
+        try:
+            from langchain_anthropic import ChatAnthropic
+        except ImportError as e:
+            raise LLMError("langchain-anthropic 未安装，请执行 uv sync 后重试") from e
+        if logprobs:
+            raise LLMError("Anthropic 原生 API 不支持 logprobs，困惑度雷达不可用")
+        anth_kwargs = {
+            "model": model,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "streaming": streaming,
+            # ChatAnthropic 1.7.x 没有 http_client 字段：传入会被转进
+            # model_kwargs 并混入 /v1/messages 请求体（每次调用必失败）。
+            # SDK 自管 httpx 客户端，超时经 default_request_timeout 下发。
+            "default_request_timeout": 300.0,
+        }
+        if base_url:
+            # SDK 会在 base_url 后自行拼接 v1/messages（要求以 / 结尾）——预置表里的
+            # https://api.anthropic.com/v1 必须剥掉 /v1 再补尾斜杠，否则拼出
+            # /v1/v1/messages（404）或 ...comv1/messages。fetch_models_from_provider
+            # 反而需要带 /v1（GET /v1/models），两处各自归一。
+            anth_kwargs["base_url"] = re.sub(r"/v1/?$", "", base_url.rstrip("/")) + "/"
+        if api_key:
+            anth_kwargs["api_key"] = api_key
+        return ChatAnthropic(**anth_kwargs)
+
     kwargs = {
         "model": model,
         "temperature": temperature,
@@ -188,10 +255,12 @@ def get_llm(
         "streaming": streaming,
     }
     # 采样惩罚仅在显式配置时传递（None 不下发，兼容不支持该参数的厂商）
-    if frequency_penalty is not None:
-        kwargs["frequency_penalty"] = frequency_penalty
-    if presence_penalty is not None:
-        kwargs["presence_penalty"] = presence_penalty
+    # Gemini 的 OpenAI 兼容端点不接受 frequency/presence_penalty，静默丢弃
+    if provider_type != "gemini":
+        if frequency_penalty is not None:
+            kwargs["frequency_penalty"] = frequency_penalty
+        if presence_penalty is not None:
+            kwargs["presence_penalty"] = presence_penalty
     if logprobs:
         kwargs["logprobs"] = True
 
@@ -237,7 +306,51 @@ def _friendly_error(e: Exception) -> str:
     return f"LLM 调用失败: {err_str[:200]}"
 
 
-def stream_llm_tokens(
+# ---------------------------------------------------------------------------
+# 瞬态错误重试(指数退避;429 尽量尊重 Retry-After)——P0-2
+# ---------------------------------------------------------------------------
+
+_LLM_RETRY_ATTEMPTS = max(1, int(os.getenv("LINGYAN_LLM_RETRIES", "3")))
+_TRANSIENT_MARKERS = ("429", "rate limit", "timeout", "timed out", "connect",
+                      "connection", "temporarily", "502", "503", "504", "overloaded", "eof")
+
+
+def _is_transient_error(exc):
+    s = str(exc).lower()
+    return any(m in s for m in _TRANSIENT_MARKERS)
+
+
+def _retry_delay(attempt, exc=None):
+    m = re.search(r"retry[- ]after[:\s]*(\d+)", str(exc).lower())
+    if m:
+        return min(float(m.group(1)), 30.0)
+    import random
+    return min(2 ** attempt, 8) + random.uniform(0, 0.5)
+
+
+def _record_llm_call(kind, model, ok, duration_ms, prompt_chars, output_chars, error=""):
+    """调用计量(P1-4):每次 LLM 调用一行,供成本/失败率聚合。失败静默不影响主链路。"""
+    try:
+        from app.models.llm_call import LLMCall
+        from app.models import db
+        db.session.add(LLMCall(
+            kind=kind, model=model or "", ok=bool(ok), duration_ms=int(duration_ms),
+            prompt_chars=int(prompt_chars), output_chars=int(output_chars),
+            error=_s(error)[:300],
+        ))
+        db.session.commit()
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+
+
+def _s(v):
+    return v if isinstance(v, str) else (str(v) if v is not None else "")
+
+
+def _stream_llm_tokens_once(
     model: str,
     messages: list[dict],
     api_key: str = "",
@@ -284,12 +397,50 @@ def stream_llm_tokens(
     except Exception as e:
         logger.error("stream_llm_tokens failed: %s", e)
         raise LLMError(_friendly_error(e)) from e
-    finally:
-        if llm and hasattr(llm, "http_client") and llm.http_client:
-            try:
-                llm.http_client.close()
-            except Exception:
-                pass
+    # http_client 已是共享连接池（_HTTP_CLIENT_CACHE），不再逐调用关闭
+
+
+def stream_llm_tokens(
+    model: str,
+    messages: list[dict],
+    api_key: str = "",
+    base_url: str = "",
+    provider_type: str = "custom",
+    temperature: float = 0.8,
+    max_tokens: int = 4096,
+    frequency_penalty: float | None = None,
+    presence_penalty: float | None = None,
+) -> Generator[str, None, None]:
+    """流式调用(带瞬态重试):仅在尚未吐出任何 token 前才重试——
+    已开始输出的流不可安全重放,中途失败直接抛 LLMError 由调用方处置。"""
+    import time as _time
+    started = _time.time()
+    for attempt in range(_LLM_RETRY_ATTEMPTS):
+        yielded = False
+        collected = 0
+        try:
+            for text in _stream_llm_tokens_once(
+                model=model, messages=messages, api_key=api_key, base_url=base_url,
+                provider_type=provider_type, temperature=temperature,
+                max_tokens=max_tokens, frequency_penalty=frequency_penalty,
+                presence_penalty=presence_penalty,
+            ):
+                yielded = True
+                collected += len(text)
+                yield text
+            _record_llm_call("stream", model, True, (_time.time() - started) * 1000,
+                             sum(len(m.get("content") or "") for m in messages), collected)
+            return
+        except LLMError as e:
+            _record_llm_call("stream", model, False, (_time.time() - started) * 1000,
+                             sum(len(m.get("content") or "") for m in messages), collected, str(e))
+            if yielded or attempt == _LLM_RETRY_ATTEMPTS - 1 or not _is_transient_error(e):
+                raise
+            delay = _retry_delay(attempt, e)
+            logger.warning("stream transient failure (attempt %d/%d), retry in %.1fs: %s",
+                           attempt + 1, _LLM_RETRY_ATTEMPTS, delay, e)
+            _time.sleep(delay)
+            started = _time.time()
 
 
 def call_llm_with_logprobs(
@@ -335,15 +486,10 @@ def call_llm_with_logprobs(
     except Exception as e:
         logger.error("call_llm_with_logprobs failed: %s", e)
         raise LLMError(_friendly_error(e)) from e
-    finally:
-        if llm and hasattr(llm, "http_client") and llm.http_client:
-            try:
-                llm.http_client.close()
-            except Exception:
-                pass
+    # http_client 已是共享连接池（_HTTP_CLIENT_CACHE），不再逐调用关闭
 
 
-def call_llm_sync(
+def _call_llm_sync_once(
     model: str,
     messages: list[dict],
     api_key: str = "",
@@ -380,9 +526,64 @@ def call_llm_sync(
     except Exception as e:
         logger.error("call_llm_sync failed: %s", e)
         raise LLMError(_friendly_error(e)) from e
-    finally:
-        if llm and hasattr(llm, "http_client") and llm.http_client:
-            try:
-                llm.http_client.close()
-            except Exception:
-                pass
+    # http_client 已是共享连接池（_HTTP_CLIENT_CACHE），不再逐调用关闭
+
+def call_llm_sync(
+    model: str,
+    messages: list[dict],
+    api_key: str = "",
+    base_url: str = "",
+    provider_type: str = "custom",
+    temperature: float = 0.8,
+    max_tokens: int = 4096,
+    frequency_penalty: float | None = None,
+    presence_penalty: float | None = None,
+) -> str:
+    """非流式调用(带瞬态重试:429/超时/连接类失败指数退避,非瞬态立即抛)。"""
+    import time as _time
+    started = _time.time()
+    prompt_chars = sum(len(m.get("content") or "") for m in messages)
+    last_exc = None
+    for attempt in range(_LLM_RETRY_ATTEMPTS):
+        try:
+            out = _call_llm_sync_once(
+                model=model, messages=messages, api_key=api_key, base_url=base_url,
+                provider_type=provider_type, temperature=temperature,
+                max_tokens=max_tokens, frequency_penalty=frequency_penalty,
+                presence_penalty=presence_penalty,
+            )
+            _record_llm_call("sync", model, True, (_time.time() - started) * 1000,
+                             prompt_chars, len(out or ""))
+            return out
+        except LLMError as e:
+            last_exc = e
+            _record_llm_call("sync", model, False, (_time.time() - started) * 1000,
+                             prompt_chars, 0, str(e))
+            if attempt == _LLM_RETRY_ATTEMPTS - 1 or not _is_transient_error(e):
+                raise
+            delay = _retry_delay(attempt, e)
+            logger.warning("call_llm_sync transient failure (attempt %d/%d), retry in %.1fs: %s",
+                           attempt + 1, _LLM_RETRY_ATTEMPTS, delay, e)
+            _time.sleep(delay)
+    raise last_exc  # 理论不可达
+
+
+def _call_embedding(text, cfg):
+    """调厂商 embedding API,返回 list[float]。cfg 需含 model_name/api_key/base_url。
+
+    OpenAI 兼容 POST /v1/embeddings;DeepSeek 等均兼容。
+    """
+    base = (cfg.get("base_url") or "https://api.deepseek.com").rstrip("/")
+    url = f"{base}/embeddings"
+    headers = {
+        "Authorization": f"Bearer {cfg.get('api_key', '')}",
+        "Content-Type": "application/json",
+    }
+    body = {"model": cfg.get("model_name", "text-embedding-3-small"), "input": text[:8000]}
+    resp = httpx.post(url, json=body, headers=headers, timeout=30.0,
+                      verify=not (cfg.get("base_url") or "").find("127.0.0.1") >= 0)
+    resp.raise_for_status()
+    data = resp.json()
+    if "data" in data and isinstance(data["data"], list) and data["data"]:
+        return data["data"][0].get("embedding", [])
+    raise ValueError("embedding API 返回格式异常")

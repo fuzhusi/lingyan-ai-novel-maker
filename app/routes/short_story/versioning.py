@@ -1,5 +1,4 @@
 """短篇版本管理路由：版本列表、保存、加载、删除、审批。"""
-import json
 from flask import request, jsonify
 from app.models import db, ShortStory, ShortStoryVersion
 from app.services.text_cleaner import clean_ai_text
@@ -10,7 +9,7 @@ from app.routes.short_story import short_story_bp
 @short_story_bp.route("/<int:story_id>/versions")
 def list_versions(story_id):
     """List all versions of a short story."""
-    story = ShortStory.query.get_or_404(story_id)
+    ShortStory.query.get_or_404(story_id)
     versions = ShortStoryVersion.query.filter_by(story_id=story_id).order_by(
         ShortStoryVersion.version_number.desc()).all()
     return jsonify([{

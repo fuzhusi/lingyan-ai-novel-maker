@@ -102,7 +102,7 @@ def review_story(story_id):
 @short_story_bp.route("/<int:story_id>/review/get")
 def get_review(story_id):
     """Get the latest review for a short story."""
-    story = ShortStory.query.get_or_404(story_id)
+    ShortStory.query.get_or_404(story_id)
     versions = ShortStoryVersion.query.filter_by(story_id=story_id).order_by(
         ShortStoryVersion.version_number.desc()).all()
     if not versions:

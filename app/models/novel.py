@@ -45,7 +45,9 @@ class Chapter(db.Model):
     # 删除章节时连带删除版本与评审（chapter_id/version_id 均非空，防 nullify IntegrityError）
     versions = db.relationship("ChapterVersion", back_populates="chapter",
                                order_by="ChapterVersion.version_number", cascade="all, delete-orphan")
-    outline_node = db.relationship("OutlineNode", backref="linked_chapter", uselist=False)
+    # viewonly:FK 由 outline_node_id 列直接管理(代码赋值列);节点删除前需先解链章节
+    outline_node = db.relationship("OutlineNode", backref=db.backref("linked_chapter", viewonly=True),
+                                   uselist=False)
 
     __table_args__ = (db.UniqueConstraint("novel_id", "chapter_number", name="uq_chapter_number"),)
 

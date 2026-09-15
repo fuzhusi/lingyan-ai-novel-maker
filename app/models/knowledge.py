@@ -17,7 +17,7 @@ class Character(db.Model):
     created_at = db.Column(db.String(20), default=now)
     updated_at = db.Column(db.String(20), default=now, onupdate=now)
 
-    novel = db.relationship("Novel", backref="characters")
+    novel = db.relationship("Novel", backref=db.backref("characters", cascade="all, delete-orphan"))
 
 
 class WorldSetting(db.Model):
@@ -30,7 +30,7 @@ class WorldSetting(db.Model):
     created_at = db.Column(db.String(20), default=now)
     updated_at = db.Column(db.String(20), default=now, onupdate=now)
 
-    novel = db.relationship("Novel", backref="world_settings")
+    novel = db.relationship("Novel", backref=db.backref("world_settings", cascade="all, delete-orphan"))
 
 
 class OutlineNode(db.Model):
@@ -44,7 +44,7 @@ class OutlineNode(db.Model):
     summary = db.Column(db.Text, default="")
     created_at = db.Column(db.String(20), default=now)
 
-    novel = db.relationship("Novel", backref="outline_nodes")
+    novel = db.relationship("Novel", backref=db.backref("outline_nodes", cascade="all, delete-orphan"))
     children = db.relationship("OutlineNode", backref=db.backref("parent", remote_side=[id]),
                                order_by="OutlineNode.sort_order")
 
@@ -64,9 +64,14 @@ class Foreshadowing(db.Model):
     last_mentioned_chapter = db.Column(db.Integer, nullable=True)
     timeout_threshold = db.Column(db.Integer, default=15)
     notes = db.Column(db.Text, default="")
+    # 拆书复刻的计划值（jarvis-write 双锚点：不可提前收 + 预期收）
+    earliest_resolve_chapter = db.Column(db.Integer, nullable=True)  # 不可早于此章回收
+    expected_resolve_chapter = db.Column(db.Integer, nullable=True)  # 预期回收章（计划值）
+    source_event = db.Column(db.Text, default="")   # 拆解锚点原值（事件名，审计回溯）
+    evidence = db.Column(db.Text, default="")       # 原书摘要引文（证据制）
     created_at = db.Column(db.String(20), default=now)
 
-    novel = db.relationship("Novel", backref="foreshadowing_items")
+    novel = db.relationship("Novel", backref=db.backref("foreshadowing_items", cascade="all, delete-orphan"))
 
 
 class PendingExtraction(db.Model):
@@ -83,6 +88,8 @@ class PendingExtraction(db.Model):
     chapter_number = db.Column(db.Integer, nullable=True)
     status = db.Column(db.String(20), default="pending")  # pending/adopted/discarded
     created_at = db.Column(db.String(20), default=now)
+
+    novel = db.relationship("Novel", backref=db.backref("pending_extractions", cascade="all, delete-orphan"))
 
 
 class CharacterRelation(db.Model):
@@ -105,7 +112,7 @@ class CharacterRelation(db.Model):
     created_at = db.Column(db.String(20), default=now)
     updated_at = db.Column(db.String(20), default=now, onupdate=now)
 
-    novel = db.relationship("Novel", backref="character_relations")
+    novel = db.relationship("Novel", backref=db.backref("character_relations", cascade="all, delete-orphan"))
     character_a = db.relationship("Character", foreign_keys=[character_a_id], backref="relations_as_a")
     character_b = db.relationship("Character", foreign_keys=[character_b_id], backref="relations_as_b")
 

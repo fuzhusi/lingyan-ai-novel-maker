@@ -49,6 +49,7 @@ from app.models import (
     WorldSetting, OutlineNode, Foreshadowing, ChapterSummary,
     ChapterMemory, CharacterRelation, StoryState, StoryStateSnapshot,
     ShortStory, ShortStoryVersion, ShortStoryReview, PromptTemplate, Setting,
+    PlagiarizeTask, DeconstructItem, BlindReview, PendingExtraction,
 )
 from app.routes.settings import AGENT_TYPES, get_model_config
 from app.routes.auth import DEFAULT_USERS
@@ -127,6 +128,16 @@ def print_table(headers, rows):
         print("  " + " | ".join(str(cell).ljust(col_widths[i]) for i, cell in enumerate(row)))
 
 
+def parse_id_list(raw):
+    """逗号分隔 id 串 → int 列表；None 保持 None（=全部角色），空串 → []（=不注入）。"""
+    if raw is None:
+        return None
+    try:
+        return [int(x) for x in raw.split(",") if x.strip()]
+    except ValueError:
+        raise SystemExit(f"✗ --character-ids 需为逗号分隔的数字，收到: {raw!r}")
+
+
 def confirm(prompt):
     """确认操作。"""
     resp = input(f"{prompt} [y/N]: ").strip().lower()
@@ -172,21 +183,8 @@ def cmd_novel(args):
                 print("已取消")
                 return
             title = novel.title
-            for ch in novel.chapters:
-                for v in ChapterVersion.query.filter_by(chapter_id=ch.id).all():
-                    CriticReview.query.filter_by(version_id=v.id).delete()
-                ChapterVersion.query.filter_by(chapter_id=ch.id).delete()
-                ChapterSummary.query.filter_by(chapter_id=ch.id).delete()
-                ChapterMemory.query.filter_by(chapter_id=ch.id).delete()
-                db.session.delete(ch)
-            Character.query.filter_by(novel_id=args.id).delete()
-            CharacterRelation.query.filter_by(novel_id=args.id).delete()
-            WorldSetting.query.filter_by(novel_id=args.id).delete()
-            OutlineNode.query.filter_by(novel_id=args.id).delete()
-            Foreshadowing.query.filter_by(novel_id=args.id).delete()
-            StoryState.query.filter_by(novel_id=args.id).delete()
-            StoryStateSnapshot.query.filter_by(novel_id=args.id).delete()
-            db.session.delete(novel)
+            from app.services.delete_service import delete_novel_full
+            delete_novel_full(args.id)
             db.session.commit()
             print(f"✓ 已删除: {title}")
 
@@ -209,7 +207,7 @@ def cmd_novel(args):
             print(f"  作者意图: {truncate(novel.author_intent, 60) or '无'}")
             print(f"  当前重心: {truncate(novel.current_focus, 60) or '无'}")
             print(f"  创建时间: {novel.created_at}")
-            print(f"  ---")
+            print("  ---")
             print(f"  章节: {ch}")
             print(f"  角色: {char}")
             print(f"  世界观条目: {ws}")
@@ -259,8 +257,8 @@ def cmd_novel(args):
                 print("暂无小说，无需删除")
                 return
             if not args.yes:
-                confirm = input(f"确定删除全部 {len(novels)} 部小说及其所有关联数据？(y/N) ").strip().lower()
-                if confirm != "y":
+                answer = input(f"确定删除全部 {len(novels)} 部小说及其所有关联数据？(y/N) ").strip().lower()
+                if answer != "y":
                     print("已取消")
                     return
             for n in novels:
@@ -425,8 +423,8 @@ def cmd_chapter(args):
                 print(f"✗ 第{args.number}章无 V{args.version} 版本")
                 return
             if v.approved and not args.yes:
-                confirm = input(f"V{args.version} 是已审批版本，确定删除？(y/N) ").strip().lower()
-                if confirm != "y":
+                answer = input(f"V{args.version} 是已审批版本，确定删除？(y/N) ").strip().lower()
+                if answer != "y":
                     print("已取消")
                     return
             CriticReview.query.filter_by(version_id=v.id).delete()
@@ -450,10 +448,29 @@ def cmd_chapter(args):
 
         elif args.action == "pipeline":
             from app.services.chapter_runner import run_chapter_pipeline
-            print(f"【一键本章流水线】小说#{args.novel} 第{args.number}章")
+            cids = parse_id_list(getattr(args, "character_ids", None))
+            scope = "全部角色" if cids is None else ("不注入角色" if not cids
+                                                     else f"出场角色 {cids}")
+            print(f"【一键本章流水线】小说#{args.novel} 第{args.number}章（{scope}）")
+            if getattr(args, "dry_run", False):
+                ch = Chapter.query.filter_by(novel_id=args.novel,
+                                             chapter_number=args.number).first()
+                if not ch:
+                    print(f"✗ 第{args.number}章不存在")
+                    return
+                outline_state = "已有大纲，跳过生成" if (ch.outline or "").strip() else "缺大纲，将自动生成"
+                save_state = "保存 AI 版本" if getattr(args, "save", None) else "停在人工闸门"
+                print(f"  大纲: {outline_state}")
+                print("  正文: 生成（目标约 2500 字）")
+                print("  门禁: skill_gate ∥ ai_metric")
+                print("  收敛: 人味分不升自动回滚")
+                print(f"  落盘: {save_state}（仍不自动审批）")
+                print("✓ dry-run 通过（未调用 LLM）")
+                return
             result = run_chapter_pipeline(args.novel, args.number,
                                           user_directive=args.directive or "",
-                                          auto_save=bool(args.save))
+                                          auto_save=bool(getattr(args, "save", None)),
+                                          character_ids=cids)
             if "error" in result:
                 print(f"✗ 失败：{result['error']}")
                 return
@@ -602,8 +619,8 @@ def cmd_chapter(args):
                 print(f"✗ 第{args.number}章不存在")
                 return
             if not args.yes:
-                confirm = input(f"确定删除第{args.number}章「{ch.title}」及其所有版本？(y/N) ").strip().lower()
-                if confirm != "y":
+                answer = input(f"确定删除第{args.number}章「{ch.title}」及其所有版本？(y/N) ").strip().lower()
+                if answer != "y":
                     print("已取消")
                     return
             for v in ChapterVersion.query.filter_by(chapter_id=ch.id).all():
@@ -706,7 +723,7 @@ def cmd_character(args):
                                 ("speaking_style", "speaking_style"), ("appearance", "appearance"),
                                 ("background", "background"), ("motivation", "motivation"),
                                 ("arc", "arc_direction")]:
-                val = getattr(args, attr, None) if attr != "arc" else getattr(args, "arc", None)
+                val = getattr(args, field, None)
                 if val is not None and str(val).strip():
                     setattr(char, attr, val)
                     changed.append(attr)
@@ -722,8 +739,8 @@ def cmd_character(args):
                 print(f"✗ 角色 {args.id} 不存在")
                 return
             if not args.yes:
-                confirm = input(f"确定删除角色 [{char.id}] {char.name}？(y/N) ").strip().lower()
-                if confirm != "y":
+                answer = input(f"确定删除角色 [{char.id}] {char.name}？(y/N) ").strip().lower()
+                if answer != "y":
                     print("已取消")
                     return
             # 级联删角色关系（SQLite 无 FK 级联，残留关系会成"幽灵角色"，对齐 cmd_novel delete）
@@ -792,8 +809,8 @@ def cmd_world(args):
                 print(f"✗ 世界观设定 {args.id} 不存在")
                 return
             if not args.yes:
-                confirm = input(f"确定删除世界观设定 [{ws.id}] {ws.title}？(y/N) ").strip().lower()
-                if confirm != "y":
+                answer = input(f"确定删除世界观设定 [{ws.id}] {ws.title}？(y/N) ").strip().lower()
+                if answer != "y":
                     print("已取消")
                     return
             db.session.delete(ws)
@@ -973,8 +990,8 @@ def cmd_foreshadow(args):
                 print(f"✗ 伏笔 {args.id} 不存在")
                 return
             if not args.yes:
-                confirm = input(f"确定删除伏笔 [{fs.id}] {fs.title}？(y/N) ").strip().lower()
-                if confirm != "y":
+                answer = input(f"确定删除伏笔 [{fs.id}] {fs.title}？(y/N) ").strip().lower()
+                if answer != "y":
                     print("已取消")
                     return
             db.session.delete(fs)
@@ -1077,13 +1094,13 @@ def cmd_outline(args):
                 return
             children = OutlineNode.query.filter_by(parent_id=node.id).count()
             if children and not args.yes:
-                confirm = input(f"节点 [{node.id}] 有 {children} 个子节点，级联删除？(y/N) ").strip().lower()
-                if confirm != "y":
+                answer = input(f"节点 [{node.id}] 有 {children} 个子节点，级联删除？(y/N) ").strip().lower()
+                if answer != "y":
                     print("已取消")
                     return
             elif not args.yes:
-                confirm = input(f"确定删除大纲节点 [{node.id}] {node.title}？(y/N) ").strip().lower()
-                if confirm != "y":
+                answer = input(f"确定删除大纲节点 [{node.id}] {node.title}？(y/N) ").strip().lower()
+                if answer != "y":
                     print("已取消")
                     return
             _delete_outline_node(node)
@@ -1209,8 +1226,8 @@ def cmd_relation(args):
                 print(f"✗ 关系 {args.id} 不存在")
                 return
             if not args.yes:
-                confirm = input(f"确定删除关系 [{rel.id}]？(y/N) ").strip().lower()
-                if confirm != "y":
+                answer = input(f"确定删除关系 [{rel.id}]？(y/N) ").strip().lower()
+                if answer != "y":
                     print("已取消")
                     return
             db.session.delete(rel)
@@ -1363,8 +1380,8 @@ def cmd_story_state(args):
                 print(f"✗ 小说 {args.novel} 无快照 [{args.snapshot}]")
                 return
             if not args.yes:
-                confirm = input(f"确定回滚到快照 [{snap.id}]（第{snap.chapter_number}章）？当前状态将丢失 (y/N) ").strip().lower()
-                if confirm != "y":
+                answer = input(f"确定回滚到快照 [{snap.id}]（第{snap.chapter_number}章）？当前状态将丢失 (y/N) ").strip().lower()
+                if answer != "y":
                     print("已取消")
                     return
             data = json.loads(snap.state_json or "{}")
@@ -1492,8 +1509,8 @@ def cmd_short(args):
                 print(f"✗ 短篇 {args.id} 无版本 V{args.version}")
                 return
             if not args.yes:
-                confirm = input(f"确定删除短篇 {args.id} 的 V{v.version_number}？(y/N) ").strip().lower()
-                if confirm != "y":
+                answer = input(f"确定删除短篇 {args.id} 的 V{v.version_number}？(y/N) ").strip().lower()
+                if answer != "y":
                     print("已取消")
                     return
             ShortStoryReview.query.filter_by(version_id=v.id).delete()
@@ -1561,8 +1578,8 @@ def cmd_short(args):
                 print(f"✗ 短篇 {args.id} 不存在")
                 return
             if not args.yes:
-                confirm = input(f"确定删除短篇「{story.title}」及其所有版本？(y/N) ").strip().lower()
-                if confirm != "y":
+                answer = input(f"确定删除短篇「{story.title}」及其所有版本？(y/N) ").strip().lower()
+                if answer != "y":
                     print("已取消")
                     return
             # 先删评审（按 version_id 关联）再删版本
@@ -1665,7 +1682,7 @@ def cmd_audit(args):
                         print(f"    - 「{pattern}」: {matches} 处")
                         count += 1
                         if count >= 10:
-                            print(f"    ... (更多省略)")
+                            print("    ... (更多省略)")
                             break
                 # 正则模式命中（与 stats['patterns_found'] 口径一致，防止"有统计无明细"矛盾）
                 import re as _re
@@ -1679,7 +1696,7 @@ def cmd_audit(args):
                         print(f"    - [正则] {truncate(sample, 30)}: {len(ms)} 处")
                         count += 1
                         if count >= 10:
-                            print(f"    ... (更多省略)")
+                            print("    ... (更多省略)")
                             break
 
 
@@ -2092,7 +2109,7 @@ def cmd_llm(args):
                     pid_s, model_id = llm_val.split(":", 1)
                     pid = int(pid_s)
                 except ValueError:
-                    print(f"✗ 格式错误，应为 provider_id:model_id（如 1:deepseek-v4-flash）")
+                    print("✗ 格式错误，应为 provider_id:model_id（如 1:deepseek-v4-flash）")
                     return
                 p = db.session.get(LLMProvider, pid)
                 if not p:
@@ -2114,7 +2131,7 @@ def cmd_llm(args):
                 db.session.commit()
                 print(f"✓ 已为 {agent_type} 指定模型: {llm_val}")
             else:
-                print(f"✗ 需要 --llm-model provider_id:model_id")
+                print("✗ 需要 --llm-model provider_id:model_id")
                 avail = get_available_models_for_agent()
                 if avail:
                     print("  可用模型:")
@@ -2307,7 +2324,7 @@ def cmd_skill(args):
             print(f"激活: {'是' if key in active else '否'}")
             print(f"\n描述: {skill.get('description', '(无)')}")
             print(f"\n约束: {skill.get('constraints', '(无)')}")
-            print(f"\n提示词:")
+            print("\n提示词:")
             print("-" * 40)
             print(skill.get("prompt", "(无)"))
             print("-" * 40)
@@ -2380,6 +2397,36 @@ def cmd_skill(args):
 # ---------------------------------------------------------------------------
 # 全书优化
 # ---------------------------------------------------------------------------
+        elif args.action == "usage":
+            # LLM 调用计量汇总(P1-4):次数/成功率/字符量→约 token,按模型聚合
+            from datetime import timedelta
+            from app.models import LLMCall
+            days = max(1, int(getattr(args, "days", 30) or 30))
+            since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+            rows = LLMCall.query.filter(LLMCall.created_at >= since).all()
+            if not rows:
+                print(f"近 {days} 天无 LLM 调用记录")
+                return
+            by_model = {}
+            fail = 0
+            total_ms = 0
+            for r in rows:
+                agg = by_model.setdefault(r.model or "(未知)", {"calls": 0, "fail": 0, "in": 0, "out": 0, "ms": 0})
+                agg["calls"] += 1
+                agg["fail"] += 0 if r.ok else 1
+                agg["in"] += r.prompt_chars or 0
+                agg["out"] += r.output_chars or 0
+                agg["ms"] += r.duration_ms or 0
+                fail += 0 if r.ok else 1
+                total_ms += r.duration_ms or 0
+            est_tokens = sum((a["in"] + a["out"]) // 2 for a in by_model.values())
+            print(f"近 {days} 天 LLM 调用：{len(rows)} 次（失败 {fail}，成功率 {100 * (len(rows) - fail) // len(rows)}%），"
+                  f"总耗时 {total_ms // 1000}s，约 {est_tokens // 1000}k tokens（按字符粗估）")
+            rows_out = sorted(by_model.items(), key=lambda kv: -kv[1]["calls"])
+            print_table(["模型", "调用", "失败", "输入字符", "输出字符", "总耗时(s)"],
+                        [[name, a["calls"], a["fail"], a["in"], a["out"], a["ms"] // 1000]
+                         for name, a in rows_out])
+
 
 def cmd_optimize(args):
     with app.app_context():
@@ -2397,7 +2444,7 @@ def cmd_optimize(args):
                 print(f"✗ {report['error']}")
                 return
             print()
-            print(f"【诊断报告】")
+            print("【诊断报告】")
             print(f"  总章节: {report['total_chapters']}")
             print(f"  总问题: {report['total_issues']}")
             print(f"  高严重度: {report['high_issues']}")
@@ -2600,6 +2647,183 @@ def cmd_queue(args):
             print(f"{'✓' if ok_flag else '✗'} {msg}")
 
 
+def cmd_deconstruct(args):
+    """拆书复刻：对标书拆解 → 待确认采纳 → 复刻长篇/短篇。"""
+    with app.app_context():
+        from app.services.book_deconstruct import (
+            deconstruct_source, adopt_item, adopt_all_items,
+            apply_blueprint_long, apply_blueprint_short, _load_elements,
+            unwritten_chapters, materialized_items_count,
+        )
+        from app.services.llm import LLMError
+
+        need_id = args.action in ("run", "show", "items", "adopt-all",
+                                  "generate-long", "generate-short", "delete")
+        if need_id and not args.id:
+            print(f"✗ deconstruct {args.action} 需要 --id <拆书任务ID>")
+            return
+        if args.action in ("adopt", "discard") and not args.item:
+            print(f"✗ deconstruct {args.action} 需要 --item <条目ID>")
+            return
+
+        if args.action == "create":
+            text = args.text or ""
+            if args.file:
+                if not os.path.exists(args.file):
+                    print(f"✗ 文件不存在: {args.file}")
+                    return
+                with open(args.file, "r", encoding="utf-8", errors="ignore") as f:
+                    text = f.read()
+            if not text.strip():
+                print("✗ 需要 --text 或 --file 提供对标书文本")
+                return
+            task = PlagiarizeTask(
+                title=(args.title or "").strip() or "未命名对标书",
+                mode="deconstruct",
+                source_text=text,
+                source_filename=os.path.basename(args.file) if args.file else "",
+                source_type="upload" if args.file else "paste",
+                modifications_text=getattr(args, "modifications", "") or "",
+                status="pending",
+            )
+            db.session.add(task)
+            db.session.commit()
+            print(f"✓ 已创建拆书任务 [{task.id}] {task.title}（源文本 {len(text)} 字）")
+            print(f"  下一步: python cli.py deconstruct run --id {task.id}")
+
+        elif args.action == "run":
+            task = db.session.get(PlagiarizeTask, args.id)
+            if not task:
+                print(f"✗ 拆书任务 {args.id} 不存在")
+                return
+            if task.status in ("summarizing", "deconstructing"):
+                print("✗ 拆书正在进行中，请勿重复触发")
+                return
+            materialized = materialized_items_count(args.id)
+            if materialized:
+                print(f"✗ 该任务已有 {materialized} 条条目写入目标书知识库，重新拆书会造成队列与知识库不一致；"
+                      "如需重拆：先在知识库删除对应的人物/世界观/大纲，或新建拆书任务")
+                return
+            print(f"拆书进行中（任务 #{args.id}）...")
+            try:
+                for chunk in deconstruct_source(args.id):
+                    print(chunk, end="", flush=True)
+            except LLMError as e:
+                print(f"\n✗ {e}")
+            print()
+
+        elif args.action == "show":
+            task = db.session.get(PlagiarizeTask, args.id)
+            if not task:
+                print(f"✗ 拆书任务 {args.id} 不存在")
+                return
+            print(f"【{task.title}】[{task.id}]")
+            print(f"  状态: {task.status} | 源: {len(task.source_text)} 字"
+                  f"{' · ' + task.source_filename if task.source_filename else ''}")
+            if task.target_novel_id:
+                print(f"  目标长篇: {task.target_novel_id}")
+            if task.target_short_story_id:
+                print(f"  目标短篇: {task.target_short_story_id}")
+            if task.modifications_text:
+                print(f"  微创新: {task.modifications_text}")
+            if task.report_text:
+                print("-" * 60)
+                print((task.report_text[:args.length or 1500])
+                      + ("..." if len(task.report_text) > (args.length or 1500) else ""))
+
+        elif args.action == "items":
+            items = DeconstructItem.query.filter_by(task_id=args.id).order_by(DeconstructItem.id).all()
+            if not items:
+                print(f"任务 {args.id} 暂无条目（先跑 deconstruct run）")
+                return
+            rows = []
+            for it in items:
+                rows.append([f"[{it.id}]", it.kind, it.title, it.status,
+                             f"#{it.target_id}" if it.target_id else "-"])
+            print_table(["ID", "类型", "标题", "状态", "目标ID"], rows)
+
+        elif args.action == "adopt":
+            item = db.session.get(DeconstructItem, args.item)
+            if not item:
+                print(f"✗ 条目 {args.item} 不存在")
+                return
+            ok, msg, _ = adopt_item(args.item)
+            print(f"{'✓' if ok else '✗'} {msg}")
+
+        elif args.action == "discard":
+            item = db.session.get(DeconstructItem, args.item)
+            if not item:
+                print(f"✗ 条目 {args.item} 不存在")
+                return
+            if item.status == "adopted" and item.target_id:
+                print("✗ 该条目已写入知识库，请到目标书的知识库页面删除对应条目")
+                return
+            item.status = "discarded"
+            item.modified_content = ""
+            db.session.commit()
+            print(f"✓ 已丢弃「{item.title}」")
+
+        elif args.action == "adopt-all":
+            ok, msg = adopt_all_items(args.id)
+            print(f"{'✓' if ok else '✗'} {msg}")
+
+        elif args.action in ("generate-long", "generate-short"):
+            task = db.session.get(PlagiarizeTask, args.id)
+            if not task:
+                print(f"✗ 拆书任务 {args.id} 不存在")
+                return
+            if not _load_elements(task):
+                print(f"✗ 任务 {args.id} 尚未完成拆书，请先: python cli.py deconstruct run --id {args.id}")
+                return
+            if args.action == "generate-long":
+                novel, created, message = apply_blueprint_long(
+                    args.id, title=args.title or "", genre=args.genre or "", novel_id=args.target,
+                    fallback_chapters=min(max(args.chapters or 5, 0), 200))
+                if novel is None:
+                    print(f"✗ {message}")
+                    return
+                print(f"✓ {message}")
+                print(f"  大纲节点写入 {len(created)} 章")
+                to_generate = list(created)
+                if getattr(args, "run", False) and not to_generate:
+                    to_generate = unwritten_chapters(novel.id, limit=args.chapters or 5)
+                    if to_generate:
+                        print(f"  无新增章节；补生成目标书 {len(to_generate)} 章尚无正文的章节")
+                if getattr(args, "run", False) and to_generate:
+                    from app.services.chapter_runner import run_chapter_pipeline
+                    directive = (task.modifications_text or "").strip()
+                    for i, ch in enumerate(to_generate, start=1):
+                        print(f"  第{i}/{len(to_generate)}章 {ch.title} 生成中...", flush=True)
+                        try:
+                            result = run_chapter_pipeline(novel.id, ch.chapter_number,
+                                                          user_directive=directive, auto_save=True)
+                            print(f"  ✓ 第{i}章 人味分 {result.get('human_score')}")
+                        except Exception as e:
+                            print(f"  ✗ 第{i}章失败: {e}")
+                if not getattr(args, "run", False) and created:
+                    print(f"  使用 --run 串行生成章节正文（python cli.py deconstruct generate-long --id {args.id} --run）")
+                print(f"  长篇 ID: {novel.id}（可在 Web 章节列表继续生成/审批）")
+            else:
+                story, message = apply_blueprint_short(
+                    args.id, title=args.title or "", genre=args.genre or "",
+                    word_target=args.word_target or 3000)
+                print(f"✓ {message}")
+                print(f"  短篇 ID: {story.id}（可在 Web 短篇工坊继续逐节点生成）")
+
+        elif args.action == "delete":
+            task = db.session.get(PlagiarizeTask, args.id)
+            if not task:
+                print(f"✗ 拆书任务 {args.id} 不存在")
+                return
+            if not args.yes:
+                if not confirm(f"确定删除拆书任务「{task.title}」及其所有条目？"):
+                    print("已取消")
+                    return
+            db.session.delete(task)
+            db.session.commit()
+            print(f"✓ 已删除拆书任务 [{args.id}] {task.title}")
+
+
 def cmd_preferences(args):
     with app.app_context():
         import json as _json
@@ -2744,10 +2968,6 @@ def cmd_sys(args):
                 return
             # 先删子行再删父（Novel.chapters 无 ORM cascade + novel_id NOT NULL，
             # 直接删 Novel 会 IntegrityError）——对齐 cmd_novel delete-all 的顺序
-            from app.models import (Novel, ShortStory, Character, CharacterRelation,
-                                    WorldSetting, OutlineNode, Foreshadowing,
-                                    StoryState, StoryStateSnapshot, PromptTemplate,
-                                    BlindReview, PlagiarizeTask, PendingExtraction)
             # 短篇及其版本/评审（级联依赖）
             for s in ShortStory.query.all():
                 db.session.delete(s)
@@ -2950,6 +3170,8 @@ def main():
     p_chapter.add_argument("--target", type=int, help="压缩目标字数（condense 用，默认 2500）")
     p_chapter.add_argument("--adjudicate", action="store_true", help="一致性核查时调用 AI 裁决疑点")
     p_chapter.add_argument("--length", type=int, help="预览长度")
+    p_chapter.add_argument("--character-ids", dest="character_ids", help="本章出场角色 ID（逗号分隔，pipeline 用）；缺省=全部角色，传空串=不注入角色档案")
+    p_chapter.add_argument("--dry-run", action="store_true", help="pipeline 时仅检查流程，不调用 LLM")
     p_chapter.add_argument("-y", "--yes", action="store_true", help="跳过删除确认")
 
     # ========== 角色 ==========
@@ -3098,13 +3320,14 @@ def main():
     p_llm.add_argument("action", choices=[
         "preset-list", "provider-list", "provider-add", "provider-update", "provider-delete",
         "fetch-models", "model-list", "model-toggle", "model-toggle-all", "test",
-        "agent-list", "agent-set", "agent-clear", "agent-param", "effective",
+        "agent-list", "agent-set", "agent-clear", "agent-param", "effective", "usage",
     ], help="预设: preset-list · 厂商: provider-list/add/update/delete · 模型: fetch-models/model-list/toggle/toggle-all/test · Agent: agent-list/set/clear/param/effective")
     p_llm.add_argument("--provider", type=int, help="厂商 ID")
-    p_llm.add_argument("--preset", help="常用厂商预设类型（provider-add 用，如 deepseek/openai/moonshot/zhipu/qwen/siliconflow/volcengine/openrouter/groq/ollama）")
+    p_llm.add_argument("--preset", help="常用厂商预设类型（provider-add 用，如 deepseek/openai/anthropic/gemini/moonshot/zhipu/qwen/siliconflow/volcengine/openrouter/groq/ollama，完整列表 llm preset-list）")
     p_llm.add_argument("--model", type=int, help="模型 ID（数据库主键）")
     p_llm.add_argument("--name", help="厂商/模型名")
     p_llm.add_argument("--base-url", dest="base_url", help="厂商 API 地址")
+    p_llm.add_argument("--days", type=int, default=30, help="usage 汇总时间窗（天，默认 30）")
     p_llm.add_argument("--api-key", dest="api_key", help="厂商 API Key")
     p_llm.add_argument("--provider-type", dest="provider_type", help="厂商类型 (deepseek/openai/ollama/custom)")
     p_llm.add_argument("--enabled", help="true/false（启用状态）")
@@ -3193,13 +3416,38 @@ def main():
     p_sys.add_argument("-y", "--yes", action="store_true", help="跳过确认")
 
     # ========== 一键本章流水线（转发到 chapter pipeline） ==========
+    # ========== 拆书复刻 ==========
+    p_dec = subparsers.add_parser("deconstruct", help="拆书复刻（对标书拆解→待确认采纳→复刻长篇/短篇）")
+    p_dec.add_argument("action", choices=["create", "run", "show", "items",
+                                          "adopt", "discard", "adopt-all",
+                                          "generate-long", "generate-short", "delete"],
+                       help="create: 建任务 · run: 拆书 · items: 待确认条目 · adopt/discard: 采纳/丢弃 · "
+                            "generate-long/generate-short: 复刻生成 · delete: 删除")
+    p_dec.add_argument("--id", type=int, help="拆书任务 ID")
+    p_dec.add_argument("--item", type=int, help="条目 ID（adopt/discard 用）")
+    p_dec.add_argument("--title", help="对标书名 / 复刻目标标题")
+    p_dec.add_argument("--text", help="对标书文本（create 用）")
+    p_dec.add_argument("--file", help="对标书文件路径 TXT/UTF-8（create 用）")
+    p_dec.add_argument("--genre", help="复刻题材（generate-long/short 用）")
+    p_dec.add_argument("--modifications", help="微创新指令（create 用）")
+    p_dec.add_argument("--target", type=int, help="已有长篇 ID（generate-long 追加用）")
+    p_dec.add_argument("--chapters", type=int, default=5, help="开篇章节数（generate-long 用，默认 5）")
+    p_dec.add_argument("--word-target", type=int, dest="word_target", default=3000,
+                       help="短篇目标字数（generate-short 用，默认 3000）")
+    p_dec.add_argument("--run", action="store_true", help="generate-long 时串行跑章节流水线")
+    p_dec.add_argument("--length", type=int, help="show 报告预览长度")
+    p_dec.add_argument("-y", "--yes", action="store_true", help="跳过删除确认")
+
+    # ========== 一键本章编排器 ==========
     p_pipeline = subparsers.add_parser("pipeline", help="一键本章编排器（缺大纲生成→正文→门禁→收敛→人工闸门）")
     p_pipeline.add_argument("action", choices=["run"], help="操作类型")
     p_pipeline.add_argument("--novel", type=int, required=True, help="小说 ID")
     p_pipeline.add_argument("--number", type=int, required=True, help="章节号")
     p_pipeline.add_argument("--directive", help="用户指示")
+    p_pipeline.add_argument("--save", action="store_true", help="落 AI 版本（缺省停在人工闸门）")
     p_pipeline.add_argument("--out", help="输出正文到文件")
     p_pipeline.add_argument("--dry-run", action="store_true", help="仅检查流程，不调用 LLM")
+    p_pipeline.add_argument("--character-ids", dest="character_ids", help="本章出场角色 ID（逗号分隔）；缺省=全部角色，传空串=不注入角色档案")
 
     args = parser.parse_args()
 
@@ -3210,7 +3458,7 @@ def main():
     # 需要登录的命令 (auth 命令本身除外)
     auth_only_commands = {"auth", "whoami"}
     if args.command not in auth_only_commands:
-        user = check_cli_auth()
+        check_cli_auth()
         # 可以在这里输出当前用户信息（可选）
         # print(f"当前用户: {user['name']} ({user['username']})")
 
@@ -3237,6 +3485,7 @@ def main():
         "style-anchor": cmd_style_anchor,
         "template-outline": cmd_template_outline,
         "queue": cmd_queue,
+        "deconstruct": cmd_deconstruct,
         "preferences": cmd_preferences,
         "tone": cmd_tone,
         "pipeline": cmd_pipeline,

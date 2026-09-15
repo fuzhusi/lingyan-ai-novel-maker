@@ -20,10 +20,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mcp.server.fastmcp import FastMCP
 from app import create_app
 from app.models import (
-    db, Novel, Chapter, ChapterVersion, CriticReview, Character,
-    WorldSetting, OutlineNode, Foreshadowing, ChapterSummary,
-    ChapterMemory, CharacterRelation, StoryState, StoryStateSnapshot,
-    ShortStory, Setting,
+    db, Novel, Chapter, ChapterVersion, Character,
+    WorldSetting, OutlineNode, Foreshadowing, ShortStory, Setting, PlagiarizeTask, DeconstructItem,
 )
 from app.services.chapter_approval import approve_chapter_version, EmptyChapterError
 
@@ -66,33 +64,10 @@ def create_novel(title: str, genre: str = "", synopsis: str = "", world_intro: s
 @mcp.tool()
 def delete_novel(novel_id: int) -> str:
     """删除小说及其所有关联数据（章节、角色、世界观、伏笔等）。"""
+    from app.services.delete_service import delete_novel_full
     with app.app_context():
-        novel = db.session.get(Novel, novel_id)
-        if not novel:
-            return f"小说 {novel_id} 不存在"
-        title = novel.title
-        try:
-            for ch in novel.chapters:
-                for v in ChapterVersion.query.filter_by(chapter_id=ch.id).all():
-                    CriticReview.query.filter_by(version_id=v.id).delete()
-                ChapterVersion.query.filter_by(chapter_id=ch.id).delete()
-                ChapterSummary.query.filter_by(chapter_id=ch.id).delete()
-                ChapterMemory.query.filter_by(chapter_id=ch.id).delete()
-                db.session.delete(ch)
-            Character.query.filter_by(novel_id=novel_id).delete()
-            CharacterRelation.query.filter_by(novel_id=novel_id).delete()
-            WorldSetting.query.filter_by(novel_id=novel_id).delete()
-            OutlineNode.query.filter_by(novel_id=novel_id).delete()
-            Foreshadowing.query.filter_by(novel_id=novel_id).delete()
-            StoryState.query.filter_by(novel_id=novel_id).delete()
-            StoryStateSnapshot.query.filter_by(novel_id=novel_id).delete()
-            ChapterMemory.query.filter_by(novel_id=novel_id).delete()
-            db.session.delete(novel)
-            db.session.commit()
-            return f"已删除小说「{title}」及所有关联数据"
-        except Exception as e:
-            db.session.rollback()
-            return f"删除失败: {e}"
+        ok, msg = delete_novel_full(novel_id)
+        return msg if ok else f"删除失败: {msg}"
 
 
 @mcp.tool()
@@ -504,16 +479,25 @@ def quick_audit(novel_id: int, chapter_number: int) -> str:
 
 @mcp.tool()
 def run_chapter_pipeline(novel_id: int, chapter_number: int,
-                         user_directive: str = "", auto_save: bool = False) -> str:
+                         user_directive: str = "", auto_save: bool = False,
+                         character_ids: str = "") -> str:
     """一键本章流水线：缺大纲则生成 → 正文 → 门禁 → 去AI味收敛（不升回滚）→ 停在人工审阅。
 
     auto_save=True 时落 AI 版本（仍不自动审批）。长耗时（整章生成，数十秒级）。
+    character_ids: 本章出场角色 ID（逗号分隔，如 "1,3,5"）；缺省空串 = 全部角色。
+    注意与 CLI 语义不同：CLI 的 --character-ids "" 表示不注入任何角色档案，
+    MCP 侧空串/不传均为全部角色，无法表达"不注入"。
     """
     with app.app_context():
         from app.services.chapter_runner import run_chapter_pipeline
+        try:
+            cids = [int(x) for x in character_ids.split(",") if x.strip()] or None
+        except ValueError:
+            return f"character_ids 需为逗号分隔的数字 ID，收到: {character_ids!r}"
         result = run_chapter_pipeline(novel_id, chapter_number,
                                       user_directive=user_directive,
-                                      auto_save=auto_save)
+                                      auto_save=auto_save,
+                                      character_ids=cids)
         if "error" in result:
             return f"流水线失败：{result['error']}"
         lines = []
@@ -529,6 +513,161 @@ def run_chapter_pipeline(novel_id: int, chapter_number: int,
         lines.append("—— 正文 ——")
         lines.append(result.get("text", ""))
         return chr(10).join(lines)
+
+
+# ---------------------------------------------------------------------------
+# 拆书复刻
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def deconstruct_book(source_text: str, title: str = "") -> str:
+    """拆书复刻：创建拆书任务并运行六维拆解（开篇节奏/金手指/整体架构/人物/世界观/文风）。
+
+    source_text 为对标书全文；超长（>2万字）会自动先做逐章摘要压缩。返回任务 ID 与拆解统计。
+    """
+    from app.services.book_deconstruct import deconstruct_source
+    with app.app_context():
+        task = PlagiarizeTask(
+            title=title.strip() or "未命名对标书", mode="deconstruct",
+            source_text=source_text, source_type="paste", status="pending",
+        )
+        db.session.add(task)
+        db.session.commit()
+        tid = task.id
+        try:
+            for _ in deconstruct_source(tid):
+                pass
+        except Exception as e:
+            return f"拆解失败: {e}"
+        task = db.session.get(PlagiarizeTask, tid)
+        if task.status != "done":
+            return f"拆书任务 [{tid}] 拆解失败（状态: {task.status}）：{task.error_message or '未知原因'}"
+        n_items = DeconstructItem.query.filter_by(task_id=tid).count()
+        return f"拆书任务 [{tid}]「{task.title}」拆解完成，{n_items} 条待确认条目已入队。可 list_deconstruct_items 查看、adopt_deconstruct_item 采纳。"
+
+@mcp.tool()
+def list_deconstruct_tasks() -> str:
+    """列出所有拆书任务（ID、标题、状态、源字数、已采纳条目数）。"""
+    with app.app_context():
+        tasks = PlagiarizeTask.query.order_by(PlagiarizeTask.created_at.desc()).all()
+        if not tasks:
+            return "暂无拆书任务"
+        result = []
+        for t in tasks:
+            adopted = DeconstructItem.query.filter_by(task_id=t.id, status="adopted").count()
+            total = DeconstructItem.query.filter_by(task_id=t.id).count()
+            line = f"[{t.id}] {t.title} | {t.status} | {len(t.source_text or '')}字 | 已采纳 {adopted}/{total}"
+            if t.target_novel_id:
+                line += f" | 长篇#{t.target_novel_id}"
+            if t.target_short_story_id:
+                line += f" | 短篇#{t.target_short_story_id}"
+            result.append(line)
+        return "\n".join(result)
+
+@mcp.tool()
+def get_deconstruct_task(task_id: int) -> str:
+    """获取拆书任务的拆书报告与微创新指令（可编辑的真源）。"""
+    with app.app_context():
+        task = db.session.get(PlagiarizeTask, task_id)
+        if not task:
+            return f"拆书任务 {task_id} 不存在"
+        parts = [f"【{task.title}】[{task.id}] 状态:{task.status}",
+                 f"微创新指令: {task.modifications_text or '（未设置）'}",
+                 "—— 拆书报告 ——", task.report_text or "（尚未拆解）"]
+        return "\n".join(parts)
+
+@mcp.tool()
+def list_deconstruct_items(task_id: int) -> str:
+    """列出拆书任务的全部条目（人物/世界观/大纲）及其确认状态，含原始拆解内容。"""
+    with app.app_context():
+        items = DeconstructItem.query.filter_by(task_id=task_id).order_by(DeconstructItem.id).all()
+        if not items:
+            return f"任务 {task_id} 暂无条目"
+        parts = []
+        for it in items:
+            status = {"pending": "待确认", "adopted": "已采纳", "discarded": "已丢弃"}.get(it.status, it.status)
+            head = f"[{it.id}] ({it.kind}) {it.title} —— {status}"
+            if it.status == "adopted" and it.target_id:
+                head += f" #目标{it.target_id}"
+            parts.append(head)
+            data = it.content
+            if data:
+                for k, v in data.items():
+                    if v:
+                        parts.append(f"  {k}: {str(v)[:120]}")
+        return "\n".join(parts)
+
+@mcp.tool()
+def adopt_deconstruct_item(item_id: int, modified_json: str = "") -> str:
+    """确认（采纳）拆书待确认条目：保存用户修改稿并标记已采纳。
+
+    modified_json 可选：用户修改后的字段 JSON（如 {"name":"新名","personality":"..."}）；
+    留空则按拆解原稿采纳。采纳只做确认，知识库写入在 generate_from_blueprint 时统一落库。
+    """
+    from app.services.book_deconstruct import adopt_item
+    import json as _json
+    with app.app_context():
+        item = db.session.get(DeconstructItem, item_id)
+        if not item:
+            return f"条目 {item_id} 不存在"
+        modified = None
+        if modified_json.strip():
+            try:
+                modified = _json.loads(modified_json)
+            except _json.JSONDecodeError:
+                return f"modified_json 不是合法 JSON: {modified_json[:100]}"
+        ok, msg, target_id = adopt_item(item_id, modified=modified)
+        return f"{'✓' if ok else '✗'} {msg}"
+
+@mcp.tool()
+def generate_from_blueprint(task_id: int, target: str = "short", title: str = "",
+                            genre: str = "", chapters: int = 5,
+                            word_target: int = 3000, run_pipeline: bool = False,
+                            novel_id: int = 0) -> str:
+    """用拆书蓝图复刻生成。target: long(长篇) / short(短篇)。
+
+    long: 建/选小说（novel_id 可选追加到已有长篇）+ 已采纳条目入知识库 + 大纲树 + 章节
+    （未采纳大纲条目时按 chapters 建空大纲章节兜底；run_pipeline=True 串行跑章节流水线）；
+    short: 建短篇 + 策划字段 + 大纲节点。
+    """
+    from app.services.book_deconstruct import (
+        apply_blueprint_long, apply_blueprint_short, _load_elements, unwritten_chapters,
+    )
+    with app.app_context():
+        task = db.session.get(PlagiarizeTask, task_id)
+        if not task:
+            return f"拆书任务 {task_id} 不存在"
+        if not _load_elements(task):
+            return "该任务尚未拆解，请先运行 deconstruct_book / 拆书"
+        if target == "long":
+            novel, created, message = apply_blueprint_long(
+                task_id, title=title, genre=genre, novel_id=novel_id or None,
+                fallback_chapters=min(max(chapters or 0, 0), 200))
+            if novel is None:
+                return f"✗ {message}"
+            lines = [f"✓ {message}", f"大纲节点写入 {len(created)} 章"]
+            to_generate = list(created)
+            if run_pipeline and not to_generate:
+                to_generate = unwritten_chapters(novel.id, limit=min(max(chapters or 5, 1), 200))
+                if to_generate:
+                    lines.append(f"  补生成目标书 {len(to_generate)} 章尚无正文的章节")
+            if run_pipeline and to_generate:
+                from app.services.chapter_runner import run_chapter_pipeline
+                directive = (task.modifications_text or "").strip()
+                for i, ch in enumerate(to_generate, start=1):
+                    try:
+                        result = run_chapter_pipeline(novel.id, ch.chapter_number,
+                                                      user_directive=directive, auto_save=True)
+                        lines.append(f"  第{i}章 人味分 {result.get('human_score')}")
+                    except Exception as e:
+                        lines.append(f"  第{i}章失败: {e}")
+            lines.append(f"长篇 ID: {novel.id}")
+            return "\n".join(lines)
+        elif target == "short":
+            story, message = apply_blueprint_short(
+                task_id, title=title, genre=genre, word_target=word_target or 3000)
+            return f"✓ {message}\n短篇 ID: {story.id}"
+        return f"未知目标: {target}（long/short）"
 
 
 # ---------------------------------------------------------------------------

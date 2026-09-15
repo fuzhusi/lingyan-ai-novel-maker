@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}资源库 — 灵砚{% endblock %}
+{% block content %}
+<div class="container" style="max-width:1100px; margin:2rem auto; padding:0 1.5rem;">
+    <h1 style="font-family:var(--font-display); font-size:1.8rem; color:var(--text-bright);">资源库</h1>
+    <p style="color:var(--text-dim); font-size:0.88rem;">对标书原文独立存储，支持语义检索；与拆书任务解耦。</p>
+    {% if books %}
+    <div style="display:grid; gap:1rem;">
+        {% for b in books %}
+        <div class="card" style="padding:1.25rem;">
+            <b>{{ b.title }}</b> · {{ b.total_chars }} 字 · {{ b.chapter_count }} 段
+            {% if b.embedded %}<span style="color:var(--success);font-size:0.75rem;">✓ 已嵌入</span>{% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p style="color:var(--text-dim);">暂无资源。上传对标书后自动入库。</p>
+    {% endif %}
+</div>
+{% endblock %}

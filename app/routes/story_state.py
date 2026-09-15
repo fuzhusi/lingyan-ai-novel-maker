@@ -5,7 +5,7 @@ arc phase (setup/development/climax/resolution), risk flags, and pacing.
 """
 import json
 from flask import Blueprint, request, jsonify
-from app.models import db, StoryState, StoryStateSnapshot, Novel, Chapter, ChapterSummary, Foreshadowing
+from app.models import db, StoryState, StoryStateSnapshot, Novel, Chapter, Foreshadowing
 
 story_state_bp = Blueprint("story_state", __name__, url_prefix="/api")
 

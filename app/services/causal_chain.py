@@ -14,7 +14,7 @@ the Cause of chapter N+1.
 import json
 from flask import Blueprint, request, jsonify
 from app.models import db, Chapter, ChapterSummary, Novel
-from app.services.llm import call_llm_sync, stream_llm_tokens, LLMError
+from app.services.llm import call_llm_sync, LLMError
 
 causal_bp = Blueprint("causal", __name__, url_prefix="/api")
 

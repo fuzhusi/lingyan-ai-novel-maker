@@ -4,13 +4,9 @@ import httpx
 from app import create_app
 from app.models import db, Novel, Chapter, ChapterVersion
 from app.routes.settings import get_effective_config
-from app.routes.generate import _stream_to_sse
 from app.services.prompt_builder import (
     build_writer_prompt, assemble_chapter_context,
 )
-from app.routes.chapter import save_version
-from flask import request
-from werkzeug.datastructures import ImmutableMultiDict
 
 
 def main():

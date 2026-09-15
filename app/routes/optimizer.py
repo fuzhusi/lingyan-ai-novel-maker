@@ -1,6 +1,6 @@
 """Full Book Optimization API — post-completion quality pass."""
 import json
-from flask import Blueprint, request, jsonify, Response
+from flask import Blueprint, request, jsonify
 from app.models import db, Novel, Chapter, ChapterVersion
 from app.services.book_optimizer import diagnose_book, auto_revise_chapter
 from app.services.deai_agent import deai_process
@@ -12,7 +12,6 @@ optimizer_bp = Blueprint("optimizer", __name__, url_prefix="/api")
 @optimizer_bp.route("/novels/<int:novel_id>/optimize/diagnose", methods=["POST"])
 def diagnose(novel_id):
     """Diagnose all chapters and return optimization report."""
-    from flask import current_app
     novel = Novel.query.get_or_404(novel_id)
     cfg = get_effective_config(novel, agent_type="optimizer")
 

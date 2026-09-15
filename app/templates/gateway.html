@@ -43,7 +43,18 @@
                     </svg>
                 </div>
                 <h3>第一次使用灵砚？</h3>
-                <p>加载示例小说（玄幻/科幻/悬疑），含完整角色、世界观、大纲、伏笔，立即体验所有功能</p>
+                {% if not has_llm_provider %}
+                <p><b style="color:var(--danger);">第 0 步：先配置模型。</b>到
+                   <a href="/settings/llm" style="color:var(--accent);">设置 → 模型配置</a>
+                   添加厂商并填入 API Key（如 DeepSeek），否则所有生成功能不可用。</p>
+                {% elif not has_enabled_model %}
+                <p>已添加厂商，但还没有勾选可用模型——到
+                   <a href="/settings/llm" style="color:var(--accent);">设置 → 模型配置</a>
+                   拉取模型并勾选启用，然后就能开始创作。</p>
+                {% else %}
+                <p>推荐路径：<a href="/plagiarize/new" style="color:var(--accent);">拆一本对标书</a> → AI 差异化改写 → 复刻新书。
+                也可以加载示例小说体验全部功能。</p>
+                {% endif %}
                 <div class="onboarding-actions">
                     <button id="btn-load-samples" class="onboarding-btn-primary">
                         一键加载示例数据
@@ -56,6 +67,19 @@
         </div>
 
         <div class="gateway-choices">
+            <a href="/plagiarize/" class="portal-card" style="border-color:var(--accent);">
+                <div class="portal-glow"></div>
+                <div class="portal-inner">
+                    <div class="portal-icon">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+                            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+                        </svg>
+                    </div>
+                    <h2>拆书复刻</h2>
+                    <span class="portal-hint">导入对标书 → AI 拆解 → 差异化改写 → 复刻新书（推荐新手从这里开始）</span>
+                </div>
+            </a>
             <a href="/novel/" class="portal-card">
                 <div class="portal-glow"></div>
                 <div class="portal-inner">

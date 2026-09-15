@@ -4,7 +4,7 @@
 """
 
 from functools import wraps
-from flask import Blueprint, render_template, request, redirect, url_for, session, g
+from flask import Blueprint, redirect, g
 
 auth_bp = Blueprint("auth", __name__)
 

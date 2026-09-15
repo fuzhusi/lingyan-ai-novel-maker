@@ -72,7 +72,7 @@ def _build_expander_prompt(story):
         "你必须**只输出一个 JSON 对象**，不要输出任何其他文字，不要用 markdown 代码块包裹，"
         "不要加解释。JSON 结构严格如下：\n"
         '{"concept": "一句话核心创意", "nodes": ['
-        '{"id": 1, "act": "第一幕·开端", "title": "节点标题", "summary": "一句话描述该节点发生的事件", "word_count": 1200}'
+        '{"id": 1, "act": "第一幕·开端", "title": "节点标题", "summary": "一句话描述该节点发生的事件", "word_count": 1200, "entities": ["本节点出场的角色名"]}'
         ']}\n\n'
         "字段要求：\n"
         f"- concept：一句话概括故事核心创意（30字以内）\n"
@@ -81,7 +81,8 @@ def _build_expander_prompt(story):
         f"- act：幕名（按上述分幕规则）\n"
         f"- title：节点标题，要具体（写具体事件，如「执法堂当众控诉」，不写「冲突升级」这种抽象词）\n"
         f"- summary：一句话描述该节点发生的事件和要达到的效果\n"
-        f"- word_count：整数，在 800-1500 之间\n\n"
+        f"- word_count：整数，在 800-1500 之间\n"
+        f"- entities：本节点出场的角色名数组（用于按需注入角色设定，必须写准）\n\n"
         "节点之间要有因果递进，前一个节点的结果驱动下一个节点，最后一个节点是完整的故事收尾。\n"
         "若提供了角色设定/场景设定，大纲必须严格使用这些设定（不得更换主角或改变核心设定）。"
     )
@@ -443,31 +444,57 @@ SECTION_PROMPTS = {
 # 逐节点生成 prompts（灵感模式多轮创作）
 # ---------------------------------------------------------------------------
 
+def _select_character_sections(char_ctx, node_text, max_chars=800):
+    """档1:按出场筛选角色设定段落（ 经济化注入 —— 只带本节点相关角色）。
+
+    结构化格式为「### 名字（定位）」分节（拆书复刻采纳与策划阶段均按此产出）；
+    无分节结构的整块文本（用户手填）原样回退。
+    选择规则：首节（主角）常驻 + 名字出现在节点文本（标题/摘要/entities）中的段落。
+    返回 (注入文本, 已选角色名列表)。
+    """
+    import re as _re
+    if "\n### " not in ("\n" + (char_ctx or "")):
+        return (char_ctx or "")[:max_chars], []
+    sections = [x.strip() for x in _re.split(r"(?m)^(?=### )", char_ctx.strip()) if x.strip()]
+    if len(sections) < 2:
+        return char_ctx[:max_chars], []
+
+    def _name(sec):
+        m = _re.match(r"###\s*([^\n（(]+)", sec)
+        return m.group(1).strip() if m else ""
+
+    picked = [sections[0]]  # 主角/首节常驻（召回失败不可接受的底座）
+    names = [_name(sections[0])]
+    for sec in sections[1:]:
+        name = _name(sec)
+        if name and name in node_text:
+            picked.append(sec)
+            names.append(name)
+    return "\n\n".join(picked)[:max_chars], names
+
+
 def build_node_prompt(story, nodes, current_idx, prev_text):
     """构建「当前节点」的生成 prompt。
 
+    上下文按「变化频率」四层排列（档0,缓存友好——前缀逐字节稳定才能命中
+    DeepSeek 前缀缓存,命中价 ≈ 1/30~1/50）：
+      层1 全站静态(不变):persona/硬规则/约束/技巧/体裁/文风指纹/锚例 → system
+      层2 篇级静态(每篇不变):角色(筛选后)/场景/主题/概念/完整大纲 → user 前
+      层3 节点级:当前节点卡 → user 中
+      层4 尾部动态:前文尾部/行文修正指令/写作指令 → user 尾
+    注意:大纲不带 ✓/★/○ 状态标记——"当前写哪个"在层4指令里给出,
+    状态标记会逐节点切断前缀缓存。
+
     Args:
         story: ShortStory 实例
-        nodes: 全部节点列表 [{id, act, title, word_count, status}]
+        nodes: 全部节点列表 [{id, act, title, summary, word_count, status, entities?}]
         current_idx: 当前要写的节点下标（0-based）
         prev_text: 已写前文（已完成节点的正文拼接）
     """
     current = nodes[current_idx]
     total = len(nodes)
-    word_target = story.word_target or 10000
 
-    # 完整大纲：标注已完成/当前/待写
-    outline_lines = []
-    for i, n in enumerate(nodes):
-        marker = "✓已写" if (i < current_idx or n.get("status") == "done") else (
-            "★当前" if i == current_idx else "○待写")
-        summary = n.get("summary", "")
-        outline_lines.append(
-            f"- [{marker}] 节点{n['id']}（{n.get('act', '')}，约{n.get('word_count', 1000)}字）："
-            f"{n.get('title', '')}" + (f" —— {summary}" if summary else "")
-        )
-    outline_str = "\n".join(outline_lines)
-
+    # ---------- 层1:全站静态（system） ----------
     system = (
         "你是一位才华横溢拥有10年番茄写作经验的短篇小说作家。你正在**逐节点**创作一篇短篇小说，"
         "当前只负责写【一个节点】的内容。\n\n"
@@ -478,30 +505,15 @@ def build_node_prompt(story, nodes, current_idx, prev_text):
         "4. 当前节点的内容必须完整展开，达到目标字数，不要草草带过\n"
         "5. 直接输出小说正文，不要输出节点编号、标题、说明或构思复述\n\n"
         "6. 必须遵循约束的写作规则，这是硬性要求。"
-        f"【完整剧情大纲 — 严格按此推进】\n{outline_str}\n\n"
-        f"【当前节点】\n节点{current['id']}（{current.get('act', '')}）：{current.get('title', '')}\n"
-        f"目标字数：约 {current.get('word_count', 1000)} 字\n\n"
         + (_bank_constraints(story) or DEFAULT_WRITER_CONSTRAINTS)
     )
-
-    # 注入活跃的写作技巧
     skill_ctx = build_skill_prompt()
     if skill_ctx:
         system += "\n\n" + skill_ctx
-    # 注入体裁专用指导
     genre_inst = _get_genre_instruction(story.genre)
     if genre_inst:
         system += "\n\n" + genre_inst
-    # 行文指纹修正：基于已完成节点正文的 AI 痕迹检测（逐节点生成的跨段重复是主要病灶）
-    if prev_text and len(prev_text.strip()) >= 500:
-        try:
-            from app.services.ai_metric import build_tone_instructions
-            tone_inst = build_tone_instructions(prev_text[-12000:])
-            if tone_inst:
-                system += "\n\n" + tone_inst
-        except Exception:
-            pass
-    # 风格指纹锚定（与长篇一致）：用户保存过文风参考时注入
+    # 风格指纹锚定（全站静态）
     try:
         from app.services.style_fingerprint import load_style, format_style_for_prompt, format_anchor_for_prompt
         style = load_style()
@@ -515,11 +527,21 @@ def build_node_prompt(story, nodes, current_idx, prev_text):
     except Exception:
         pass
 
+    # ---------- 层2+3+4:用户消息（静态在前,动态在尾） ----------
     user_parts = []
-    # 注入分阶段策划产出（角色/场景/主题），优先使用策划阶段产出，回退用户输入
+
+    # 层2:角色设定（档1:按**全书大纲联合**筛选出场角色——集合对同篇所有节点
+    # 一致,前缀稳定命中缓存;逐节点筛选会让集合逐节点变化,反而杀死缓存。
+    # 首节常驻兜底:主角召回失败不可接受）
     char_ctx = story.plan_characters or story.character_desc
     if char_ctx:
-        user_parts.append(f"【角色设定（必须遵守）】\n{char_ctx[:500]}")
+        outline_text_parts = []
+        for n in nodes:
+            outline_text_parts.extend(
+                [n.get("title", ""), n.get("summary", ""), n.get("act", "")]
+                + list(n.get("entities") or []))
+        sel_ctx, _sel_names = _select_character_sections(char_ctx, " ".join(outline_text_parts))
+        user_parts.append(f"【角色设定（必须遵守；本书出场角色）】\n{sel_ctx}")
     scene_ctx = story.scene_desc
     if scene_ctx:
         user_parts.append(f"【场景设定（必须遵守）】\n{scene_ctx[:300]}")
@@ -528,10 +550,35 @@ def build_node_prompt(story, nodes, current_idx, prev_text):
     if story.concept:
         # 只取核心概念部分（concept 格式为「核心概念 + 剧情大纲」，前 200 字即核心概念）
         user_parts.append(f"【核心概念】\n{story.concept[:200]}")
+
+    # 层2:完整大纲（静态——不带逐节点状态标记,保证前缀稳定）
+    outline_lines = []
+    for n in nodes:
+        summary = n.get("summary", "")
+        outline_lines.append(
+            f"- 节点{n['id']}（{n.get('act', '')}，约{n.get('word_count', 1000)}字）："
+            f"{n.get('title', '')}" + (f" —— {summary}" if summary else "")
+        )
+    user_parts.append("【完整剧情大纲 — 全书按此推进】\n" + "\n".join(outline_lines))
+
+    # 层4:前文尾部（动态）
     if prev_text:
-        user_parts.append(f"【前文内容】\n{prev_text[-6000:]}")
+        user_parts.append(f"【前文内容（承接此结尾）】\n{prev_text[-6000:]}")
+
+    # 层4:行文修正指令（每次检测后变化,必须放尾部——放中段会杀死前缀缓存）
+    if prev_text and len(prev_text.strip()) >= 500:
+        try:
+            from app.services.ai_metric import build_tone_instructions
+            tone_inst = build_tone_instructions(prev_text[-12000:])
+            if tone_inst:
+                user_parts.append(f"【行文修正指令（基于已写内容的 AI 痕迹检测）】\n{tone_inst}")
+        except Exception:
+            pass
+
+    # 层4:写作指令（"现在写什么"放最末尾——注意力最佳位置）
     user_parts.append(
-        f"\n请开始写【节点{current['id']}：{current.get('title', '')}】的正文，"
+        f"\n现在请写【节点{current['id']}：{current.get('title', '')}】"
+        f"（{current_idx + 1}/{total}，{current.get('act', '')}）的正文，"
         f"约 {current.get('word_count', 1000)} 字："
     )
 

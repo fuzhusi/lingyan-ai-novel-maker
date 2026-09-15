@@ -1,5 +1,6 @@
 import json
-from flask import Blueprint, request, Response, jsonify, current_app
+import time
+from flask import Blueprint, request, Response, jsonify
 from app.services.prompt_builder import (
     build_outline_prompt, build_writer_prompt, assemble_chapter_context,
 )
@@ -18,22 +19,49 @@ def _sse_event(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _stream_to_sse(messages, cfg, word_target=None):
+def _stream_to_sse(messages, cfg, word_target=None, phase="write"):
     """Shared streaming helper — yields SSE event strings.
 
     word_target: 传入时启用字数保障——流结束后正文不足字数底线
     则携带前文尾部自动续写，续写 token 继续推入同一 SSE 流。
     生成逻辑（含续写轮）在 writer_chain.generation_tokens，与编排器共用。
+
+    进度帧（{"status": {...}}）：阶段/轮次/首字延迟/耗时等诊断信息穿插在
+    token 帧之间。旧前端只认 token/error/done 字段，未知帧自动忽略，
+    故对既有客户端完全向后兼容。
     """
     collected = []
+    pending = []
+    started = time.time()
+
+    def on_event(ev):
+        # 事件在生成器内部同步触发，先攒后冲即可保序，无需加锁
+        pending.append(ev)
+
     try:
-        for token in generation_tokens(messages, cfg, word_target=word_target):
+        yield _sse_event({"status": {
+            "stage": "stream_start", "phase": phase,
+            "model": cfg.get("model_name", ""),
+            "provider": cfg.get("provider_type", ""),
+        }})
+        for token in generation_tokens(messages, cfg, word_target=word_target,
+                                       on_event=on_event):
+            while pending:
+                yield _sse_event({"status": pending.pop(0)})
             collected.append(token)
             yield _sse_event({"token": token})
-        yield _sse_event({"done": True, "full_text": "".join(collected)})
+        while pending:
+            yield _sse_event({"status": pending.pop(0)})
+        yield _sse_event({"done": True, "full_text": "".join(collected),
+                          "elapsed_s": round(time.time() - started, 1)})
     except LLMError as e:
+        # 栈展开时 finally 里追加的收尾帧（round_end 等）一并冲刷，不丢进度上下文
+        while pending:
+            yield _sse_event({"status": pending.pop(0)})
         yield _sse_event({"error": str(e), "full_text": "".join(collected)})
     except Exception as e:
+        while pending:
+            yield _sse_event({"status": pending.pop(0)})
         yield _sse_event({"error": str(e), "full_text": "".join(collected)})
 
 
@@ -47,14 +75,15 @@ def generate_stream():
     chapter_number = request.form.get("chapter_number", type=int)
 
     # 出场角色勾选（前端角色库勾选区）：逗号分隔的角色 id
-    # None/缺省 = 全部角色（兼容旧流程与 MCP）；显式空串 = 不注入任何角色档案
+    # None/缺省 = 全部角色（兼容旧流程与 MCP）；显式空串 = 不注入任何角色档案；
+    # 非法值按显式选择失败处理（[]），绝不静默放大为"全部角色"
     character_ids = None
     raw_ids = request.form.get("character_ids")
     if raw_ids is not None and raw_ids.strip():
         try:
             character_ids = [int(x) for x in raw_ids.split(",") if x.strip()]
         except ValueError:
-            character_ids = None
+            character_ids = []
     elif raw_ids is not None:
         character_ids = []
 
@@ -73,7 +102,8 @@ def generate_stream():
     )
 
     cfg = get_effective_config(novel, agent_type="writer")
-    return Response(_stream_to_sse(messages, cfg, word_target=CHAPTER_WORD_TARGET),
+    return Response(_stream_to_sse(messages, cfg, word_target=CHAPTER_WORD_TARGET,
+                                   phase="write"),
                     mimetype="text/event-stream")
 
 
@@ -111,7 +141,8 @@ def outline_stream():
 
     novel = Novel.query.get(novel_id) if novel_id else None
     cfg = get_effective_config(novel, agent_type="outline")
-    return Response(_stream_to_sse(messages, cfg), mimetype="text/event-stream")
+    return Response(_stream_to_sse(messages, cfg, phase="outline"),
+                    mimetype="text/event-stream")
 
 
 @generate_bp.route("/focus-generate-stream", methods=["POST"])
@@ -165,7 +196,7 @@ def focus_generate_stream():
             char_parts.append(f"动机：{character.motivation}")
         if character.arc_direction:
             char_parts.append(f"角色弧光：{character.arc_direction}")
-        blocks.append(f"【聚焦角色设定】\n" + "\n".join(char_parts))
+        blocks.append("【聚焦角色设定】\n" + "\n".join(char_parts))
 
     blocks.append(f"【写作场景】\n{scene}")
     if tone:
@@ -183,7 +214,7 @@ def focus_generate_stream():
             if cs:
                 summaries.append(f"第{ch.chapter_number}章：{cs.summary}")
         if summaries:
-            blocks.append(f"【前情提要】\n" + "\n".join(summaries))
+            blocks.append("【前情提要】\n" + "\n".join(summaries))
         target_ch = Chapter.query.filter_by(novel_id=novel_id, chapter_number=chapter_number).first()
         if target_ch and target_ch.outline:
             blocks.append(f"【本章大纲】\n{target_ch.outline}")
@@ -196,7 +227,8 @@ def focus_generate_stream():
     ]
 
     cfg = get_effective_config(novel, agent_type="writer")
-    return Response(_stream_to_sse(messages, cfg), mimetype="text/event-stream")
+    return Response(_stream_to_sse(messages, cfg, phase="focus"),
+                    mimetype="text/event-stream")
 
 
 @generate_bp.route("/chapter-pipeline", methods=["POST"])

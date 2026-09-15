@@ -61,7 +61,7 @@ python mcp_server.py
 | `get_chapter_content` | novel_id, chapter_number | 获取章节最新版本 |
 | `approve_chapter` | novel_id, chapter_number | 审批通过最新版本 |
 | `save_chapter_content` | novel_id, chapter_number, content, source? | 保存章节（创建新版本） |
-| `run_chapter_pipeline` | novel_id, chapter_number, user_directive?, auto_save? | 一键本章：缺大纲生成→正文→门禁→AI味收敛→停在人工闸门 |
+| `run_chapter_pipeline` | novel_id, chapter_number, user_directive?, auto_save?, character_ids? | 一键本章：缺大纲生成→正文→门禁→AI味收敛→停在人工闸门；character_ids 为逗号分隔的出场角色 ID。注意：不传/空串 = 全部角色（MCP 无法表达"不注入"，需要不注入请用 CLI `--character-ids ""`） |
 
 #### 人物管理 (3)
 
@@ -548,6 +548,10 @@ python cli.py compass set --novel 1 --intent "复仇外壳写救赎" --focus "�
 # 一键本章流水线：缺大纲生成 → 正文 → 门禁 → AI味收敛（不升回滚）→ 停在人工审阅
 python cli.py chapter pipeline --novel 1 --number 5
 python cli.py chapter pipeline --novel 1 --number 5 --save   # 自动保存 AI 版本（不审批）
+# 指定本章出场角色（人物出场勾选）：只注入 id 1、3、5 的角色档案
+python cli.py chapter pipeline --novel 1 --number 5 --character-ids 1,3,5
+# --character-ids 传空串 = 不注入任何角色档案；缺省 = 全部角色
+python cli.py pipeline run --novel 1 --number 5 --character-ids 1,3,5 --save   # 顶层等价命令
 ```
 
 ### 4.18 去AI味 (tone) / 一致性核查 (consistency)

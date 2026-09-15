@@ -210,6 +210,7 @@
                         try {
                             var data = JSON.parse(line.slice(6));
                             if (data.token && handlers.onToken) handlers.onToken(data.token);
+                            if (data.status && handlers.onStatus) handlers.onStatus(data.status);
                             if (data.error) {
                                 errorMsg = data.error;
                                 if (handlers.onApiError) handlers.onApiError(data.error);

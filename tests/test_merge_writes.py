@@ -1,6 +1,5 @@
 """merge-assessment 快赢项测试：收敛回滚环(A2)、锚例反向提取(A3)、
 大纲失配标记(A1v1)、字数超标压缩(A5)。"""
-import pytest
 
 from app import db
 from app.models import Novel, Chapter, ChapterVersion

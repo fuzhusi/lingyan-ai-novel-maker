@@ -1,8 +1,8 @@
 import io
 import re
 from html import escape
-from flask import Blueprint, Response, send_file, request, jsonify
-from app.models import db, Novel, Chapter, ChapterVersion
+from flask import Blueprint, send_file, request, jsonify
+from app.models import Novel, Chapter, ChapterVersion
 
 export_bp = Blueprint("export", __name__, url_prefix="/novel/<int:novel_id>/export")
 

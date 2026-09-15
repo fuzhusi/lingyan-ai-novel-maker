@@ -9,7 +9,6 @@
 """
 import re
 import sys
-import collections
 from pathlib import Path
 
 # 每条对应 SKILL.md 的一条规则，正则尽量贴规则的触发标记

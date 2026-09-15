@@ -2095,6 +2095,28 @@ pre.t-content {
 .gate-report.pass { color: #2e8b64; }
 .gate-report.fail { color: #b03a55; }
 
+/* 纸上大纲树节点：类型徽章/标题/摘要从夜幕亮色转深字浅底。
+   作用域限定 .outline-item 内——上方图例仍处于夜幕深底，保留亮色徽章。
+   统一用字面量（不依赖变量链），浏览器深色模式重绘也不会把它刷回淡色。 */
+.outline-item .outline-type.type-volume {
+    color: #6a4fc0;
+    background: rgba(122, 92, 214, 0.14);
+    border-color: rgba(122, 92, 214, 0.32);
+}
+.outline-item .outline-type.type-chapter {
+    color: #2e8b64;
+    background: rgba(46, 139, 100, 0.12);
+    border-color: rgba(46, 139, 100, 0.30);
+}
+.outline-item .outline-type.type-scene {
+    color: #b5432e;
+    background: rgba(181, 67, 46, 0.12);
+    border-color: rgba(181, 67, 46, 0.30);
+}
+.outline-item .outline-title {
+    color: #241c11;
+}
+
 /* Scrollbar — 幽蓝轨道 + 流光拖块 */
 ::-webkit-scrollbar { width: 9px; height: 9px; }
 ::-webkit-scrollbar-track { background: rgba(18, 12, 10, 0.6); }

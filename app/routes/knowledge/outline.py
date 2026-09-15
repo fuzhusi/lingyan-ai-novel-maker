@@ -109,6 +109,8 @@ def delete_outline_node(novel_id, node_id):
             to_delete.append(child)
             stack.append(child.id)
     for n in to_delete:
+        # 先解链章节(FK ON 下删除被引用节点会被拦截;viewonly 关系不做自动置空)
+        Chapter.query.filter_by(outline_node_id=n.id).update({"outline_node_id": None})
         db.session.delete(n)
     db.session.commit()
     return redirect(url_for("knowledge.outline_page", novel_id=novel_id))

@@ -43,7 +43,7 @@ def build_critic_prompt(novel_title="", chapter_title="", chapter_content="",
         ws_lines = []
         for ws in world_settings:
             ws_lines.append(f"【{ws.get('category', '')} - {ws.get('title', '')}】\n{ws.get('content', '')}")
-        user_parts.append(f"【世界观设定参考】\n\n".join(ws_lines))
+        user_parts.append("【世界观设定参考】\n\n".join(ws_lines))
     if characters:
         char_lines = []
         for c in characters:
@@ -53,7 +53,7 @@ def build_critic_prompt(novel_title="", chapter_title="", chapter_content="",
                 if val:
                     parts.append(f"{label}：{val}")
             char_lines.append("\n".join(parts))
-        user_parts.append(f"【人物设定参考】\n" + "\n---\n".join(char_lines))
+        user_parts.append("【人物设定参考】\n" + "\n---\n".join(char_lines))
     if chapter_title:
         user_parts.append(f"【章节标题】\n{chapter_title}")
     if outline:
@@ -62,7 +62,7 @@ def build_critic_prompt(novel_title="", chapter_title="", chapter_content="",
         user_parts.append(f"【特别指示】\n{user_directive}")
     if foreshadowing_items:
         fs_lines = [f"• {f['description']}" for f in foreshadowing_items]
-        user_parts.append(f"【待回收伏笔】\n" + "\n".join(fs_lines))
+        user_parts.append("【待回收伏笔】\n" + "\n".join(fs_lines))
 
     user_parts.append(f"\n【章节正文】\n{chapter_content}")
 

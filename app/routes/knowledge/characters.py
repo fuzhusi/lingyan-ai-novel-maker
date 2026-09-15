@@ -107,7 +107,7 @@ def create_character_from_template(novel_id):
 def ai_generate_character(novel_id):
     """AI 自动生成角色（流式）。"""
     from app.config_utils import get_effective_config
-    from app.services.llm import call_llm_sync, stream_llm_tokens, LLMError
+    from app.services.llm import call_llm_sync, LLMError
 
     novel = Novel.query.get_or_404(novel_id)
     role_hint = request.form.get("role_hint", "")
@@ -185,7 +185,7 @@ def characters_page(novel_id):
 
 @knowledge_bp.route("/characters/create", methods=["POST"])
 def create_character(novel_id):
-    novel = Novel.query.get_or_404(novel_id)
+    Novel.query.get_or_404(novel_id)
     char = Character(
         novel_id=novel_id,
         name=request.form.get("name", "").strip(),

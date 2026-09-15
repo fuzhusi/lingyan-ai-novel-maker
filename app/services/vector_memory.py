@@ -12,7 +12,7 @@ Memory types:
 """
 import json
 from flask import Blueprint, request, jsonify
-from app.models import (db, Novel, Chapter, ChapterVersion, ChapterSummary,
+from app.models import (db, Novel, Chapter, ChapterSummary,
                         Character, WorldSetting, Foreshadowing, ChapterMemory)
 
 memory_bp = Blueprint("memory", __name__, url_prefix="/api")

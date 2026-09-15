@@ -1,5 +1,4 @@
 """Character Relations — multi-dimensional relationship tracking with dynamic evolution."""
-import json
 from flask import Blueprint, request, jsonify
 from app.models import db, CharacterRelation, Character, Novel
 
@@ -108,7 +107,6 @@ def update_relation(relation_id):
     data = request.get_json(silent=True) or {}
 
     for field in ["relation_type", "description", "status"]:
-        camel = field.replace("_", "").replace("type", "Type")
         # Map camelCase keys
         key_map = {
             "relationType": "relation_type",

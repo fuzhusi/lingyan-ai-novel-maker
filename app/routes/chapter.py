@@ -1,4 +1,3 @@
-import json as _json
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify
 from app.models import db, Novel, Chapter, ChapterVersion, OutlineNode, Character
 from app.services.text_cleaner import clean_ai_text
@@ -19,7 +18,7 @@ def chapter_list(novel_id):
 
 @chapter_bp.route("/chapter/create", methods=["POST"])
 def create_chapter(novel_id):
-    novel = Novel.query.get_or_404(novel_id)
+    Novel.query.get_or_404(novel_id)
     title = request.form.get("title", "").strip()
     chapter_number = request.form.get("chapter_number", type=int)
     outline = request.form.get("outline", "")
@@ -110,7 +109,7 @@ def save_outline(novel_id, chapter_number):
 
 @chapter_bp.route("/chapter/<int:chapter_number>/save-version", methods=["POST"])
 def save_version(novel_id, chapter_number):
-    chapter = Chapter.query.filter_by(novel_id=novel_id, chapter_number=chapter_number).first_or_404()
+    Chapter.query.filter_by(novel_id=novel_id, chapter_number=chapter_number).first_or_404()
     content = clean_ai_text(request.form.get("content", ""))
     source = request.form.get("source", "ai")
     # Auto apply de-AI processing for AI-generated content

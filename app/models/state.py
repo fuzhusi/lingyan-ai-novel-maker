@@ -36,7 +36,7 @@ class StoryState(db.Model):
     current_chapter = db.Column(db.Integer, default=0)
     updated_at = db.Column(db.String(20), default=now, onupdate=now)
 
-    novel = db.relationship("Novel", backref="story_state")
+    novel = db.relationship("Novel", backref=db.backref("story_state", cascade="all, delete-orphan"))
 
 
 class StoryStateSnapshot(db.Model):
@@ -50,7 +50,7 @@ class StoryStateSnapshot(db.Model):
     is_checkpoint = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.String(20), default=now)
 
-    novel = db.relationship("Novel", backref="state_snapshots")
+    novel = db.relationship("Novel", backref=db.backref("state_snapshots", cascade="all, delete-orphan"))
     chapter = db.relationship("Chapter", backref="state_snapshot")
 
 
@@ -69,7 +69,7 @@ class ChapterMemory(db.Model):
     scenes_json = db.Column(db.Text, default="[]")  # Scene-level summaries
     created_at = db.Column(db.String(20), default=now)
 
-    novel = db.relationship("Novel", backref="chapter_memories")
+    novel = db.relationship("Novel", backref=db.backref("chapter_memories", cascade="all, delete-orphan"))
     # 删除章节时连带删除记忆（否则 flush 会尝试置 NULL 而 chapter_id 非空，触发 IntegrityError）
     # cascade 配置在 backref（Chapter.memory 一对多方向）
     chapter = db.relationship("Chapter", backref=db.backref("memory", cascade="all, delete-orphan"))

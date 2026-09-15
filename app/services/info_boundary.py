@@ -16,7 +16,7 @@ Implementation:
 - After generating, check for boundary violations
 """
 import json
-from app.models import db, Character, Chapter, ChapterVersion, ChapterMemory
+from app.models import Character, Chapter, ChapterMemory
 
 
 def get_character_knowledge(novel_id, character_name, up_to_chapter):

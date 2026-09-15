@@ -1,4 +1,6 @@
-from flask import Flask, session, request, jsonify
+import json
+
+from flask import Flask, request, jsonify
 from datetime import timedelta
 from app.config import AppConfig
 from app.models import db, init_db
@@ -13,6 +15,21 @@ def create_app():
 
     db.init_app(app)
     init_db(app)
+
+    # 模板过滤器：人物 status_json.plan → 可读计划行（拆书成果可见性）
+
+    @app.template_filter("plan_summary")
+    def _plan_summary(status_json):
+        try:
+            plan = (json.loads(status_json or "{}").get("plan")) or {}
+        except Exception:
+            return ""
+        parts = []
+        if plan.get("first_chapter"):
+            parts.append(f"首现第{plan['first_chapter']}章")
+        if plan.get("exit_chapter"):
+            parts.append(f"退场第{plan['exit_chapter']}章（{plan.get('exit_mode') or '收线'}）")
+        return " · ".join(parts)
 
     # 请求结束后清空 provider 缓存
     from app.config_utils import _reset_provider_cache
@@ -43,12 +60,14 @@ def create_app():
     from app.routes.outline_templates import templates_bp as outline_templates_bp
     from app.routes.plagiarize import plagiarize_bp
     from app.routes.llm_settings import llm_settings_bp
+    from app.routes.resources import resources_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(sample_bp)
     app.register_blueprint(outline_templates_bp)
     app.register_blueprint(plagiarize_bp)
     app.register_blueprint(llm_settings_bp)
+    app.register_blueprint(resources_bp)
     app.register_blueprint(novel_bp)
     app.register_blueprint(chapter_bp)
     app.register_blueprint(generate_bp)

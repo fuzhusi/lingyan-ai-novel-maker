@@ -12,7 +12,7 @@ Workflow:
 import json
 from flask import Blueprint, request, jsonify
 from app.models import db, Setting
-from app.services.llm import call_llm_sync, stream_llm_tokens, LLMError
+from app.services.llm import call_llm_sync, LLMError
 
 style_bp = Blueprint("style", __name__, url_prefix="/api")
 

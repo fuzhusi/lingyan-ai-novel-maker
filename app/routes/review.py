@@ -95,7 +95,7 @@ def review_stream():
 def save_review():
     version_id = request.form.get("version_id", type=int)
     full_response = request.form.get("full_response", "")
-    version = ChapterVersion.query.get_or_404(version_id)
+    ChapterVersion.query.get_or_404(version_id)
 
     data = _extract_json_dict(full_response)
     if data is not None:

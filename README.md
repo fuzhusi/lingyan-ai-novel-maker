@@ -3,7 +3,7 @@
 > 双盲审驱动的中文长篇 / 短篇小说创作工作台：写作、评审、一致性保障一站式完成。
 > 借鉴开源社区（OpenWrite / jarvis-write / NovelForge / lieflat-less-ai-tone 等）的成熟机制，去其糟粕取其精华，沉淀为本项目的确定性工程能力。
 
-Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI / Kimi / 智谱 / Ollama 等 11 家 OpenAI 兼容厂商，按 Agent 类型配置不同模型。
+Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI / Anthropic Claude / Google Gemini / Kimi / 智谱 / Ollama 等 13 家厂商预设（Claude 走原生协议，其余 OpenAI 兼容），按 Agent 类型配置不同模型。
 
 ## 📑 目录
 
@@ -33,7 +33,7 @@ Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI /
 
 **写作**
 - **一键本章流水线**：缺大纲自动生成 → 正文 → 确定性门禁 → AI味收敛（人味分不升自动回滚保留原稿），停在人工审阅不自动审批；可 `--save` 落 AI 版本
-- **流式生成**：SSE 逐字输出；字数双向保障——不足 2000 字自动续写补足，超目标 1.3 倍可一键「压缩超标」（保留情节节拍/对话/因果，压描写冗余）
+- **流式生成**：SSE 逐字输出 + **实时进度行**（当前阶段：规划大纲/写作/续写补足第 N 轮 · 所用厂商与模型 · 已用时 · 已生成字数）；超 20 秒无新内容提示「厂商 API 可能繁忙/限流，仍在等待」，首字等待超 15 秒标注响应较慢；字数双向保障——不足 2000 字自动续写补足，超目标 1.3 倍可一键「压缩超标」（保留情节节拍/对话/因果，压描写冗余）
 - **创作罗盘**（借鉴 OpenWrite）：`author_intent`（全书承诺）+ `current_focus`（阶段目标）注入 writer/outline/rewrite/focus 四条链路的最高优先位置，上下文压缩永不裁掉；章节列表页内联编辑，防长篇写歪
 - **上下文预算渐进压缩**：超 14000 字符按稳定优先级收缩（远章概要→近章摘要→世界观→检索记忆→角色次要字段）；罗盘/信息边界/上章结尾/大纲/伏笔/因果链永不压缩
 - **大纲失配标记**：保存正文时记录大纲指纹，事后改纲自动标「⚠ 大纲已变更」，章节列表与写作页可见——改纲不再静默漂移
@@ -88,10 +88,13 @@ Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI /
 ### 🛠️ 其他能力
 
 - 📤 五格式导出（TXT / DOCX / Markdown / HTML / EPUB），HTML 导出全转义 + CSP
-- 🔗 借鉴改写：风格模仿 / 情节骨架移植 / 三档洗稿
+- 🔗 **拆书复刻**：对标书（粘贴/TXT/DOCX/EPUB 上传）→ 四层漏斗拆解（L0 开篇原文精读拆节奏/文风/金手指 + L1 逐章摘要【4 章合批 × 8 并发 × fast 挡模型，断点续跑】+ L2 卷级归并全量覆盖 + L3 全局拆架构/人物/世界观/伏笔/金手指成长线，短书走快路单次直拆）→ 蓝图条目（人物/世界观/大纲/伏笔）AI 差异化改写（成套改名映射 + 差异轴，改写稿进修改稿人工签字）→ 逐条采纳（错拆不污染知识库；已入库禁止重拆）→ 复刻长篇（建书+知识库+大纲树+章节流水线）或短篇（策划+大纲节点）
+- 🔗 **生成期差异化与防雷同**：每章写作包自动注入「原创性红线」（R1 节拍只定功能不定做法 / R2 禁来源专名 / R3 禁梗概式复述 + 原创细节配额 ≥3 + 切入角置换 + 矫枉过正校准）+「金手指规则与爽点」+「must_payoff 伏笔排程（≤2 条硬性任务 + 禁埋令）」+「本章登场/退场角色」+「差异轴」；逐章雷同检测（8-gram containment + 13 字连续红线，知网标准）→ alarm 自动带整改清单重生一次（跨档保留判据）；已取消/已完成的任务断点续用
+- 📚 **资源库**：对标书原文独立存储（与拆书任务解耦），分段嵌入（fast 挡 embedding API + 字符频率降级），语义检索 API 供写作包按需拉取相关片段——"一部分一部分解锁给 AI"
+- 📋 **伏笔双锚点排程** — 伏笔带 expected（预期回收章）+ earliest（不可提前收）双锚点 + importance + 逐章摘要来源证据；活跃容量上限 + 每章回收配额（≤2 条）+ 超容禁埋令；人物生命周期计划（首现/退场事件 + 方式）落库后在角色卡可见
 - 🧠 提示词模板库 + 13 个内置写作技巧（Skill）+ 作者文风协议（江南三技巧），生成后自动跑「技巧门禁」确定性验收
-- 🖥️ **MCP Server（27 工具）**：含 `run_chapter_pipeline` 一键本章、`approve_chapter` 审批、全套知识库 CRUD
-- ⌨️ **CLI（27 命令组）**：与 Web 同源复用，见下节
+- 🖥️ **MCP Server（33 工具）**：含 `run_chapter_pipeline` 一键本章、`approve_chapter` 审批、拆书复刻（`deconstruct_book`/`adopt_deconstruct_item`/`generate_from_blueprint`）、全套知识库 CRUD
+- ⌨️ **CLI（28 命令组）**：与 Web 同源复用，见下节
 - 📱 移动端响应式布局
 
 ### 🌙 界面主题：朱金 · 玄漆 ——「夜幕下摊开的稿纸」
@@ -116,6 +119,8 @@ Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI /
 | 章节列表 | `/novel/<id>/` | 章节网格 + 大纲失配徽标 |
 | 知识库 | `/novel/<id>/characters` `/world` `/outline` `/foreshadowing` | 角色 / 世界观 / 大纲树 / 伏笔 |
 | 双盲审工作台 | `/blind/` | 任意文本 / 短篇 / 章节开审，结果存档回看 |
+| 拆书复刻 | `/plagiarize/` 及子页 | 对标书上传 → 六维拆解 → 待确认条目逐条采纳 → 复刻长篇/短篇 |
+| 资源库 | `/resources/` | 对标书原文独立存储，语义检索 API 供写作包按需拉取相关片段 |
 | 设置 | `/settings/` | 厂商 / Per-Agent 模型 / 文风锚例 / 创作偏好档案 |
 | 短篇工坊 | `/short/` 及子页 | 三模式创作、逐节点多轮、评审卡 |
 
@@ -156,9 +161,58 @@ python cli.py chapter pipeline --novel 1 --number 5 --save
 
 ---
 
+## 📖 拆书复刻流程
+
+把一本对标书工业化复刻成新书：**上传 → AI 拆解 → 差异化改写 → 人工签字 → 装进长篇/短篇**。
+
+```
+上传对标书（粘贴 / TXT·DOCX·EPUB）
+  → 拆书（按书的厚度自动选路）：
+      ≤2 万字  快路：原文单次调用直拆六维
+      >2 万字  四层漏斗：
+        L1 章级摘要   逐章压 400-600 字（4 章/次合批 × 8 并发 × fast 挡模型，
+                      逐批落库断点续跑，上限 600 章显式警告）
+        L2 卷级归并   每 50 章摘要归并成卷级摘要 → 全量信息进入全局拆解，无截断
+        L0 开篇精读   前 2 章原文不压缩直拆 → 开篇节奏/金手指/文风（deep 挡）
+        L3 全局拆解   卷级摘要 + L0 结论 → 全书架构/人物/世界观/伏笔/金手指成长线
+  → 待确认工作台（步骤条 ①→④ 引导）：
+      人物/世界观/大纲/伏笔逐条卡片（默认折叠，可展开编辑）
+      「AI 全部改写」成套改名映射 + 差异轴 → 改写稿进修改稿人工签字
+      逐条「采纳/丢弃」（已入库不可重拆；丢弃可恢复）
+  → 复刻为长篇：建/选小说 + 创作罗盘注入（红线/节奏/文风/金手指/差异轴/微创新）
+     + 已采纳条目写入知识库 + 伏笔双锚点排程 + 章节建连
+     可勾选串行跑章节流水线（每章自动注入 must_payoff + 差异化红线 + 雷同检测）
+  → 复刻为短篇：建短篇，采纳条目进策划字段 + 大纲节点，跳转短篇工坊逐节点生成
+```
+
+CLI 全流程示例：
+
+```bash
+python cli.py deconstruct create --title "对标书" --file book.txt   # 建任务
+python cli.py deconstruct run --id 1                                # 拆书（断点续跑）
+python cli.py deconstruct items --id 1                              # 看待确认条目
+python cli.py deconstruct adopt-all --id 1                          # 全部采纳
+python cli.py deconstruct generate-long --id 1 --title "新书" --run  # 复刻长篇+生成正文
+```
+
+MCP 对应 `deconstruct_book` / `list_deconstruct_items` / `adopt_deconstruct_item` / `generate_from_blueprint`。
+
+### 生成期质量保障（每章自动注入）
+
+| 机制 | 说明 |
+|------|------|
+| **原创性红线** | R1 节拍只定功能不定做法 / R2 禁来源专名 / R3 禁梗概式复述 + 原创细节配额 ≥3 + 切入角置换 + 矫枉过正校准 |
+| **must_payoff 伏笔排程** | 本章到期的伏笔硬性回收（≤2 条）+ 悬挂提醒 + 容量禁埋令 |
+| **金手指规则与爽点** | 从拆书蓝图提取，每章写作包注入 |
+| **本章登场/退场角色** | 拆书计划值：首现/退场事件锚 → 章节号，自动注入 |
+| **雷同检测** | 8-gram containment + 13 字连续红线（对标书逐章摘要）→ alarm 自动带整改清单重生一次 |
+| **语义检索** | 资源库向量检索对标书相关片段，注入"写法参考"（禁止照抄内容） |
+
+---
+
 ## 🤖 MCP / AI IDE 接入
 
-MCP Server 走 stdio 协议，27 个工具覆盖小说/章节/角色/世界观/伏笔/大纲/短篇/设置/审计 + 一键本章编排。在 Claude Code 的 `~/.claude/settings.json` 添加：
+MCP Server 走 stdio 协议，33 个工具覆盖小说/章节/角色/世界观/伏笔/大纲/短篇/设置/审计/拆书复刻 + 一键本章编排。在 Claude Code 的 `~/.claude/settings.json` 添加：
 
 ```json
 {
@@ -178,6 +232,7 @@ Cursor 等其他支持 MCP 的 IDE 同理。典型用法（Claude Code 里）：
 用 mcp__lingyan__list_novels 看有哪些小说
 用 mcp__lingyan__run_chapter_pipeline 给第 1 本小说生成第 5 章（缺大纲自动补）
 用 mcp__lingyan__approve_chapter 审批最新版本（空内容会被拒绝）
+用 mcp__lingyan__deconstruct_book 拆解对标书，generate_from_blueprint 复刻新书
 ```
 
 ---
@@ -186,17 +241,17 @@ Cursor 等其他支持 MCP 的 IDE 同理。典型用法（Claude Code 里）：
 
 ```text
 lingyan/
-├── run.py / cli.py / mcp_server.py   # 三个入口（Web / CLI 27 命令组 / MCP 27 工具）
+├── run.py / cli.py / mcp_server.py   # 三个入口（Web / CLI 28 命令组 / MCP 33 工具）
 ├── app/
-│   ├── __init__.py                   # Flask app 工厂，注册 25 个蓝图
+│   ├── __init__.py                   # Flask app 工厂，注册 26 个蓝图
 │   ├── config.py / config_utils.py   # 配置加载与解析
-│   ├── models/                       # 23 个 SQLAlchemy 模型（按领域拆分）
-│   ├── routes/                       # 20 个路由蓝图（novel/chapter/generate/review/blind/...）
-│   ├── services/                     # 24 个业务模块（writer_chain/chapter_runner/ai_metric/...）
+│   ├── models/                       # 28 个 SQLAlchemy 模型（按领域拆分）
+│   ├── routes/                       # 21 个路由蓝图（novel/chapter/generate/review/blind/resources/...）
+│   ├── services/                     # 29 个业务模块（writer_chain/chapter_runner/book_deconstruct/narrative_plan/similarity_check/...）
 │   ├── templates/                    # 23 个 Jinja2 模板
 │   └── static/                       # 主题 CSS + 月夜氛围 JS
 ├── docs/                             # 架构/设计/路线/方法论文档（见文末索引）
-└── tests/                            # 151 个用例（独立临时库，不碰开发数据）
+└── tests/                            # 260+ 用例（独立临时库，不碰开发数据）
 ```
 
 ---
@@ -207,7 +262,7 @@ lingyan/
 |----|------|
 | 后端 | Python 3.14, Flask（app factory） |
 | ORM | Flask-SQLAlchemy（SQLite 单文件 + FTS5 全文检索） |
-| AI 接口 | langchain-openai，OpenAI 兼容协议（11 家厂商） |
+| AI 接口 | langchain-openai + langchain-anthropic；OpenAI 兼容协议为主，Claude 走 Anthropic 原生协议（13 家厂商预设） |
 | 流式 | SSE（`text/event-stream`） |
 | 前端 | Jinja2 + 原生 JS + 响应式 CSS（朱金·玄漆主题） |
 | 视觉 | Three.js 月夜氛围层（WebGL + 降级 CSS） |
@@ -218,12 +273,13 @@ lingyan/
 
 ## ⌨️ CLI 快速上手
 
-CLI 与 Web 复用同一套服务层，行为一致（不是各写一套）。27 个命令组：
+CLI 与 Web 复用同一套服务层，行为一致（不是各写一套）。28 个命令组：
 
 | 命令组 | 用途 | 示例 |
 |--------|------|------|
 | `novel` | 小说 CRUD + 导出 | `python cli.py novel list` |
 | `chapter` | 章节 CRUD + 版本 + 大纲失配 + **一键本章/收敛/压缩/一致性核查** | `python cli.py chapter pipeline --novel 1 --number 5 --save` |
+| `deconstruct` | **拆书复刻**（create/run/items/adopt/generate-long/short） | `python cli.py deconstruct generate-long --id 1 --title "新书" --run` |
 | `compass` | 创作罗盘 | `python cli.py compass set --novel 1 --intent "复仇外壳写救赎"` |
 | `tone` | AI 痕迹检测 / 收敛 / 困惑度雷达 | `python cli.py tone radar --novel 1 --number 5` |
 | `consistency` | 一致性链核查（`--adjudicate` 交 AI 裁决） | `python cli.py chapter consistency --novel 1 --number 5` |
@@ -239,6 +295,10 @@ CLI 与 Web 复用同一套服务层，行为一致（不是各写一套）。27
 ```bash
 python cli.py chapter pipeline --novel 1 --number 5 --save
 # 缺大纲生成 → 正文 → 门禁 → AI味收敛 → 保存 AI 版本（未审批），停在人工审阅
+# 指定本章出场角色（人物出场勾选）：只注入 id 1、3、5 的角色档案
+python cli.py chapter pipeline --novel 1 --number 5 --character-ids 1,3,5
+# --character-ids 缺省=全部角色；传空串=不注入任何角色档案（对齐 Web 出场角色勾选区）
+# 注意跨端差异：MCP 工具 run_chapter_pipeline 的空串/不传均为全部角色，无法表达"不注入"
 ```
 
 ---
@@ -269,7 +329,8 @@ uv run python run.py          # 打开 http://127.0.0.1:5000（免登录）
 
 | 层级 | 方式 | 说明 |
 |------|------|------|
-| 厂商配置 | `/settings/llm` 页面或 `cli.py llm provider-add --preset deepseek` | 内置 11 家预设，填 key 即拉取模型；**推荐方式，存数据库** |
+| 厂商配置 | `/settings/llm` 页面或 `cli.py llm provider-add --preset deepseek` | 内置 13 家预设（含 OpenAI / Claude / Gemini），填 key 即拉取模型；**推荐方式，存数据库** |
+| 网络可达性 | 见各预设提示 | OpenAI / Claude / Gemini 官方接口**国内需代理**；国内可直连：DeepSeek、Kimi、智谱、通义、硅基流动、火山方舟（Groq 视网络而定） |
 | Per-Agent | `/settings/` 页面或 `cli.py llm agent-set` | 16 种 Agent 各自指定厂商/模型/温度/Token/采样惩罚 |
 | 自动默认 | 无需配置 | 未显式配置的 Agent 自动匹配已勾选模型（快速类偏好 flash/lite，深度类偏好 pro/max）|
 | 去 AI 化开关 | Setting 键 `deai_auto = "0"` 关闭 | 默认开启；仅对 AI 来源内容生效 |
@@ -298,6 +359,7 @@ uv run python run.py          # 打开 http://127.0.0.1:5000（免登录）
 ## 💾 数据与备份
 
 - 全部数据（小说/章节/记忆/配置/厂商）都在 `data.db` 单文件里，直接拷贝即备份
+- 数据库已启用 **WAL 模式**（读写并发友好）；注意 WAL 下运行中裸拷贝 `data.db` 会缺 `-wal` 附属文件导致快照不完整
 - CLI 提供安全备份：`python cli.py sys backup`（走 SQLite 备份 API，WAL/并发下也是完整快照，优于裸文件拷贝）
 - 开发库与测试库隔离：测试自动用 `.tmp-test/test.db`，`pytest` 永远不碰你的写作数据
 - 数据库可随时重建（应用启动时自动建表 + 自动迁移旧库）
@@ -322,7 +384,7 @@ uv run python run.py          # 打开 http://127.0.0.1:5000（免登录）
 
 ```bash
 uv sync --group dev
-uv run pytest            # tests/ 目录（151 例），独立临时数据库，不碰开发数据
+uv run pytest            # tests/ 目录（260+ 例），独立临时数据库，不碰开发数据
 ```
 
 测试覆盖：路由级接线（罗盘/意见/审批）、困惑度雷达对齐算法、收敛回滚环、一致性三查、编排器全阶段、抽取队列、写作包注入等。
@@ -358,10 +420,19 @@ A：三连招：① 顶部「AI味收敛」——检测→定向重写→复测�
 A：一致性链四件套：① 写前「创作罗盘」定承诺；② 审批时事实入「待确认队列」人工采纳；③ 每章生成后跑「一致性核查」（时序真相回潮/伏笔排期/已回收复现）；④ 改大纲后看「失配标记」并按新纲重生成。
 
 **Q：生成很慢？**
-A：`chapter pipeline` 或「AI 生成本章」是串行多次大 LLM 调用（大纲→正文→门禁→收敛），分钟级属正常。要快：先用已有大纲（跳过大纲生成）、收敛可稍后再点、`--no-converge` 场景在 CLI 用 `tone check` 只查不改。
+A：`chapter pipeline` 或「AI 生成本章」是串行多次大 LLM 调用（大纲→正文→字数不足自动续写补足），分钟级属正常。写作页输出区下方有**实时进度行**（当前阶段 / 所用厂商与模型 / 已用时 / 已生成字数）——能看到它在动就不是卡死；超 20 秒无新内容会提示「厂商 API 可能繁忙/限流」，此时可以继续等，也可以取消后换个厂商/模型再试。要快：先用已有大纲（跳过大纲生成）、选响应快的厂商跑大纲；CLI 用 `tone check` 只检测不修改。
+
+**Q：拆书整本要跑多久？中断了怎么办？**
+A：短书（≤2万字）走快路，一次调用约几十秒；长书走四层漏斗——摘要阶段每次压 4 章 × 8 并发（fast 挡便宜模型），500 章的书约 3-5 分钟。中断/关页后重新拆书会自动断点续跑，已完成的摘要不重算。单章摘要失败会自动降级为截断正文兜底，不会炸整条管线。
+
+**Q：为什么拆过的任务不能重新拆书？**
+A：如果该任务的条目已经采纳并写进了目标书的知识库，重拆会清空队列但无法回收已写入的角色/设定，造成两边不一致。确要重拆：先到目标书的知识库删除对应内容，或直接新建拆书任务。（注：若目标书中的角色/伏笔已被手动删除，系统会检测到并放行重拆。）
+
+**Q：复刻出来的书会不会跟对标书太像？**
+A：系统有四道防线确保"结构忠实、皮肉原创"：①AI 差异化改写（全员改名映射 + 差异轴 + 具体情节重写）；②创作罗盘注入微创新方向（随每章生成）；③原创性红线（R1 节拍只定功能 / R2 禁来源专名 / R3 禁梗概式复述）注入每章写作包；④雷同检测——生成后自动与对标书摘要做 8-gram 比对 + 13 字连续红线，超标自动带整改清单重生一次。但最终把关仍是你的责任：采纳前请审阅改写稿，发布前建议自行做查重。
 
 **Q：模型怎么配？**
-A：设置 → 模型配置 → 添加厂商（11 家预设）→ 填 key → 拉取模型 → 勾选启用。未显式配置的 Agent 自动匹配已勾选模型，通常加一个厂商勾几个模型就能用。
+A：设置 → 模型配置 → 添加厂商（13 家预设）→ 填 key → 拉取模型 → 勾选启用。未显式配置的 Agent 自动匹配已勾选模型，通常加一个厂商勾几个模型就能用。
 
 **Q：CLI 和 Web 行为会不一致吗？**
 A：不会。CLI 复用 Web 同一套服务层（`app/services/`），不是各写一套；Web/MCP/CLI 三入口共用审批、抽取、门禁等核心逻辑。

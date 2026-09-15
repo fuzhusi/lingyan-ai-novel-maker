@@ -43,7 +43,7 @@ CLI 免登录，直接读写 `data.db`，与 Web 看到的是同一份数据。
 ```bash
 PY=.venv/Scripts/python.exe   # 下文用 $PY 代指
 
-# 1) 看有哪些预设（11 家：deepseek/openai/moonshot/zhipu/qwen/...）
+# 1) 看有哪些预设（13 家：deepseek/openai/anthropic/gemini/moonshot/zhipu/qwen/...）
 $PY cli.py llm preset-list
 
 # 2) 按预设添加厂商，填 key 即用（Ollama 本地无需 key）

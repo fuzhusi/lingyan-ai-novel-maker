@@ -11,7 +11,12 @@ novel_bp = Blueprint("novel", __name__)
 @novel_bp.route("/")
 def index():
     """Gateway page — choose between long-form and short-form."""
-    return render_template("gateway.html")
+    # 配置检测(PM C3):新人第一次价值体验卡在配 API key——首屏直接给出去向
+    from app.models import LLMProvider, LLMModel
+    has_provider = LLMProvider.query.count() > 0
+    has_model = LLMModel.query.filter_by(enabled=True).count() > 0
+    return render_template("gateway.html",
+                           has_llm_provider=has_provider, has_enabled_model=has_model)
 
 
 @novel_bp.route("/novel/")
@@ -91,28 +96,9 @@ def save_compass(novel_id):
 
 @novel_bp.route("/novel/<int:novel_id>/delete", methods=["POST"])
 def delete_novel(novel_id):
-    novel = Novel.query.get_or_404(novel_id)
-    for ch in novel.chapters:
-        # Delete reviews first (foreign key to chapter_versions)
-        for v in ChapterVersion.query.filter_by(chapter_id=ch.id).all():
-            CriticReview.query.filter_by(version_id=v.id).delete()
-        ChapterVersion.query.filter_by(chapter_id=ch.id).delete()
-        ChapterSummary.query.filter_by(chapter_id=ch.id).delete()
-        ChapterMemory.query.filter_by(chapter_id=ch.id).delete()
-        db.session.delete(ch)
-    Character.query.filter_by(novel_id=novel_id).delete()
-    CharacterRelation.query.filter_by(novel_id=novel_id).delete()
-    WorldSetting.query.filter_by(novel_id=novel_id).delete()
-    OutlineNode.query.filter_by(novel_id=novel_id).delete()
-    Foreshadowing.query.filter_by(novel_id=novel_id).delete()
-    StoryStateSnapshot.query.filter_by(novel_id=novel_id).delete()
-    StoryState.query.filter_by(novel_id=novel_id).delete()
-    db.session.delete(novel)
-    db.session.commit()
-
-    # 同步清理 FTS 记忆索引（SQLite 无 FK，残留会被跨小说检索命中）
-    from app.services.vector_memory import delete_novel_memory
-    delete_novel_memory(novel_id)
+    # 删除单一真源:外围引用清理 + ORM 级联(app/services/delete_service.py)
+    from app.services.delete_service import delete_novel_full
+    ok, _ = delete_novel_full(novel_id)
     return redirect(url_for("novel.index"))
 
 

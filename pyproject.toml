@@ -23,6 +23,8 @@ dependencies = [
     "itsdangerous>=2.2",
     "blinker>=1.9",
     "certifi>=2026.0",
+    "tiktoken==0.13.0",
+    "langchain-anthropic>=1.7.2",
 ]
 
 [project.optional-dependencies]

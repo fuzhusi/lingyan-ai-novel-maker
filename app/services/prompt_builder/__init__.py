@@ -2,7 +2,7 @@
 
 统一导出所有构建函数，保持向后兼容。
 """
-from app.services.prompt_builder.context import (
+from app.services.prompt_builder.context import (  # noqa: F401
     _section, _load_system_prompt, _load_constraints,
     DEFAULT_WRITER_CONSTRAINTS, assemble_chapter_context,
     apply_context_budget, build_compass_block,

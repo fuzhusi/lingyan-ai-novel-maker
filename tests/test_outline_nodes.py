@@ -138,7 +138,7 @@ class TestLoadOutlineNodes:
             yield
 
     def test_load_valid_json(self, app_ctx):
-        from app.models import ShortStory, db
+        from app.models import ShortStory
         s = ShortStory(title="t", mode="inspiration")
         s.outline_nodes = json.dumps([
             {"id": 1, "act": "幕", "title": "x", "word_count": 1000, "status": "done"},

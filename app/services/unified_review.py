@@ -13,10 +13,8 @@
 """
 
 import json
-import concurrent.futures
-from app.services.llm import call_llm_sync, stream_llm_tokens, LLMError
-from app.models import (db, ChapterVersion, CriticReview, Chapter, Novel,
-                        Character, WorldSetting, Foreshadowing, ChapterSummary)
+from app.services.llm import call_llm_sync, LLMError
+from app.models import (db, ChapterVersion, CriticReview, Chapter, Novel)
 from app.services.blind_review import run_dual_review
 from app.services.prompt_builder import (build_critic_prompt, build_rewrite_prompt,
                                           assemble_chapter_context)

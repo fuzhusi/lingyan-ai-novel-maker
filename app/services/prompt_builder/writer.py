@@ -16,9 +16,10 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
                         boundary_context="",
                         prev_ending="", earlier_summaries="", genre="", db=None,
                         tone_instructions="", author_intent="", current_focus="",
-                        style_memo="", creator_preferences=""):
+                        style_memo="", creator_preferences="", narrative_plan="",
+                        reference_passages=""):
     system_prompt = _load_system_prompt(db, "writer", (
-        "你是一位专业的小说作家，擅长用生动的语言和细腻的描写创作引人入胜的故事。"
+        "你是一位专业的畅销网文作家，具备丰富的网文学创作经验，擅长使用细腻的描写和生动的对话来刻画人物和推动情节发展。"
         "根据提供的创作指引，写出高质量的小说章节内容。严格遵守世界观设定和人物设定，"
         "保持人物性格和行为的一致性。"
     ))
@@ -145,6 +146,12 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
             planted_note = f"（第{planted}章埋）" if planted else ""
             fs_lines.append(f"• {label}{desc}{planted_note} [{status}]")
         blocks.append(_section("待回收伏笔（请在写作中自然融入，勿遗忘）", "\n".join(fs_lines)))
+
+    if narrative_plan:
+        blocks.append(_section("本章叙事计划（拆书蓝图排程，硬性任务，不是可选提醒）", narrative_plan))
+
+    if reference_passages:
+        blocks.append(_section("对标书写法参考（语义检索，仅供技法参考，禁止照抄内容）", reference_passages))
 
     if causal_chain:
         blocks.append(_section("因果链（前几章的因果关系，请延续逻辑）", causal_chain))

@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template
 from datetime import datetime
-from app.models import (db, Novel, Chapter, ChapterVersion, Character,
+from app.models import (Novel, Chapter, ChapterVersion, Character,
                         WorldSetting, OutlineNode, Foreshadowing, ChapterSummary)
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/novel/<int:novel_id>/dashboard")

@@ -233,4 +233,11 @@ def approve_chapter_version(version, generate_summary=True):
         except Exception:
             logger.warning("锚例候选提取失败", exc_info=True)
 
+    # P1-3:FTS 语义记忆增量索引(全量重建对数百章书代价可接受,审批是低频人工事件)
+    try:
+        from app.services.vector_memory import index_memory
+        index_memory(chapter.novel_id)
+    except Exception:
+        logger.warning("FTS 索引更新失败(可在记忆页手动重建)", exc_info=True)
+
     return result

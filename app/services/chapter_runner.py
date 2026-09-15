@@ -20,8 +20,12 @@ logger = logging.getLogger(__name__)
 
 def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
                          auto_save=False, converge=True,
-                         word_target=CHAPTER_WORD_TARGET):
+                         word_target=CHAPTER_WORD_TARGET,
+                         character_ids=None):
     """一键本章流水线。
+
+    character_ids: 本章出场角色 id 列表；None=全部角色（缺省），[]=不注入角色档案。
+    传给大纲生成与正文生成两处，控制角色档案注入范围（对齐 Web 出场角色勾选）。
 
     Returns:
         {"text", "stages": [{stage, ok, ...}], "human_score"?, "outline"?,
@@ -43,7 +47,8 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
     # ---- Stage 1: outline（已有则跳过）----
     if not (chapter.outline or "").strip():
         cfg_o = get_effective_config(novel, agent_type="outline")
-        ctx = assemble_chapter_context(novel_id, chapter_number, db)
+        ctx = assemble_chapter_context(novel_id, chapter_number, db,
+                                       character_ids=character_ids)
         messages = build_outline_prompt(
             novel_title=novel.title, genre=novel.genre,
             synopsis=novel.synopsis, world_intro=novel.world_intro,
@@ -65,7 +70,8 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
 
     # ---- Stage 2: body ----
     kw, novel = build_writer_kwargs(novel_id, chapter_number, chapter.outline,
-                                    user_directive=user_directive)
+                                    user_directive=user_directive,
+                                    character_ids=character_ids)
     cfg_w = get_effective_config(novel, agent_type="writer")
     messages = build_writer_prompt(
         novel_title=novel.title, chapter_title=chapter.title,

@@ -5,13 +5,12 @@ import pytest
 
 from app import db
 from app.models import (Novel, Chapter, ChapterVersion, Foreshadowing,
-                        PendingExtraction, Setting)
+                        Setting)
 from app.services import opinions as op
 from app.services import consistency_check as cc
 from app.services import chapter_runner as runner
 from app.services import writer_chain as wc
 from app.services import extraction_queue as eq
-from app.services.llm import LLMError
 from app.services.prompt_builder import build_writer_prompt
 
 
@@ -329,3 +328,78 @@ def test_keeper_configs_marked_reserved(app):
     from app.routes.settings import AGENT_TYPES
     for key in ("character_check", "lore_check", "foreshadow_check"):
         assert "预留" in AGENT_TYPES[key]["name"]
+
+
+# ---------------------------------------------------------------------------
+# 人物出场勾选（character_ids）透传：Web 出场角色勾选区 → CLI/MCP → 编排器
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("cids,expected", [
+    (None, None),      # 缺省 = 全部角色
+    ([], []),          # 显式空 = 不注入任何角色档案
+    ([7, 9], [7, 9]),  # 只注入指定出场角色
+])
+def test_runner_character_ids_reach_writer_kwargs(app, monkeypatch, cids, expected):
+    n = Novel(title="出场角色测试")
+    db.session.add(n)
+    db.session.commit()
+    ch = Chapter(novel_id=n.id, chapter_number=1, title="第一章",
+                 outline="既有大纲。")
+    db.session.add(ch)
+    db.session.commit()
+
+    received = {}
+
+    def fake_build(novel_id, chapter_number, outline, user_directive="",
+                   character_ids=None):
+        received["character_ids"] = character_ids
+        return {}, Novel.query.get(novel_id)
+
+    monkeypatch.setattr(runner, "build_writer_kwargs", fake_build)
+    monkeypatch.setattr(runner, "collect_full_text",
+                        lambda messages, cfg, word_target=None: "正文若干。" * 60)
+    monkeypatch.setattr("app.services.ai_metric.analyze_ai_tone",
+                        lambda text: {"passed": True, "human_score": 95})
+    monkeypatch.setattr("app.services.skill_gate.run_gate",
+                        lambda text, active_skills=None: {"passed": True, "checks": []})
+
+    result = runner.run_chapter_pipeline(n.id, 1, character_ids=cids)
+    assert "error" not in result
+    assert received["character_ids"] == expected
+
+
+def test_runner_character_ids_reach_outline_context(app, monkeypatch):
+    """缺大纲时，出场角色过滤同样作用到大纲生成的角色档案。"""
+    n = Novel(title="出场角色大纲")
+    db.session.add(n)
+    db.session.commit()
+    ch = Chapter(novel_id=n.id, chapter_number=1, title="第一章", outline="")
+    db.session.add(ch)
+    db.session.commit()
+
+    calls = {"cids": None}
+
+    def fake_ctx(novel_id, chapter_number, db, character_ids=None):
+        calls["cids"] = character_ids
+        return {"characters": [], "summaries": [], "foreshadowing_items": []}
+
+    monkeypatch.setattr("app.services.prompt_builder.assemble_chapter_context",
+                        fake_ctx)
+    monkeypatch.setattr(
+        runner, "collect_full_text",
+        lambda messages, cfg, word_target=None: (
+            "大纲：测试。" if any("章节大纲" in m.get("content", "")
+                                for m in messages if isinstance(m, dict))
+            else "正文若干。" * 60))
+    monkeypatch.setattr(
+        runner, "build_writer_kwargs",
+        lambda novel_id, chapter_number, outline, user_directive="",
+        character_ids=None: ({}, Novel.query.get(novel_id)))
+    monkeypatch.setattr("app.services.ai_metric.analyze_ai_tone",
+                        lambda text: {"passed": True, "human_score": 95})
+    monkeypatch.setattr("app.services.skill_gate.run_gate",
+                        lambda text, active_skills=None: {"passed": True, "checks": []})
+
+    result = runner.run_chapter_pipeline(n.id, 1, character_ids=[3])
+    assert "error" not in result
+    assert calls["cids"] == [3]

@@ -47,7 +47,7 @@ app/
 ├── config.py            # AppConfig 从 .env 加载
 ├── config_utils.py      # 配置解析 (get_model_config / get_effective_config)
 │
-├── models/              # 23 个 SQLAlchemy 模型 (按领域拆分)
+├── models/              # 24 个 SQLAlchemy 模型 (按领域拆分)
 │   ├── __init__.py      # 统一导出 + init_db()
 │   ├── base.py          # db 实例 + now()
 │   ├── novel.py         # Novel, Chapter, ChapterVersion, CriticReview, BlindReview,
@@ -75,11 +75,9 @@ app/
 │   │   ├── review.py    # 评审 + 反馈 + 基于反馈重写
 │   │   ├── versioning.py # 版本管理
 │   │   └── export.py    # TXT/DOCX/MD/HTML/EPUB 导出
-│   ├── plagiarize/      # 借鉴改写 (子包)
+│   ├── plagiarize/      # 拆书复刻 (子包)
 │   │   ├── __init__.py  # Blueprint 定义 + CRUD + 保存
-│   │   ├── style.py     # 风格模仿 + 风格分析 + 保存为 Skill
-│   │   ├── plot.py      # 情节借鉴 + 情节骨架提取
-│   │   ├── rewrite.py   # 改写洗稿 (轻度/中度/重度)
+│   │   ├── deconstruct.py # 拆书流式 + 待确认采纳 + 复刻长篇/短篇
 │   │   └── upload.py    # 文件上传 (TXT/DOCX/EPUB)
 │   ├── pipeline.py      # 多 Agent 并行检查（保留停用：无任何入口调用）
 │   ├── blind_review.py  # 双盲审工作台 + 通用 API（/blind/）
@@ -135,7 +133,7 @@ app/
         └── inkflow.js   # 网关沉浸页增强场景（Three.js 大满月+桂花雨粒子+朱金光尘+鼠标扰动）
 ```
 
-## 数据库模型 (23 个)
+## 数据库模型 (24 个)
 
 | 类别 | 模型 |
 |------|------|
@@ -143,7 +141,7 @@ app/
 | **知识库** | Character, WorldSetting, OutlineNode, Foreshadowing, CharacterRelation, PendingExtraction |
 | **高级** | StoryState, StoryStateSnapshot, ChapterMemory, ChapterSummary |
 | **短篇** | ShortStory, ShortStoryVersion, ShortStoryReview |
-| **借鉴** | PlagiarizeTask |
+| **拆书复刻** | PlagiarizeTask, DeconstructItem |
 | **LLM 厂商** | LLMProvider, LLMModel |
 
 ## Key Patterns
@@ -407,13 +405,12 @@ python cli.py sys sample-data         # 加载示例小说（对齐 Web 一键�
 - 每 10 秒保存到 `localStorage`
 - 页面加载时检测草稿，提供恢复
 
-### 🔗 借鉴改写
-- **风格模仿**：分析参考文本风格 → 生成风格分析报告 → 用该风格创作新内容 → 可保存为自定义 Skill
-- **情节借鉴**：提取情节骨架 → 套用到新角色/世界观 → 生成全新故事
-- **改写洗稿**：三档改写程度（轻度/中度/重度）→ 左右对比视图
+### 🔗 拆书复刻
+- **三层漏斗拆解**：对标书 → L0 开篇原文精读（节奏/文风/金手指）+ L1 逐章摘要（断点续跑）+ L2 卷级归并 + L3 全局拆解（架构/人物/世界观）；短书走快路单次直拆（`app/services/book_deconstruct.py`）
+- **待确认采纳**：拆解产物进 `DeconstructItem` 队列，逐条编辑后采纳，复刻生成时统一落库（错拆不污染知识库）
+- **复刻生成**：长篇（建书 + 知识库 + 大纲树 + 章节流水线，节奏/文风/微创新注入创作罗盘 + user_directive）/ 短篇（策划 + 大纲节点 + extra_instructions）
 - **文件上传**：支持 TXT/DOCX/EPUB 文件导入
-- **输出**：保存为长篇章节或短篇
-- 端点: `/plagiarize/`
+- 端点: `/plagiarize/`（CLI `deconstruct` 命令组 / MCP 6 个工具）
 
 ## Key Files
 

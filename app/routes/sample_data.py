@@ -1,9 +1,9 @@
 """示例数据服务 — 快速生成示例小说供用户体验。"""
 
-from flask import Blueprint, jsonify, redirect, url_for
+from flask import Blueprint, jsonify, redirect
 from app.models import (
-    db, Novel, Chapter, ChapterVersion, Character, WorldSetting,
-    OutlineNode, Foreshadowing, Foreshadowing  # type: ignore
+    db, Novel, Chapter, Character, WorldSetting,
+    OutlineNode, Foreshadowing  # type: ignore
 )
 
 

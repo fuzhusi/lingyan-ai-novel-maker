@@ -17,8 +17,8 @@ Each truth has:
 """
 import json
 from flask import Blueprint, request, jsonify
-from app.models import db, Novel, Chapter, ChapterMemory, Setting
-from app.services.llm import call_llm_sync, stream_llm_tokens, LLMError
+from app.models import db, Chapter, Setting
+from app.services.llm import call_llm_sync, LLMError
 
 truth_bp = Blueprint("truth", __name__, url_prefix="/api")
 

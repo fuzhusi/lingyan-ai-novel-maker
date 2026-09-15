@@ -67,3 +67,7 @@ tests/.tmp*/
 
 # ===== ZCode 工具内部文件（不共享） =====
 .zcode/
+
+# SQLite WAL 边车文件（真实数据，绝不提交）
+data.db-shm
+data.db-wal

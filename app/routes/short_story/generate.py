@@ -11,8 +11,7 @@ from app.services.llm import stream_llm_tokens, call_llm_sync, LLMError
 from app.routes.short_story.prompts import (
     _build_expander_prompt, _build_writer_from_concept_prompt,
     _build_setting_prompt, _build_careful_prompt, SECTION_PROMPTS,
-    DEFAULT_WRITER_CONSTRAINTS, _get_genre_instruction,
-    build_skill_prompt, get_template_prompt, build_node_prompt,
+    DEFAULT_WRITER_CONSTRAINTS, build_skill_prompt, build_node_prompt,
     _build_character_prompt, _build_theme_prompt,
 )
 from app.routes.short_story import short_story_bp
@@ -154,6 +153,10 @@ def _parse_expander_output(raw):
             "word_count": int(n.get("word_count", 1000)),
             "status": "pending",
         }
+        # 档1:出场实体名单(生成时按名单筛选注入角色设定,省 token)
+        ents = n.get("entities")
+        if isinstance(ents, list):
+            node["entities"] = [str(x).strip() for x in ents if str(x).strip()][:8]
         if node["id"] > 0 and node["title"]:
             valid_nodes.append(node)
     # id 连续性校验
@@ -645,7 +648,6 @@ def continue_story(story_id):
 
     cfg = get_model_config(agent_type="short_story")
     app = current_app._get_current_object()
-    nodes = load_outline_nodes(story)
     concept = story.concept or story.inspiration or story.theme or ""
 
     system = (
@@ -724,7 +726,7 @@ def expand_selection(story_id):
     user = (
         (f"【前文（供衔接参考）】\n……{before}\n\n" if before else "")
         + f"【待扩写片段】\n{text}\n\n"
-        + f"请输出扩写后的完整段落："
+        + "请输出扩写后的完整段落："
     )
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
