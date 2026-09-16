@@ -87,7 +87,7 @@
                         <input type="checkbox" {% if p.enabled %}checked{% endif %} onchange="toggleProvider({{ p.id }}, this.checked)">
                         启用
                     </label>
-                    <button class="btn btn-sm" onclick="deleteProvider({{ p.id }})" style="color:var(--danger);font-size:0.75rem">删除</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteProvider({{ p.id }})" style="font-size:0.75rem">删除</button>
                 </div>
             </div>
 

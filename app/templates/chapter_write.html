@@ -1137,8 +1137,8 @@
                 html += `<div class="meta-block" style="margin-bottom:0.6rem">` +
                     `<div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:0.3rem">${escapeHtml(cat)}（${items.length}）</div>`;
                 items.forEach(s => {
-                    const authorTag = s.author ? `<span style="color:var(--accent-dim);font-size:0.78rem"> ${escapeHtml(s.author)}</span>` : '';
-                    const protocolTag = s.protocol_pack ? '<span style="font-size:0.68rem;padding:0.05rem 0.35rem;border-radius:6px;background:var(--accent-ghost);color:var(--accent-dim);border:1px solid var(--accent-dim);margin-left:0.3rem">完整协议</span>' : '';
+                    const authorTag = s.author ? `<span style="color:var(--accent-light);font-size:0.78rem"> ${escapeHtml(s.author)}</span>` : '';
+                    const protocolTag = s.protocol_pack ? '<span style="font-size:0.68rem;padding:0.05rem 0.35rem;border-radius:6px;background:var(--accent-ghost);color:var(--accent-light);border:1px solid var(--accent-dim);margin-left:0.3rem">完整协议</span>' : '';
                     html += `<div style="display:flex;align-items:center;gap:0.4rem;padding:0.2rem 0;font-size:0.84rem">` +
                         `<span style="color:var(--success)">●</span>` +
                         `<span style="color:var(--text)">${escapeHtml(s.name)}</span>${authorTag}${protocolTag}</div>`;
