@@ -86,6 +86,7 @@ def assemble_chapter_context(novel_id, chapter_number, db, character_ids=None):
     characters = char_query.all()
     characters_data = [
         {
+            "id": c.id,
             "name": c.name, "personality": c.personality,
             "speaking_style": c.speaking_style, "appearance": c.appearance,
             "background": c.background, "motivation": c.motivation,
@@ -96,7 +97,7 @@ def assemble_chapter_context(novel_id, chapter_number, db, character_ids=None):
 
     world_settings = WorldSetting.query.filter_by(novel_id=novel_id).all()
     world_data = [
-        {"category": ws.category, "title": ws.title, "content": ws.content}
+        {"id": ws.id, "category": ws.category, "title": ws.title, "content": ws.content}
         for ws in world_settings
     ]
 

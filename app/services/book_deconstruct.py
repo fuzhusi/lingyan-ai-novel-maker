@@ -1534,6 +1534,8 @@ def apply_blueprint_long(task_id, title="", genre="", novel_id=None, fallback_ch
     counts["foreshadow"] = fs_count
     from app.services.narrative_plan import resolve_plan_chapters
     resolve_plan_chapters(novel.id, event_map)
+    from app.services.semantic_service import embed_novel_entities
+    embed_novel_entities(novel.id)
 
     # 4.6) 蓝图采纳条目→嵌入资源库(语义检索供后续章节生成引用)
     try:

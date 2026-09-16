@@ -94,7 +94,8 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
 
     # 语义选角色/设定(实体嵌入):用本章大纲+前文尾部检索相关实体,
     # 替代"全量注入→压缩"——只注入语义相关的 top-K 角色/世界观。
-    # 注意：用户显式勾选了出场角色（character_ids 非 None）时跳过角色侧剪枝——
+    # 保底：语义结果为空或过滤后为空时回退全量（不让检索失败变成零上下文）。
+    # 用户显式勾选了出场角色（character_ids 非 None）时跳过角色侧剪枝——
     # 勾选是作者对本章人物的有意安排，不能被语义 top-K 静默裁掉。
     try:
         from app.services.semantic_service import select_relevant_entities
@@ -102,10 +103,14 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
             novel_id, outline or "", (ctx.get("prev_ending") or "")[-500:], top_k=5)
         if selected["character_ids"] and character_ids is None:
             char_ids = set(selected["character_ids"])
-            kw["characters"] = [c for c in kw["characters"] if c.get("id") in char_ids]
+            filtered_chars = [c for c in kw["characters"] if c.get("id") in char_ids]
+            if filtered_chars:
+                kw["characters"] = filtered_chars
         if selected["world_ids"]:
             world_ids = set(selected["world_ids"])
-            kw["world_settings"] = [w for w in kw["world_settings"] if w.get("id") in world_ids]
+            filtered_world = [w for w in kw["world_settings"] if w.get("id") in world_ids]
+            if filtered_world:
+                kw["world_settings"] = filtered_world
     except Exception as exc:
         logger.warning("writer_chain 语义选角色降级(回退全量): %s", exc)
 
