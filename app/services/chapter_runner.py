@@ -9,13 +9,16 @@ auto_save=True 时落 AI 版本，仍不自动审批）。
 import logging
 
 from app import db
-from app.models import Novel, Chapter
+from app.models import Novel, Chapter, OutlineNode
 from app.config_utils import get_effective_config
 from app.services.writer_chain import (
     build_writer_kwargs, collect_full_text, CHAPTER_WORD_TARGET,
 )
 
 logger = logging.getLogger(__name__)
+
+# 细纲硬门禁：低于此长度的大纲视为「没有细纲」，禁止进入正文阶段
+_MIN_OUTLINE_CHARS = 50
 
 
 def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
@@ -45,6 +48,14 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
     novel = Novel.query.get(novel_id)
 
     # ---- Stage 1: outline（已有则跳过）----
+    # 已关联大纲树节点：用节点实时组装的大纲（摘要+分幕指引），
+    # 不再走 AI 现编——大纲树的规划就是本章大纲
+    if chapter.outline_node_id and not (chapter.outline or "").strip():
+        from app.services.outline_sync import compose_node_outline
+        node = OutlineNode.query.get(chapter.outline_node_id)
+        if node:
+            chapter.outline = compose_node_outline(node)
+            db.session.commit()
     if not (chapter.outline or "").strip():
         cfg_o = get_effective_config(novel, agent_type="outline")
         ctx = assemble_chapter_context(novel_id, chapter_number, db,
@@ -57,6 +68,7 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
             foreshadowing_items=ctx["foreshadowing_items"], db=db,
             author_intent=novel.author_intent or "",
             current_focus=novel.current_focus or "",
+            world_settings=ctx["world_settings"],
         )
         outline_text = collect_full_text(messages, cfg_o).strip()
         if not outline_text:
@@ -67,6 +79,28 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
         stages.append({"stage": "outline", "ok": True, "chars": len(outline_text)})
     else:
         stages.append({"stage": "outline", "ok": True, "skipped": "已有大纲"})
+
+    # 细纲硬门禁（oh-story guard-outline-before-prose）：无有效细纲禁止写正文
+    outline_ready = (chapter.outline or "").strip()
+    if len(outline_ready) < _MIN_OUTLINE_CHARS:
+        stages.append({"stage": "outline_gate", "ok": False,
+                       "chars": len(outline_ready),
+                       "min_chars": _MIN_OUTLINE_CHARS})
+        return {
+            "error": f"细纲不足（{len(outline_ready)} 字 < {_MIN_OUTLINE_CHARS} 字下限），"
+                     f"禁止进入正文阶段。请先补全本章大纲。",
+            "stages": stages,
+        }
+
+    # ---- Stage 1b: event plan（StoryWriter planning 层）----
+    # 从大纲提炼 2-4 个必须推进的事件（目标-冲突-微结局），落库供写作包注入
+    try:
+        from app.services.chapter_events import ensure_event_plan
+        events = ensure_event_plan(novel_id, chapter_number, outline=chapter.outline)
+        stages.append({"stage": "event_plan", "ok": True, "count": len(events)})
+    except Exception as e:
+        logger.warning("事件清单提取降级: %s", e)
+        stages.append({"stage": "event_plan", "ok": True, "skipped": str(e)[:120]})
 
     # ---- Stage 2: body ----
     kw, novel = build_writer_kwargs(novel_id, chapter_number, chapter.outline,
@@ -119,6 +153,12 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
                        "converged": conv["converged"],
                        "score": final_score,
                        "gate_passed": gate_passed})
+        # 跨章 Reflexion：收敛失败时把原因写入章节笔记，下一章注入
+        try:
+            from app.services.reflexion import note_from_convergence
+            note_from_convergence(conv, novel_id, chapter_number)
+        except Exception as e:
+            logger.warning("Reflexion 笔记写入降级: %s", e)
     else:
         stages.append({"stage": "converge", "ok": True,
                        "skipped": "人味分达标/未开启"})

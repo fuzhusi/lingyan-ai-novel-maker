@@ -71,3 +71,7 @@ tests/.tmp*/
 # SQLite WAL 边车文件（真实数据，绝不提交）
 data.db-shm
 data.db-wal
+
+# 书稿与创作内容不上传（lingyi_setup 的脚本工具保留）
+lingyi_setup/content/
+lingyi_setup/review/

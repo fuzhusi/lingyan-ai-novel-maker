@@ -79,6 +79,39 @@ _PERSONA_TENOR_RE = re.compile(
 # 8. 相邻句结构同款：相邻两句逗号数相同且长度接近（连续 ≥2 组判定）
 _SAME_STRUCT_LEN_TOL = 0.25
 
+# 12. 情绪空转（oh-story Gate C）：堆叠抽象情绪词却无具体动作/物件承载
+_EMOTION_SPIN_RE = re.compile(
+    r"(?:心中|心里|内心(?:深处)?)(?:充满|涌起|泛起|升起|萦绕)(?:了?一种|着|了)?"
+    r"(?:难以言喻|无法言喻|说不清|莫名|莫名奇妙|复杂|异样|奇怪)?"
+    r"的?(?:感觉|情感|情绪|滋味|味道|波澜)"
+    r"|(?:说不出的|难以言喻的|无法形容的|莫可名状的)"
+    r"(?:悲伤|喜悦|愤怒|失落|惆怅|感动|心痛|温暖)"
+    r"|(?:一种|一股)(?:难以|无法|说不清)(?:言喻|形容|名状)"
+)
+
+# 13. 结尾升华（oh-story Gate F）：段落/章节收束处的顿悟哲理壳
+#     skill_gate 已有 imperfection 技能门禁；这里做成计分检测，覆盖全文段末
+_ENDING_UPLIFT_AI_RE = re.compile(
+    r"(?:这|那)(?:或许|也许|大概)?(?:就)?是(?:所谓)?(?:成长|人生|生活|命运|代价)"
+    r"|命运的齿轮(?:开始)?(?:转动|悄然)"
+    r"|他(?:们)?终于(?:明白|读懂|领悟|懂得)"
+    r"|也许，?这就是"
+    r"|(?:人生|生活|命运)(?:不|并)?(?:就|本|原)(?:该|来)?如此"
+)
+
+# 14. 解释腔（oh-story Gate G）：用因果解释代替推进，向读者说教
+_EXPLAIN_TONE_RE = re.compile(
+    r"(?:之所以|之所以会|之所以这样)[^。！？\n]{2,30}(?:是)?因为"
+    r"|这一切(?:都)?是因为"
+    r"|(?:这|那)(?:其实)?说明(?:了)?[^。！？\n]{2,20}的道理"
+    r"|(?:它|这)告诉我们"
+)
+
+# 15. Burstiness 塌平（harshaneel/humanize）：连续 ≥3 句长度几乎等长
+#     与「相邻句结构同款」互补：那项盯逗号数+成分序，这项只盯句长波动
+_BURST_LEN_TOL = 0.18   # 相邻句长度相对差 ≤18% 视为等长
+_BURST_RUN = 3
+
 # 门禁扫描上限
 _MAX_SCAN_CHARS = 300_000
 
@@ -315,6 +348,80 @@ def _check_cross_para_repetition(text):
     }
 
 
+def _check_emotion_spin(text):
+    """情绪空转：抽象情绪名词堆叠，无动作/物件承载（oh-story Gate C）。
+
+    小说允许内心戏，但「充满了难以言喻的感觉」这类壳句是 AI 病灶；
+    真实活动（纠结/盘算）应写成可见行为，见 L0 底线条款。
+    """
+    ms = list(_EMOTION_SPIN_RE.finditer(text))
+    return {
+        "name": "情绪空转（抽象情绪壳句）",
+        "risk": "high" if len(ms) >= 4 else ("mid" if ms else "low"),
+        "count": len(ms),
+        "detail": f"命中 {len(ms)} 处（改法：用动作/物件/身体反应承载情绪）",
+        "excerpts": _excerpts(text, ms),
+    }
+
+
+def _check_ending_uplift(text):
+    """结尾升华：顿悟/哲理壳（oh-story Gate F）。对齐 skill_gate 检测但全文计分。"""
+    ms = list(_ENDING_UPLIFT_AI_RE.finditer(text))
+    return {
+        "name": "结尾升华（顿悟哲理壳）",
+        "risk": "high" if len(ms) >= 3 else ("mid" if ms else "low"),
+        "count": len(ms),
+        "detail": f"命中 {len(ms)} 处（改法：停在动作或物件上，不向上拔）",
+        "excerpts": _excerpts(text, ms),
+    }
+
+
+def _check_explain_tone(text):
+    """解释腔：用「之所以…因为」「这告诉我们」向读者说教（oh-story Gate G）。"""
+    ms = list(_EXPLAIN_TONE_RE.finditer(text))
+    return {
+        "name": "解释腔（说教式因果）",
+        "risk": "high" if len(ms) >= 3 else ("mid" if ms else "low"),
+        "count": len(ms),
+        "detail": f"命中 {len(ms)} 处（改法：删解释，让因果自己站住）",
+        "excerpts": _excerpts(text, ms),
+    }
+
+
+def _check_burstiness_flat(text):
+    """Burstiness 塌平：连续 ≥3 句长度几乎等长（人类句长波动大）。
+
+    harshaneel/humanize：禁止连续 3 句长度差过小。与 same_structure 互补。
+    """
+    sentences = _split_sentences(text)
+    lens = []
+    for s in sentences:
+        cleaned = re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9]", "", s)
+        lens.append((len(cleaned), s))
+    runs = []
+    i = 0
+    while i < len(lens) - 1:
+        j = i
+        while (j + 1 < len(lens)
+               and lens[j][0] >= 8 and lens[j + 1][0] >= 8
+               and abs(lens[j][0] - lens[j + 1][0]) / max(lens[j][0], lens[j + 1][0])
+               <= _BURST_LEN_TOL):
+            j += 1
+        if j - i + 1 >= _BURST_RUN:
+            frag = " ▸ ".join(s[:10] for _, s in lens[i:i + 3])
+            runs.append(frag)
+            i = j + 1
+        else:
+            i += 1
+    return {
+        "name": "Burstiness 塌平（连续等长句）",
+        "risk": "high" if len(runs) >= 3 else ("mid" if runs else "low"),
+        "count": len(runs),
+        "detail": f"{len(runs)} 处连续 ≥3 句等长（相对差≤{_BURST_LEN_TOL:.0%}）",
+        "excerpts": runs[:4],
+    }
+
+
 # ---------------------------------------------------------------------------
 # 统计指标（信息性展示，暂不计分——待朱雀标注校准）
 # ---------------------------------------------------------------------------
@@ -392,23 +499,48 @@ _WEIGHTS = {
     "same_structure": 12,
     "cross_para_repetition": 18,
     "dunhao": 5,
+    "emotion_spin": 12,
+    "ending_uplift": 10,
+    "explain_tone": 8,
+    "burstiness_flat": 10,
+}
+
+# 润色模式权重（ARB 2026：人稿+LLM 润色会使 FastDetectGPT/Binoculars 检出率
+# 从 91% 崩到 15-31%——构式层信号在 H2L 路径上区分力下降，阈值应放宽）。
+# 生成模式保持原权重；润色模式对「已接近人类」的结构类特征降权。
+_WEIGHTS_POLISH = {
+    **_WEIGHTS,
+    "para_open_comment": 12,
+    "same_structure": 6,
+    "cross_para_repetition": 10,
+    "burstiness_flat": 4,
+    "translationese": 10,
 }
 
 
-def analyze_ai_tone(text):
+def analyze_ai_tone(text, mode="generate"):
     """对文本执行篇章层 AI 痕迹检测。
+
+    Args:
+        text: 待检测正文。
+        mode: "generate"（直接生成，默认）或 "polish"（人稿+AI润色/H2L）。
+              润色模式对结构类特征降权（ARB 基准结论）。
 
     Returns:
         {
           "passed": bool,          # 是否无 mid/high 风险项
           "human_score": int,      # 0-100，越高越像人写的
+          "mode": str,
           "checks": [...],
           "stats": {...},          # 信息性统计指标
         }
     """
     text = (text or "")[:_MAX_SCAN_CHARS]
+    mode = "polish" if mode == "polish" else "generate"
+    weights = _WEIGHTS_POLISH if mode == "polish" else _WEIGHTS
     if len(text.strip()) < 200:
-        return {"passed": True, "human_score": None, "checks": [], "stats": {},
+        return {"passed": True, "human_score": None, "mode": mode,
+                "checks": [], "stats": {},
                 "skipped": "文本过短（<200 字），跳过检测"}
 
     checks = {
@@ -422,6 +554,10 @@ def analyze_ai_tone(text):
         "persona_tenor": _check_persona_tenor(text),
         "same_structure": _check_same_structure(text),
         "cross_para_repetition": _check_cross_para_repetition(text),
+        "emotion_spin": _check_emotion_spin(text),
+        "ending_uplift": _check_ending_uplift(text),
+        "explain_tone": _check_explain_tone(text),
+        "burstiness_flat": _check_burstiness_flat(text),
     }
 
     deduction = 0
@@ -429,14 +565,15 @@ def analyze_ai_tone(text):
     # 输出顺序：按风险区分力排序（段首回指最强）
     for key in ("para_open_comment", "persona_tenor", "prompt_colon", "dash",
                 "translationese", "reversal", "same_structure",
-                "cross_para_repetition", "dunhao", "openers"):
+                "cross_para_repetition", "emotion_spin", "ending_uplift",
+                "explain_tone", "burstiness_flat", "dunhao", "openers"):
         item = checks[key]
         item["passed"] = item["risk"] == "low"
         ordered.append(item)
         if item["risk"] == "high":
-            deduction += _WEIGHTS[key]
+            deduction += weights[key]
         elif item["risk"] == "mid":
-            deduction += max(_WEIGHTS[key] // 2, 1)
+            deduction += max(weights[key] // 2, 1)
 
     human_score = max(0, min(100, 100 - deduction))
 
@@ -444,6 +581,7 @@ def analyze_ai_tone(text):
         # passed = 无高风险项（mid 为改进建议，不判失败）
         "passed": all(c["risk"] != "high" for c in ordered),
         "human_score": human_score,
+        "mode": mode,
         "checks": ordered,
         "stats": _statistical_features(text),
     }
@@ -475,6 +613,10 @@ _CHECK_KEY_MAP = [
     ("翻案腔", "翻案腔"),
     ("译文腔", "译文腔"),
     ("段首零回指", "段首零回指评论"),
+    ("情绪空转", "情绪空转"),
+    ("结尾升华", "结尾升华"),
+    ("解释腔", "解释腔"),
+    ("Burstiness", "Burstiness塌平"),
 ]
 
 

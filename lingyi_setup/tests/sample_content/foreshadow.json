@@ -1,0 +1,16 @@
+[
+  {
+    "title": "样本伏笔·没说完的那句话",
+    "description": "样本：第1章灵堂里亡者未说完的话，中段引爆。",
+    "importance": 8,
+    "planted_chapter": 1,
+    "target_status": "planned",
+    "notes": "样本排期备注：预期第 60 章回收（expected_resolve_chapter 字段 CLI 写不进去）。"
+  },
+  {
+    "title": "样本伏笔·旧外套",
+    "description": "样本：他常年穿的那件洗旧外套，卷一埋、卷五收。",
+    "importance": 5,
+    "planted_chapter": 2
+  }
+]

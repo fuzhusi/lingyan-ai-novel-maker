@@ -141,3 +141,23 @@ class CharacterRelation(db.Model):
         if self.trust < 30 and self.affection < 30:
             return "敌对"
         return "普通"
+
+
+class ReaderKnowledge(db.Model):
+    """读者已知时间线（oh-story 双真相：作者真相 vs 读者已知）。
+
+    与 info_boundary（角色视角「谁知道什么」）互补：
+    本表追踪「已经向读者揭示」的设定/反转，供双盲审检查
+    视角正确性（角色是否说出读者还不该知道的话；悬念是否被过早戳破）。
+    """
+    __tablename__ = "reader_knowledge"
+    id = db.Column(db.Integer, primary_key=True)
+    novel_id = db.Column(db.Integer, db.ForeignKey("novels.id"), nullable=False)
+    chapter_number = db.Column(db.Integer, nullable=False)  # 揭示章节
+    kind = db.Column(db.String(20), default="reveal")  # setting / reveal / secret / character
+    content = db.Column(db.Text, nullable=False)
+    # public=读者已明确知道；foreshadowed=已暗示未明说；planted=作者埋了读者还不知道
+    reader_state = db.Column(db.String(20), default="public")
+    created_at = db.Column(db.String(20), default=now)
+
+    novel = db.relationship("Novel", backref=db.backref("reader_knowledge", cascade="all, delete-orphan"))

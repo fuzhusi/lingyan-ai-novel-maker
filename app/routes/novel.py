@@ -1,9 +1,5 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify
-from app.models import (
-    db, Novel, Chapter, ChapterVersion, CriticReview, Character, WorldSetting,
-    OutlineNode, Foreshadowing, ChapterSummary,
-    ChapterMemory, CharacterRelation, StoryState, StoryStateSnapshot,
-)
+from app.models import db, Novel, Chapter, Character, WorldSetting
 
 novel_bp = Blueprint("novel", __name__)
 
@@ -96,10 +92,11 @@ def save_compass(novel_id):
 
 @novel_bp.route("/novel/<int:novel_id>/delete", methods=["POST"])
 def delete_novel(novel_id):
-    # 删除单一真源:外围引用清理 + ORM 级联(app/services/delete_service.py)
+    # 删除单一真源:外围引用清理 + bulk 级联(app/services/delete_service.py)
     from app.services.delete_service import delete_novel_full
     ok, _ = delete_novel_full(novel_id)
-    return redirect(url_for("novel.index"))
+    # 删完回长篇列表（用户从这里点的删除），不跳网关页
+    return redirect(url_for("novel.novel_list"))
 
 
 @novel_bp.route("/novel/delete-all", methods=["POST"])
@@ -107,25 +104,10 @@ def delete_all_novels():
     # 破坏性操作：要求显式确认参数，防止误触/纯 CSRF 型请求
     if request.form.get("confirm", "").strip().upper() != "YES":
         return jsonify({"error": "缺少 confirm=YES 确认参数，已拒绝删除全部小说"}), 400
-    novels = Novel.query.all()
-    for novel in novels:
-        for ch in novel.chapters:
-            for v in ChapterVersion.query.filter_by(chapter_id=ch.id).all():
-                CriticReview.query.filter_by(version_id=v.id).delete()
-            ChapterVersion.query.filter_by(chapter_id=ch.id).delete()
-            ChapterSummary.query.filter_by(chapter_id=ch.id).delete()
-            ChapterMemory.query.filter_by(chapter_id=ch.id).delete()
-            db.session.delete(ch)
-        Character.query.filter_by(novel_id=novel.id).delete()
-        CharacterRelation.query.filter_by(novel_id=novel.id).delete()
-        WorldSetting.query.filter_by(novel_id=novel.id).delete()
-        OutlineNode.query.filter_by(novel_id=novel.id).delete()
-        Foreshadowing.query.filter_by(novel_id=novel.id).delete()
-        StoryStateSnapshot.query.filter_by(novel_id=novel.id).delete()
-        StoryState.query.filter_by(novel_id=novel.id).delete()
-        db.session.delete(novel)
-        # 同步清理该小说的 FTS 记忆索引
-        from app.services.vector_memory import delete_novel_memory
-        delete_novel_memory(novel.id)
-    db.session.commit()
+    # 删除单一真源级联：与单本删除同源（外围引用→FTS→本体），FK ON 下安全。
+    # 此前这里是手写的第二套级联，盲审/关系顺序错误在 FK ON 后必炸，
+    # 且 FTS 先行物理删除后随整体回滚造成"数据在、索引没了"的不一致。
+    from app.services.delete_service import delete_novel_full
+    for n in Novel.query.all():
+        delete_novel_full(n.id)
     return redirect(url_for("novel.index"))

@@ -49,6 +49,23 @@ _ABSTRACT_SENSORY_RE = re.compile(
     r"|(?:周围|屋里|房间里)(?:十分|非常|格外|很|异常|出奇)?安静"
 )
 
+# 标点硬限（harshaneel/humanize：em-dash 每 300 字 ≤1、分号近零、冒号须跟完整句）
+# 门禁级：不挂在技能上，始终检查——确定性、零成本
+_MAX_DASH_PER_300 = 1.2
+_SEMICOLON_HARD = 8          # 全文分号绝对上限
+# 空转冒号：后接不足 8 字即收束。排除：
+#   1) 数字:数字（8:30 / 3:1）
+#   2) 对白提示语后的短句（他说：好。）——由对话技能管
+#   3) 引号内的冒号
+_COLON_NO_SENTENCE_RE = re.compile(
+    r"(?<!\d)[：:](?!\d)(?![^。！？\n」”\"]{8,})"
+)
+# 对白提示语：动词紧贴冒号（他说：/ 她问： / 老头道：）
+# 不用宽匹配——「答案」「知道」里的 答/道 会误伤总结腔冒号
+_DIALOGUE_COLON_RE = re.compile(
+    r"(?:说|问道|喊道|叫道|答道|吼道|叹道|骂道|笑道|哼道|回道|应道|问|喊|叫|吼|叹|骂|笑|哼)[：:]"
+)
+
 # 门禁扫描的最大文本长度（防御性上限，超长截断后仍可检查）
 _MAX_SCAN_CHARS = 300_000
 
@@ -85,6 +102,36 @@ def _consecutive_same_opening(text, need=3):
             frag = "".join(sentences[i:i + need])[:60]
             return [("…" if i > 0 else "") + frag + "…"]
     return []
+
+
+def _punctuation_hard_limits(text):
+    """标点硬限：破折号密度 / 分号绝对数 / 空转冒号。始终检查。"""
+    viol = []
+    n_chars = max(len(re.sub(r"\s", "", text)), 1)
+    dash_density = text.count("——") / n_chars * 1000
+    if dash_density > _MAX_DASH_PER_300:
+        viol.append(f"破折号密度 {dash_density:.2f}/千字（硬限 {_MAX_DASH_PER_300}）")
+    semis = text.count("；") + text.count(";")
+    if semis > _SEMICOLON_HARD:
+        viol.append(f"分号 {semis} 处（硬限 {_SEMICOLON_HARD}）")
+    empty_colons = []
+    for m in _COLON_NO_SENTENCE_RE.finditer(text):
+        # 对白提示语冒号不算空转
+        start = max(0, m.start() - 12)
+        window = text[start:m.end()]
+        if _DIALOGUE_COLON_RE.search(window):
+            continue
+        s = max(0, m.start() - 10)
+        e = min(len(text), m.end() + 16)
+        frag = text[s:e].replace("\n", " ")
+        if "「" in frag or "“" in frag or "』" in frag:
+            continue
+        empty_colons.append(("…" if s > 0 else "") + frag + ("…" if e < len(text) else ""))
+        if len(empty_colons) >= 6:
+            break
+    if len(empty_colons) >= 3:
+        viol.append(f"空转冒号 {len(empty_colons)} 处（冒号后须跟完整句）")
+    return viol
 
 
 def run_checks(text, active_skills=None):
@@ -147,6 +194,10 @@ def run_checks(text, active_skills=None):
     if "sensory_concrete" in active or "sensory_detail" in active:
         add("sensory_concrete", "抽象感官词",
             _excerpts(text, _ABSTRACT_SENSORY_RE, limit=4))
+
+    # 标点硬限（始终检查，不依赖技能激活）
+    punct_viol = _punctuation_hard_limits(text)
+    add("punctuation_limits", "标点硬限", punct_viol)
 
     return {
         "passed": all(c["passed"] for c in checks),

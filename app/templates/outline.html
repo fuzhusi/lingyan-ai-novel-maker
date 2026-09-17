@@ -47,8 +47,9 @@
                 <input type="text" name="title" required placeholder="如：第1章 灵气初现">
             </div>
             <div class="form-row">
-                <label>摘要（用于生成时注入 prompt）</label>
-                <textarea name="summary" rows="4" placeholder="这一章/卷/场景要发生什么...&#10;&#10;提示：chapter/scene 节点的摘要会在生成章节正文时自动作为【大纲树规划】注入 prompt。"></textarea>
+                <label>摘要（用于生成时注入 prompt）<span class="hint">（章/场景节点建议用固定格式，正文按节拍铺场景）</span></label>
+                <textarea name="summary" rows="10" id="create-node-summary" placeholder="这一章/卷/场景要发生什么...&#10;&#10;提示：chapter/scene 节点的摘要会在生成章节正文时自动作为【大纲树规划】注入 prompt；可点「插入大纲模板」套用 7 字段固定格式。"></textarea>
+                <button type="button" class="btn-sm" style="margin-top:0.3rem" onclick="insertOutlineTemplate('create-node-summary')">&#x1F4CB; 插入大纲模板</button>
             </div>
             <button type="submit">添加节点</button>
         </form>
@@ -57,7 +58,7 @@
     <h3>大纲树 <span class="count-badge">{{ nodes|length }}</span></h3>
     <div class="outline-legend">
         <span class="legend-item"><span class="outline-type type-volume">卷</span> 分组</span>
-        <span class="legend-item"><span class="outline-type type-chapter">章</span> 可创建章节</span>
+        <span class="legend-item"><span class="outline-type type-chapter">章</span> 自动创建章节</span>
         <span class="legend-item"><span class="outline-type type-scene">场景</span> 分幕指引</span>
         <span class="legend-item"><span class="status-tag linked">已有章节</span></span>
         <span class="legend-item"><span class="status-tag unlinked">未关联</span></span>
@@ -73,7 +74,7 @@
     </div>
     {% else %}
     <div class="empty-state">
-        <p class="empty-desc">还没有大纲节点。建议先创建「卷」&rarr;「章」&rarr;「场景」三层结构，然后从章节点一键创建写作章节。</p>
+        <p class="empty-desc">还没有大纲节点。建议先创建「卷」&rarr;「章」&rarr;「场景」三层结构：添加「章」节点时会自动创建对应写作章节，无需手动再去章节列表新建。</p>
     </div>
     {% endif %}
 </div>
@@ -97,6 +98,9 @@
             {% endif %}
         {% endif %}
         <div class="outline-actions">
+            {% if node.node_type in ('chapter', 'scene') %}
+            <button class="btn-sm" onclick="aiFillSummary({{ node.id }})" title="按 7 字段固定格式生成摘要，填入下方编辑框">&#x2728; AI 摘要</button>
+            {% endif %}
             <button class="btn-sm" onclick="document.getElementById('edit-on-{{ node.id }}').style.display='block'">编辑</button>
             <form method="POST" action="/novel/{{ novel.id }}/outline/{{ node.id }}/delete"
                   onsubmit='return confirm("确定删除节点 " + {{ node.title|tojson }} + " 及其所有子节点？")' style="display:inline">
@@ -127,8 +131,11 @@
                 </select>
                 <input type="text" name="title" value="{{ node.title }}" style="flex:2" required>
             </div>
-            <textarea name="summary" rows="3">{{ node.summary }}</textarea>
-            <button type="submit" class="btn-sm">保存</button>
+            <textarea name="summary" rows="10" id="edit-summary-{{ node.id }}">{{ node.summary }}</textarea>
+            <div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.3rem">
+                <button type="button" class="btn-sm" onclick="insertOutlineTemplate('edit-summary-{{ node.id }}')">&#x1F4CB; 插入大纲模板</button>
+                <button type="submit" class="btn-sm">保存</button>
+            </div>
         </form>
     </div>
 
@@ -143,9 +150,51 @@
 {% block scripts %}
 <!-- 大纲树/类型徽章/状态标签样式统一由 main.css「流光」主题提供 -->
 <script>
+const NOVEL_ID = {{ novel.id }};
+
+// AI 生成固定格式摘要 → 填入节点编辑框（人工确认后点保存落库）
+async function aiFillSummary(nodeId) {
+    const ta = document.getElementById('edit-summary-' + nodeId);
+    const area = document.getElementById('edit-on-' + nodeId);
+    if (!ta || !area) return;
+    area.style.display = 'block';
+    ta.value = '✨ AI 正在按固定格式生成摘要…';
+    ta.disabled = true;
+    try {
+        const resp = await fetch(`/novel/${NOVEL_ID}/outline/${nodeId}/ai-summary`, { method: 'POST' });
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) throw new Error(data.error || 'HTTP ' + resp.status);
+        ta.value = data.summary;
+        ta.focus();
+    } catch(e) {
+        ta.value = '';
+        alert('AI 生成摘要失败: ' + e.message);
+    } finally {
+        ta.disabled = false;
+    }
+}
+
 document.getElementById('create-toggle').addEventListener('click', function() {
     const form = document.getElementById('create-form');
     form.style.display = form.style.display === 'none' ? 'block' : 'none';
+});
+
+// 固定格式契约（硬限制）：章/场景节点的摘要缺 7 字段直接拒绝保存；
+// 卷节点免检。摘要展示区把字段名渲染为高亮
+window.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('form').forEach(function(f) {
+        const ta = f.querySelector('textarea[name="summary"]');
+        if (!ta) return;
+        const typeSel = f.querySelector('select[name="node_type"]');
+        f.addEventListener('submit', function(e) {
+            const isVolume = typeSel ? typeSel.value === 'volume' : false;
+            const err = isVolume ? null : outlineFormatError(ta.value);
+            if (err && ta.value.trim()) { alert(err); e.preventDefault(); }
+        });
+    });
+    document.querySelectorAll('.outline-summary').forEach(function(el) {
+        if (el.textContent.trim()) el.innerHTML = formatOutlineDisplay(el.textContent);
+    });
 });
 </script>
 {% endblock %}

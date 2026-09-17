@@ -85,8 +85,9 @@
                 </div>
             </div>
             <div class="form-row">
-                <label>本章大纲</label>
-                <textarea name="outline" rows="3" placeholder="这一章要发生什么..."></textarea>
+                <label>本章大纲 <span class="hint">（建议用固定格式，写正文时按节拍铺场景）</span></label>
+                <textarea name="outline" rows="8" id="new-ch-outline" placeholder="这一章要发生什么...可点「插入大纲模板」套用固定格式"></textarea>
+                <button type="button" class="btn-sm" style="margin-top:0.3rem" onclick="insertOutlineTemplate('new-ch-outline')">&#x1F4CB; 插入大纲模板</button>
             </div>
             <div class="form-row">
                 <label>特别指示 <span class="hint">（最高优先级，覆盖预设设定）</span></label>
@@ -119,14 +120,28 @@
         {% endfor %}
     </div>
     {% else %}
-    <p class="empty">还没有章节 &mdash; 可以从 <a href="/novel/{{ novel.id }}/outline">大纲树</a> 一键创建</p>
+    <p class="empty">还没有章节 &mdash; 到 <a href="/novel/{{ novel.id }}/outline">大纲树</a> 添加「章」节点即会自动出现在这里</p>
     {% endif %}
     <div style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-faint);letter-spacing:0.05em">
-        提示：先到 <a href="/novel/{{ novel.id }}/outline">大纲树</a> 规划结构，再创建章节并关联大纲节点，生成时会自动注入分幕指引。
+        提示：在大纲树添加「章」节点会自动创建对应章节，且节点摘要与大纲实时同步（章节创作页也可直接编辑大纲）；下方表单可创建不挂大纲树的自由章节。
     </div>
 </div>
 
 <script>
+// 固定格式大纲模板见共享的 /static/js/outline-template.js
+
+// 固定格式硬限制：新建章节的手写大纲缺 7 字段直接拒绝提交
+window.addEventListener('DOMContentLoaded', function() {
+    const f = document.querySelector('form');
+    const ta = document.getElementById('new-ch-outline');
+    if (f && ta) {
+        f.addEventListener('submit', function(e) {
+            const err = outlineFormatError(ta.value);
+            if (err) { alert(err); e.preventDefault(); }
+        });
+    }
+});
+
 function exportNovel(format) {
     const chapters = document.getElementById('export-chapters').value.trim();
     let url = `/novel/{{ novel.id }}/export/${format}`;

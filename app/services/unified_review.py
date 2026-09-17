@@ -13,12 +13,42 @@
 """
 
 import json
-from app.services.llm import call_llm_sync, LLMError
+import logging
+import threading
+
+from flask import current_app
+
+from app.services.llm import call_llm_sync, stream_llm_tokens, LLMError
 from app.models import (db, ChapterVersion, CriticReview, Chapter, Novel)
 from app.services.blind_review import run_dual_review
 from app.services.prompt_builder import (build_critic_prompt, build_rewrite_prompt,
                                           assemble_chapter_context)
 from app.config_utils import get_effective_config
+
+logger = logging.getLogger(__name__)
+
+
+def _resolve_chapter_version(novel_id, chapter_number, version_id=None):
+    """解析章节与版本，做归属校验。返回 (chapter, version, novel, error_dict)。"""
+    chapter = Chapter.query.filter_by(novel_id=novel_id, chapter_number=chapter_number).first()
+    if not chapter:
+        return None, None, None, {"error": f"第{chapter_number}章不存在"}
+
+    if version_id:
+        version = ChapterVersion.query.get(version_id)
+        # 归属校验：版本必须属于该章节，防止 A 章上下文 + B 章正文混合审计
+        if version and version.chapter_id != chapter.id:
+            return None, None, None, {"error": "version_id 与指定章节不匹配"}
+    else:
+        version = (ChapterVersion.query
+                   .filter_by(chapter_id=chapter.id)
+                   .order_by(ChapterVersion.version_number.desc()).first())
+
+    if not version:
+        return None, None, None, {"error": f"第{chapter_number}章暂无内容"}
+
+    novel = Novel.query.get(novel_id)
+    return chapter, version, novel, None
 
 
 def unified_review(novel_id, chapter_number, version_id=None, include_rewrite=False):
@@ -54,24 +84,9 @@ def unified_review(novel_id, chapter_number, version_id=None, include_rewrite=Fa
         }
     """
     # 1. 获取章节内容
-    chapter = Chapter.query.filter_by(novel_id=novel_id, chapter_number=chapter_number).first()
-    if not chapter:
-        return {"error": f"第{chapter_number}章不存在"}
-
-    if version_id:
-        version = ChapterVersion.query.get(version_id)
-        # 归属校验：版本必须属于该章节，防止 A 章上下文 + B 章正文混合审计
-        if version and version.chapter_id != chapter.id:
-            return {"error": "version_id 与指定章节不匹配"}
-    else:
-        version = (ChapterVersion.query
-                   .filter_by(chapter_id=chapter.id)
-                   .order_by(ChapterVersion.version_number.desc()).first())
-
-    if not version:
-        return {"error": f"第{chapter_number}章暂无内容"}
-
-    novel = Novel.query.get(novel_id)
+    chapter, version, novel, err = _resolve_chapter_version(novel_id, chapter_number, version_id)
+    if err:
+        return err
 
     # 2. 准备上下文
     ctx = assemble_chapter_context(novel_id, chapter_number, db)
@@ -91,11 +106,12 @@ def unified_review(novel_id, chapter_number, version_id=None, include_rewrite=Fa
         cfg=cfg,
     )
 
-    # 4. Step 2: 双盲审（两位编辑并行，零上下文只看正文）
+    # 4. Step 2: 双盲审（两位编辑并行，零上下文只看正文；与 critic 同源配置）
     try:
-        blind_result = run_dual_review(version.content)
+        blind_result = run_dual_review(version.content, novel=novel)
     except Exception:
-        # 盲审失败不阻断评审：critic 结果照常返回
+        # 盲审失败不阻断评审：critic 结果照常返回，但必须留痕便于排查
+        logger.exception("unified_review: 双盲审失败 (chapter=%s)", chapter_number)
         blind_result = {"editors": [], "elapsed": 0.0}
 
     # 5. Step 3: 合并报告（critic 结构化评分 + 双盲审文本报告）
@@ -242,16 +258,23 @@ def _merge_report(critic_result, blind_result):
 
     blind_editors = blind_result.get("editors", []) if blind_result else []
 
-    # issues 全部来自 critic annotations（结构化、可定位、可喂改写）
+    # issues 全部来自 critic annotations（结构化、可定位、可喂改写）。
+    # 注意 critic schema：annotation = {paragraph_index, quote, issue, suggestion}
+    # （无 name/severity 字段，severity 仅在模型自愿多给时才存在）
     all_issues = []
     for ann in critic_annotations:
         all_issues.append({
-            "dimension": ann.get("name", "综合评论"),
-            "dimension_name": ann.get("name", "综合评论"),
+            "dimension": "原文批注",
+            "dimension_name": "原文批注",
             "severity": ann.get("severity", "medium"),
-            "issue": ann.get("quote", ann.get("issue", "")),
+            # 问题描述优先，quote 只做兜底——此前把 quote 塞进 issue，
+            # 真正的问题描述被丢弃，改写链拿到的全是引文
+            "issue": (ann.get("issue") or ann.get("quote", "")).strip(),
+            "quote": ann.get("quote", ""),
             "suggestion": ann.get("suggestion", ""),
-            "location": f"第{ann.get('paragraph_index') + 1}段" if ann.get("paragraph_index") is not None else "",
+            "paragraph_index": ann.get("paragraph_index"),
+            "location": f"第{ann.get('paragraph_index') + 1}段"
+                        if ann.get("paragraph_index") is not None else "",
         })
     severity_order = {"high": 0, "medium": 1, "low": 2}
     all_issues.sort(key=lambda x: severity_order.get(x.get("severity", "medium"), 1))
@@ -305,19 +328,23 @@ def _generate_summary(score, high_count, total_count):
     return " | ".join(parts)
 
 
+def _issue_feedback(issues):
+    """问题清单 → 改写链反馈文本（同步/流式改写共用）。"""
+    descriptions = []
+    for issue in issues[:10]:  # 最多取 10 个问题
+        descriptions.append(
+            f"- [{issue.get('severity', 'medium')}] {issue.get('dimension_name', '')}: {issue.get('issue', '')}"
+            + (f" → 建议: {issue['suggestion']}" if issue.get("suggestion") else "")
+        )
+    return "\n".join(descriptions) if descriptions else "无"
+
+
 def _auto_rewrite(content, issues, novel_title, chapter_title, outline, user_directive, cfg,
                   author_intent="", current_focus=""):
     """基于问题清单自动改写。"""
-    issue_descriptions = []
-    for issue in issues[:10]:  # 最多取 10 个问题
-        issue_descriptions.append(
-            f"- [{issue.get('severity', 'medium')}] {issue.get('dimension_name', '')}: {issue.get('issue', '')}"
-            + (f" → 建议: {issue['suggestion']}" if issue.get('suggestion') else "")
-        )
-
     messages = build_rewrite_prompt(
         original_content=content,
-        critic_feedback="\n".join(issue_descriptions) if issue_descriptions else "无",
+        critic_feedback=_issue_feedback(issues),
         novel_title=novel_title,
         chapter_title=chapter_title,
         outline=outline,
@@ -365,13 +392,14 @@ def _save_review(version_id, report, critic_result):
                     "score": dim.get("score", 0),
                 })
 
-        # 提取注释
+        # 提取注释：字段一一对应回写，段落号保留真实值
+        # （此前 paragraph_index 硬编码 0，历史评审的段落标注全部错位到第 1 段）
         annotations = []
         for issue in report.get("issues", []):
             annotations.append({
-                "paragraph_index": 0,
-                "quote": issue.get("issue", "")[:100],
-                "issue": issue.get("dimension_name", ""),
+                "paragraph_index": issue.get("paragraph_index") or 0,
+                "quote": (issue.get("quote") or "")[:100],
+                "issue": issue.get("issue", ""),
                 "suggestion": issue.get("suggestion", ""),
             })
 
@@ -393,31 +421,143 @@ def _save_review(version_id, report, critic_result):
         db.session.rollback()
 
 
+def _sse(obj) -> str:
+    return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+
+
 def unified_review_stream(novel_id, chapter_number, version_id=None, include_rewrite=False):
-    """统一评审流程（流式版本）。
+    """统一评审流程（真流式）。
 
-    用于前端 SSE 流式输出。
+    critic 意见 token 级流出；双盲审与 critic 并行执行（盲审是纯 LLM 调用，
+    自建 app context，与主链路零共享状态）；结束后推结构化报告；
+    可选自动改写同样 token 级流出。
 
-    Yields:
-        SSE 事件:
-        {"type": "start", "chapter": 1}
-        {"type": "review_token", "token": "..."}
-        {"type": "review_done", "comment": "..."}
-        {"type": "blind_done", "editors": [...], "elapsed": 12.3}
-        {"type": "report", "report": {...}}
-        {"type": "rewrite_token", "token": "..."}
-        {"type": "rewrite_done", "rewritten": "..."}
-        {"type": "done"}
+    事件契约（与 /static/js/lingyan-stream.js 的 sse() 对齐）:
+        {"token": "...", "phase": "critic"|"rewrite"}
+        {"status": {"stage": "review_start"|"critic_done"|"blind_done"
+                    |"rewrite_start"|"rewrite_done"|"rewrite_error", ...}}
+        {"report": {...}}          —— 合并报告（含 merged_opinions）
+        {"error": "..."}           —— 致命错误（评审链失败）
+        {"done": true}
     """
-    # 简化版：先同步完成，再分阶段推送
-    yield f"data: {json.dumps({'type': 'start', 'chapter': chapter_number}, ensure_ascii=False)}\n\n"
+    chapter, version, novel, err = _resolve_chapter_version(novel_id, chapter_number, version_id)
+    if err:
+        yield _sse({"error": err["error"]})
+        yield _sse({"done": True})
+        return
 
-    # 这里可以做更复杂的流式逻辑，先做简化版
-    report = unified_review(novel_id, chapter_number, version_id, include_rewrite)
+    yield _sse({"status": {"stage": "review_start", "chapter": chapter_number}})
 
-    yield f"data: {json.dumps({'type': 'report', 'report': report}, ensure_ascii=False)}\n\n"
+    # 双盲审与 critic 并行：critic 在主流式循环里逐 token 出，
+    # 盲审在旁路线程里跑（run_dual_review 内部还需再并行两位编辑）
+    app_obj = current_app._get_current_object()
+    blind_box = {}
 
-    if report.get("rewrite"):
-        yield f"data: {json.dumps({'type': 'rewrite_done', 'rewritten': report['rewrite'].get('rewritten_content', '')}, ensure_ascii=False)}\n\n"
+    def _blind_worker():
+        try:
+            with app_obj.app_context():
+                # 与同章 critic 同源配置（含 novel.model_override）
+                blind_box["result"] = run_dual_review(version.content, novel=novel)
+        except Exception as exc:
+            # 盲审失败不阻断评审，但必须留痕——静默丢两位编辑意见是严重损耗
+            logger.warning("unified_review_stream: 盲审失败: %s", exc)
+            blind_box["error"] = str(exc)
 
-    yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+    blind_thread = threading.Thread(target=_blind_worker, name="blind-review", daemon=True)
+    blind_thread.start()
+
+    # ---- Step 1: critic 评审（token 级流出）----
+    ctx = assemble_chapter_context(novel_id, chapter_number, db)
+    cfg = get_effective_config(novel, agent_type="critic")
+    messages = build_critic_prompt(
+        novel_title=novel.title,
+        chapter_title=chapter.title,
+        chapter_content=version.content,
+        outline=chapter.outline or "",
+        user_directive=chapter.user_directive or "",
+        characters=ctx.get("characters", []),
+        world_settings=ctx.get("world_settings", []),
+        foreshadowing_items=ctx.get("foreshadowing_items", []),
+        db=db,  # 不传会导致用户自定义 critic 模板被静默忽略
+    )
+    collected = []
+    try:
+        for tok in stream_llm_tokens(
+            model=cfg["model_name"], messages=messages,
+            api_key=cfg.get("api_key", ""), base_url=cfg.get("base_url", ""),
+            provider_type=cfg.get("provider_type", "deepseek"),
+            temperature=cfg.get("temperature", 0.5), max_tokens=cfg.get("max_tokens", 4096),
+        ):
+            collected.append(tok)
+            yield _sse({"token": tok, "phase": "critic"})
+    except Exception as exc:
+        yield _sse({"error": f"评审失败: {exc}"})
+        yield _sse({"done": True})
+        return
+    critic_result = _parse_critic_response("".join(collected))
+
+    # ---- Step 2: 收盲审结果 ----
+    blind_thread.join()
+    blind_result = blind_box.get("result") or {"editors": [], "elapsed": 0.0}
+
+    yield _sse({"status": {"stage": "critic_done",
+                           "score": critic_result.get("overall_score"),
+                           "grade": _score_grade(critic_result.get("overall_score"))}})
+    yield _sse({"status": {"stage": "blind_done", "elapsed": blind_result.get("elapsed", 0.0),
+                           "editors": [e.get("name") for e in blind_result.get("editors", [])]}})
+
+    # ---- Step 3: 合并报告并落库（与同步版同一套合并/意见/保存逻辑）----
+    report = _merge_report(critic_result, blind_result)
+    if blind_box.get("error"):
+        report["blind_error"] = blind_box["error"]
+    try:
+        from app.services.opinions import build_merged_opinions
+        report["merged_opinions"] = build_merged_opinions(
+            critic_issues=report.get("issues"),
+            critic_comment=report.get("critic_comment", ""),
+            blind_reviews=report.get("blind_reviews"),
+        )
+    except Exception:
+        report["merged_opinions"] = []
+    _save_review(version.id, report, critic_result)
+    yield _sse({"report": report})
+
+    # ---- Step 4 (可选): 自动改写（token 级流出）----
+    if include_rewrite and report.get("total_issue_count", 0) > 0:
+        rewrite_cfg = get_effective_config(novel, agent_type="rewrite")
+        yield _sse({"status": {"stage": "rewrite_start"}})
+        r_messages = build_rewrite_prompt(
+            original_content=version.content,
+            critic_feedback=_issue_feedback(report["issues"]),
+            novel_title=novel.title,
+            chapter_title=chapter.title,
+            outline=chapter.outline or "",
+            user_directive=chapter.user_directive or "",
+            db=db,
+            author_intent=(novel.author_intent or "") if novel else "",
+            current_focus=(novel.current_focus or "") if novel else "",
+        )
+        r_collected = []
+        try:
+            for tok in stream_llm_tokens(
+                model=rewrite_cfg["model_name"], messages=r_messages,
+                api_key=rewrite_cfg.get("api_key", ""), base_url=rewrite_cfg.get("base_url", ""),
+                provider_type=rewrite_cfg.get("provider_type", "deepseek"),
+                temperature=rewrite_cfg.get("temperature", 0.5),
+                max_tokens=rewrite_cfg.get("max_tokens", 4096),
+            ):
+                r_collected.append(tok)
+                yield _sse({"token": tok, "phase": "rewrite"})
+        except Exception as exc:
+            yield _sse({"status": {"stage": "rewrite_error", "error": str(exc)[:200]}})
+        else:
+            rewritten = "".join(r_collected)
+            report["rewrite"] = {
+                "rewritten_content": rewritten,
+                "improvements": [i.get("suggestion", "") for i in report["issues"][:5]
+                                 if i.get("suggestion")],
+                "issues_addressed": len(report["issues"]),
+            }
+            yield _sse({"status": {"stage": "rewrite_done", "chars": len(rewritten)}})
+
+    yield _sse({"done": True})

@@ -11,6 +11,7 @@ import time
 
 from app import db
 from app.models import Novel, Setting
+from app.config_utils import get_effective_config
 from app.services.llm import stream_llm_tokens, LLMError
 from app.services.prompt_builder import (
     assemble_chapter_context, apply_context_budget,
@@ -56,6 +57,39 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
         "current_focus": ctx["current_focus"],
     }
 
+    # 出场角色硬约束（用户显式勾选时）：勾选语义不只是"注入谁的档案"，
+    # 还要明确告诉模型"只许这些人登场"——否则未勾选角色会经由叙事计划
+    # 排程点名、前章结尾、摘要/记忆检索等通道乱入正文。
+    # None/缺省（MCP/旧流程）= 全部角色，不加约束。
+    if character_ids is not None:
+        allowed_names = [c.get("name", "") for c in ctx["characters"] if c.get("name")]
+        if allowed_names:
+            kw["cast_constraint"] = (
+                "本章只允许以下角色登场并获得戏份：" + "、".join(allowed_names) + "。"
+                "未列入的角色一律不得在本章出场、不得获得台词或推进其剧情；"
+                "上一章结尾与前情提要中提及的其他人物仅作背景交代，"
+                "不新增其出场与戏份。"
+            )
+        else:
+            # ctx["characters"] 已按勾选过滤，不能当"无角色卡"的判据——
+            # 查全书是否真的一张卡都没有（冷启动）
+            from app.models import Character
+            has_cards = (db.session.query(Character.id)
+                         .filter_by(novel_id=novel_id).first() is not None)
+            if not has_cards:
+                # 冷启动：大纲的【出场人物】名册仍会点名角色，禁具名与名册
+                # 正面矛盾；改按大纲处理，只禁大纲外新角色。
+                kw["cast_constraint"] = (
+                    "本书暂无人物档案：登场人物按本章大纲【出场人物】与节拍处理，"
+                    "不得引入大纲之外的具名新角色。"
+                )
+            else:
+                kw["cast_constraint"] = (
+                    "本章未勾选任何角色档案：不要让任何具名角色登场或获得台词，"
+                    "只写环境、氛围与叙事者视角的场景推进"
+                    "（前文已确立人物至多作背景性提及，不新增戏份）。"
+                )
+
     # Causal chain context from previous chapters
     try:
         from app.services.causal_chain import get_chain_context, format_chain_for_prompt
@@ -73,11 +107,46 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
 
     # 叙事计划块(拆书蓝图计划值):must_payoff 伏笔/禁埋令/本章登场退场角色。
     # 小块(~几百字),不参与预算压缩——排程任务是硬约束。
+    # 登场/退场排程按出场白名单过滤：显式勾选时,拆书排程不能点名未勾选角色。
     try:
         from app.services.narrative_plan import build_plan_block
-        kw["narrative_plan"] = build_plan_block(novel_id, chapter_number)
+        allowed = None
+        if character_ids is not None:
+            allowed = [c.get("name") for c in ctx["characters"] if c.get("name")]
+        kw["narrative_plan"] = build_plan_block(novel_id, chapter_number,
+                                                allowed_names=allowed)
     except Exception as exc:
         logger.warning("writer_chain 计划块注入降级: %s", exc)
+
+    # 本章事件清单（StoryWriter planning 层）：已有则注入，没有则从大纲现提
+    try:
+        from app.services.chapter_events import ensure_event_plan, format_events_block
+        cfg_e = get_effective_config(novel, agent_type="outline")
+        events = ensure_event_plan(novel_id, chapter_number, outline=outline, cfg=cfg_e)
+        block = format_events_block(events)
+        if block:
+            kw["chapter_events"] = block
+    except Exception as exc:
+        logger.warning("writer_chain 事件清单注入降级: %s", exc)
+
+    # 读者已知时间线（oh-story 双真相）：只注入本章之前已揭示的事实，
+    # 帮助 writer 知道哪些不用重讲、哪些可作戏剧反讽
+    try:
+        from app.services.reader_knowledge import build_reader_context
+        rk = build_reader_context(novel_id, before_chapter=chapter_number, limit=15)
+        if rk:
+            kw["reader_known"] = rk
+    except Exception as exc:
+        logger.warning("writer_chain 读者已知注入降级: %s", exc)
+
+    # 跨章 Reflexion：最近几章的收敛失败/弃稿教训，主动避开
+    try:
+        from app.services.reflexion import collect_recent_lessons
+        lessons = collect_recent_lessons(novel_id, chapter_number)
+        if lessons:
+            kw["reflexion_lessons"] = lessons
+    except Exception as exc:
+        logger.warning("writer_chain Reflexion 注入降级: %s", exc)
 
     # 语义检索(资源库):用本章大纲向量检索对标书相关片段,注入"原书写法参考"。
     # 只取 top-3、每条截 300 字(~900 字),不挤占主上下文预算。
@@ -167,7 +236,10 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
                           ChapterModel.chapter_number < chapter_number)
                   .order_by(ChapterModel.chapter_number.desc())
                   .limit(2).all())
-        sample_text = "\n\n".join(ch.content or "" for ch in reversed(recent))
+        # 正文在 ChapterVersion 上，Chapter 本身没有 content 字段（旧写法恒抛
+        # AttributeError 被 except 吞掉，该注入长期静默失效）。取每章最新版本。
+        sample_text = "\n\n".join(
+            (ch.versions[-1].content or "") for ch in reversed(recent) if ch.versions)
         if len(sample_text.strip()) >= 500:
             tone_inst = build_tone_instructions(sample_text[-15000:])
             if tone_inst:

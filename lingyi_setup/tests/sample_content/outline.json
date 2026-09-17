@@ -1,0 +1,28 @@
+[
+  {
+    "title": "样本第一卷：立规矩",
+    "type": "volume",
+    "summary": "样本卷摘要：交代他的行当、他的铁律、他为什么回避。",
+    "children": [
+      {
+        "title": "样本第1章 起腔",
+        "type": "chapter",
+        "summary": "样本章摘要：一桩白事，他替亡者传了最后一句话。",
+        "children": [
+          { "title": "样本场景·灵堂", "type": "scene", "summary": "样本场景摘要：香灰、纸钱、没说完的话。" },
+          { "title": "样本场景·后巷", "type": "scene", "summary": "样本场景摘要：他把该收的东西收了。" }
+        ]
+      },
+      {
+        "title": "样本第2章 撞破",
+        "type": "chapter",
+        "summary": "样本章摘要：女一撞破他的规矩。"
+      },
+      {
+        "title": "样本第3章 代价",
+        "type": "chapter",
+        "summary": "样本章摘要：代价第一次落到具体的人身上。"
+      }
+    ]
+  }
+]

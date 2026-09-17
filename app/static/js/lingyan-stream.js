@@ -180,10 +180,13 @@
         /* ===== SSE 分帧流（长篇链路专用）=====
          * handlers:
          *   onToken(token)     —— 正文 token
+         *   onStatus(st)       —— 服务端 {"status":{...}} 进度帧
+         *   onEvent(data)      —— 每个解析完整的 SSE 事件原样回调（多阶段流，
+         *                           如统一评审按 phase/report 分发，用这个）
          *   onApiError(msg)    —— 服务端业务错误（计入最终 throw）
          *   signal             —— 可选 AbortSignal（暂停用）
          *
-         * 服务端事件形如 data: {"token":"..."}\n\n；按行解析，
+         * 服务端事件形如 data: {json}\n\n；按行解析，
          * 未收完整的一帧留在 buffer 等下一个 chunk 拼齐。
          * 任意服务端 error 事件后：循环走完抛出该错误。
          * （历史事故：主题换装提交曾把 '\n' 吃成字面 n，导致长篇流式静默全灭）
@@ -209,6 +212,7 @@
                         if (!line.startsWith('data: ')) continue;
                         try {
                             var data = JSON.parse(line.slice(6));
+                            if (handlers.onEvent) handlers.onEvent(data);
                             if (data.token && handlers.onToken) handlers.onToken(data.token);
                             if (data.status && handlers.onStatus) handlers.onStatus(data.status);
                             if (data.error) {

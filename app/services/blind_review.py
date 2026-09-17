@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from flask import current_app
 
-from app.config_utils import get_model_config
+from app.config_utils import get_model_config, get_effective_config
 from app.services.llm import call_llm_sync, LLMError
 
 logger = logging.getLogger(__name__)
@@ -97,16 +97,22 @@ def build_editor_messages(editor_system, content):
     ]
 
 
-def run_dual_review(content):
+def run_dual_review(content, novel=None):
     """并行跑两位编辑，返回 {editors: [...], elapsed: 秒}。
 
-    每个线程各自挂 app context（get_model_config 需要查询数据库）。
+    每个线程各自挂 app context（配置解析需要查询数据库）。
+    novel 传入时走 get_effective_config（含 novel.model_override），
+    与同章 critic 用同一套模型配置——否则同一本书的 critic 与盲审
+    会各用各的厂商/模型。自由文本盲审（无 novel）退回全局配置。
     """
     app = current_app._get_current_object()
 
     def _run_one(editor):
         with app.app_context():
-            cfg = get_model_config(agent_type="critic")
+            if novel is not None:
+                cfg = get_effective_config(novel, agent_type="critic")
+            else:
+                cfg = get_model_config(agent_type="critic")
             text = call_llm_sync(
                 model=cfg["model_name"],
                 messages=build_editor_messages(editor["system"], content),

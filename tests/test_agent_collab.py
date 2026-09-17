@@ -155,7 +155,7 @@ def test_runner_full_pipeline_with_auto_save(app, monkeypatch):
     db.session.add(n)
     db.session.commit()
     ch = Chapter(novel_id=n.id, chapter_number=1, title="第一章",
-                 outline="既有大纲：主角进入北境。")
+                 outline="既有大纲：主角进入北境，遭遇雪暴，在旧年哨塔遗迹里发现一本残缺的巡逻日志，并第一次听见城墙下传来的低语声，直觉告诉他这不只是天气。")
     db.session.add(ch)
     db.session.commit()
 
@@ -171,7 +171,7 @@ def test_runner_full_pipeline_with_auto_save(app, monkeypatch):
     result = runner.run_chapter_pipeline(n.id, 1, auto_save=True)
     assert "error" not in result
     stage_names = [s["stage"] for s in result["stages"]]
-    assert stage_names == ["outline", "body", "gates", "converge", "save"]
+    assert stage_names == ["outline", "event_plan", "body", "gates", "converge", "save"]
     assert result["stages"][0].get("skipped") == "已有大纲"
     assert result["saved_version_id"]
 
@@ -196,7 +196,7 @@ def test_runner_generates_missing_outline(app, monkeypatch):
         # 大纲链的 system prompt 含「章节大纲」字样，正文链没有 → 以此区分阶段
         if any("章节大纲" in m.get("content", "") for m in messages if isinstance(m, dict)):
             calls["outline"] = True
-            return "大纲：主角进入北境，遭遇伏击。"
+            return "大纲：主角进入北境，途中遭遇伏击，在哨塔遗迹发现残缺的巡逻日志，并听到城墙下传来的低语，此事只有夜里的风知道。"
         return "正文若干。" * 40
 
     monkeypatch.setattr(runner, "collect_full_text", fake_collect)
@@ -219,7 +219,7 @@ def test_runner_stops_when_final_gate_fails(app, monkeypatch):
     db.session.add(n)
     db.session.commit()
     ch = Chapter(novel_id=n.id, chapter_number=1, title="第一章",
-                 outline="既有大纲")
+                 outline="既有大纲：主角进入北境，遭遇雪暴，在旧年哨塔遗迹里发现一本残缺的巡逻日志，并第一次听见城墙下传来的低语声，直觉告诉他这不只是天气。")
     db.session.add(ch)
     db.session.commit()
 
@@ -344,7 +344,7 @@ def test_runner_character_ids_reach_writer_kwargs(app, monkeypatch, cids, expect
     db.session.add(n)
     db.session.commit()
     ch = Chapter(novel_id=n.id, chapter_number=1, title="第一章",
-                 outline="既有大纲。")
+                 outline="既有大纲：主角进入北境，遭遇雪暴，在旧年哨塔遗迹里发现一本残缺的巡逻日志，并第一次听见城墙下传来的低语声，直觉告诉他这不只是天气。")
     db.session.add(ch)
     db.session.commit()
 
@@ -381,14 +381,15 @@ def test_runner_character_ids_reach_outline_context(app, monkeypatch):
 
     def fake_ctx(novel_id, chapter_number, db, character_ids=None):
         calls["cids"] = character_ids
-        return {"characters": [], "summaries": [], "foreshadowing_items": []}
+        return {"characters": [], "summaries": [], "foreshadowing_items": [],
+                "world_settings": []}
 
     monkeypatch.setattr("app.services.prompt_builder.assemble_chapter_context",
                         fake_ctx)
     monkeypatch.setattr(
         runner, "collect_full_text",
         lambda messages, cfg, word_target=None: (
-            "大纲：测试。" if any("章节大纲" in m.get("content", "")
+            "大纲：主角北上进入北境，途中遭遇伏击，在哨塔遗迹发现残缺的巡逻日志，并第一次听到城墙下传来的低语，此事只有夜里的风知道。" if any("章节大纲" in m.get("content", "")
                                 for m in messages if isinstance(m, dict))
             else "正文若干。" * 60))
     monkeypatch.setattr(
@@ -403,3 +404,100 @@ def test_runner_character_ids_reach_outline_context(app, monkeypatch):
     result = runner.run_chapter_pipeline(n.id, 1, character_ids=[3])
     assert "error" not in result
     assert calls["cids"] == [3]
+
+
+# ---------------------------------------------------------------------------
+# 出场角色硬约束（勾选语义：没勾的角色不得乱入正文）
+# ---------------------------------------------------------------------------
+
+def _make_cast(novel_id, plans=None):
+    """建两个角色；plans={name: status_json_dict} 用于叙事计划排程。"""
+    from app.models import Character
+    made = {}
+    for name in ("阿三", "白二"):
+        c = Character(novel_id=novel_id, name=name,
+                      personality="沉稳", speaking_style="简短")
+        if plans and name in plans:
+            c.status_json = plans[name]
+        db.session.add(c)
+        made[name] = c
+    db.session.commit()
+    return made
+
+
+def test_cast_constraint_built_on_explicit_selection(app):
+    n = Novel(title="乱入回归")
+    db.session.add(n)
+    db.session.commit()
+    cast = _make_cast(n.id, plans={
+        "阿三": '{"plan": {"first_chapter": 1}}',
+        "白二": '{"plan": {"first_chapter": 1}}',
+    })
+    ch = Chapter(novel_id=n.id, chapter_number=1, title="第一章", outline="大纲")
+    db.session.add(ch)
+    db.session.commit()
+
+    kw, _ = wc.build_writer_kwargs(n.id, 1, "大纲", character_ids=[cast["阿三"].id])
+    # 白名单只含勾选者
+    assert "cast_constraint" in kw
+    assert "阿三" in kw["cast_constraint"]
+    assert "白二" not in kw["cast_constraint"]
+    # 叙事计划的登场排程按白名单过滤：白二不得被计划点名
+    assert "白二" not in kw.get("narrative_plan", "")
+    assert "阿三" in kw.get("narrative_plan", "")
+
+
+def test_cast_constraint_empty_selection(app):
+    n = Novel(title="空场测试")
+    db.session.add(n)
+    db.session.commit()
+    _make_cast(n.id)
+    ch = Chapter(novel_id=n.id, chapter_number=1, title="第一章", outline="大纲")
+    db.session.add(ch)
+    db.session.commit()
+
+    kw, _ = wc.build_writer_kwargs(n.id, 1, "大纲", character_ids=[])
+    assert "未勾选任何角色档案" in kw.get("cast_constraint", "")
+    assert kw["characters"] == []
+    # 空白名单时叙事计划不得点名任何角色登场
+    assert "本章新登场的角色" not in kw.get("narrative_plan", "")
+
+
+def test_cast_constraint_cold_start_no_cards(app):
+    """冷启动：全书一张角色卡都没有时，禁具名指令与大纲【出场人物】名册
+    正面矛盾——应改为"按大纲处理、禁大纲外新角色"，而非全员禁入。"""
+    n = Novel(title="冷启动测试")
+    db.session.add(n)
+    db.session.commit()
+    ch = Chapter(novel_id=n.id, chapter_number=1, title="第一章", outline="大纲")
+    db.session.add(ch)
+    db.session.commit()
+
+    kw, _ = wc.build_writer_kwargs(n.id, 1, "大纲", character_ids=[])
+    cc = kw.get("cast_constraint", "")
+    assert "暂无人物档案" in cc
+    assert "按本章大纲【出场人物】" in cc
+    assert "不得引入大纲之外" in cc
+    assert "未勾选任何角色档案" not in cc  # 严格禁入措辞只留给"有卡但全不勾"
+
+
+def test_no_cast_constraint_when_selection_absent(app):
+    """缺省（None=MCP/旧流程）保持全部角色注入，不加约束。"""
+    n = Novel(title="缺省测试")
+    db.session.add(n)
+    db.session.commit()
+    _make_cast(n.id)
+    ch = Chapter(novel_id=n.id, chapter_number=1, title="第一章", outline="大纲")
+    db.session.add(ch)
+    db.session.commit()
+
+    kw, _ = wc.build_writer_kwargs(n.id, 1, "大纲")
+    assert "cast_constraint" not in kw
+    assert len(kw["characters"]) == 2
+
+
+def test_writer_prompt_renders_cast_constraint():
+    msgs = build_writer_prompt(novel_title="测试",
+                               cast_constraint="本章只允许以下角色登场：阿三。")
+    assert "本章出场角色约束" in msgs[1]["content"]
+    assert "只允许以下角色登场" in msgs[1]["content"]

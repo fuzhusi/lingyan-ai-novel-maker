@@ -1,6 +1,6 @@
 import json
 import time
-from flask import Blueprint, request, Response, jsonify
+from flask import Blueprint, request, Response, jsonify, stream_with_context
 from app.services.prompt_builder import (
     build_outline_prompt, build_writer_prompt, assemble_chapter_context,
 )
@@ -87,6 +87,21 @@ def generate_stream():
     elif raw_ids is not None:
         character_ids = []
 
+    # 细纲硬门禁：请求未带大纲时回落到章节已存大纲；两者皆空/过短则拒写
+    # （oh-story guard-outline-before-prose：无细纲不进正文）
+    _MIN_OUTLINE_CHARS = 50
+    if not (outline or "").strip() and novel_id and chapter_number:
+        ch = (Chapter.query
+              .filter_by(novel_id=novel_id, chapter_number=chapter_number)
+              .first())
+        if ch and (ch.outline or "").strip():
+            outline = ch.outline.strip()
+    if len((outline or "").strip()) < _MIN_OUTLINE_CHARS:
+        return jsonify({
+            "error": f"细纲不足（需至少 {_MIN_OUTLINE_CHARS} 字）。"
+                     f"请先生成/填写本章大纲再写正文。",
+        }), 400
+
     # 写作包：上下文组装/预算压缩/锚例/罗盘/tone 指令/备忘录统一在 writer_chain
     kw, novel = build_writer_kwargs(novel_id, chapter_number, outline,
                                     user_directive=user_directive,
@@ -102,9 +117,9 @@ def generate_stream():
     )
 
     cfg = get_effective_config(novel, agent_type="writer")
-    return Response(_stream_to_sse(messages, cfg, word_target=CHAPTER_WORD_TARGET,
-                                   phase="write"),
-                    mimetype="text/event-stream")
+    return Response(stream_with_context(
+        _stream_to_sse(messages, cfg, word_target=CHAPTER_WORD_TARGET, phase="write")),
+        mimetype="text/event-stream")
 
 
 @generate_bp.route("/outline-stream", methods=["POST"])
@@ -126,6 +141,7 @@ def outline_stream():
             "foreshadowing_items": ctx["foreshadowing_items"],
             "author_intent": ctx["author_intent"],
             "current_focus": ctx["current_focus"],
+            "world_settings": ctx["world_settings"],
         }
 
     messages = build_outline_prompt(
@@ -141,7 +157,7 @@ def outline_stream():
 
     novel = Novel.query.get(novel_id) if novel_id else None
     cfg = get_effective_config(novel, agent_type="outline")
-    return Response(_stream_to_sse(messages, cfg, phase="outline"),
+    return Response(stream_with_context(_stream_to_sse(messages, cfg, phase="outline")),
                     mimetype="text/event-stream")
 
 
@@ -227,7 +243,7 @@ def focus_generate_stream():
     ]
 
     cfg = get_effective_config(novel, agent_type="writer")
-    return Response(_stream_to_sse(messages, cfg, phase="focus"),
+    return Response(stream_with_context(_stream_to_sse(messages, cfg, phase="focus")),
                     mimetype="text/event-stream")
 
 

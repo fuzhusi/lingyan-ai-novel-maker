@@ -32,7 +32,7 @@ from app.models.novel import (
 # 知识库
 from app.models.knowledge import (
     Character, WorldSetting, OutlineNode, Foreshadowing, CharacterRelation,
-    PendingExtraction,
+    PendingExtraction, ReaderKnowledge,
 )
 
 # 故事状态
@@ -213,6 +213,10 @@ MIGRATIONS = [
             "ALTER TABLE long_tasks ADD COLUMN cancel_requested BOOLEAN DEFAULT 0",
             # 差异轴（生成期差异化指令块的数据源）
             "ALTER TABLE plagiarize_tasks ADD COLUMN axes_text TEXT DEFAULT ''",
+            # 本章事件清单（StoryWriter planning 层）
+            "ALTER TABLE chapters ADD COLUMN event_plan TEXT DEFAULT ''",
+            # 跨章 Reflexion 笔记
+            "ALTER TABLE chapters ADD COLUMN reflexion_notes TEXT DEFAULT ''",
         ]
 
 
@@ -220,7 +224,7 @@ __all__ = [
     "db", "now", "init_db",
     "Novel", "Chapter", "ChapterVersion", "CriticReview", "BlindReview", "PromptTemplate", "Setting",
     "Character", "WorldSetting", "OutlineNode", "Foreshadowing", "CharacterRelation",
-    "PendingExtraction",
+    "PendingExtraction", "ReaderKnowledge",
     "StoryState", "StoryStateSnapshot", "ChapterMemory", "ChapterSummary",
     "ShortStory", "ShortStoryVersion", "ShortStoryReview",
     "PlagiarizeTask", "DeconstructItem",

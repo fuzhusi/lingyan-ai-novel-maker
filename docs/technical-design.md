@@ -782,9 +782,9 @@ CREATE TABLE settings (
 | `/novel/<id>/chapter/<num>/save-version` | POST | 保存版本 |
 | `/api/generate-stream` | POST | SSE 生成章节 |
 | `/api/outline-stream` | POST | SSE 生成大纲 |
-| `/api/review-stream` | POST | SSE 评审 |
 | `/api/rewrite-stream` | POST | SSE 改写 |
-| `/api/review/save` | POST | 保存评审 |
+| `/api/unified-review` | POST | 统一评审（同步全量，兼容入口） |
+| `/api/unified-review-stream` | POST | SSE 统一评审：critic 意见逐 token 流出 + 双盲审并行 + 结构化报告（前端「全面评审」在用） |
 | `/api/review/get` | GET | 获取评审 |
 | `/api/review/feedback` | POST | 用户反馈 |
 | `/api/approve` | POST | 审批 |

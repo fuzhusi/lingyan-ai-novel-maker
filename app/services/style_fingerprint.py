@@ -213,7 +213,7 @@ _ANCHOR_MAX_CHARS = 2000  # 约 1000-1500 中文字 + 指令，防 prompt 膨胀
 
 
 def save_anchor(text):
-    """保存文风锚例原文到数据库。"""
+    """保存文风锚例原文到数据库，并同步提炼风格假设。"""
     setting = Setting.query.get("style_anchor_text")
     if setting:
         setting.value = text
@@ -221,6 +221,13 @@ def save_anchor(text):
         setting = Setting(key="style_anchor_text", value=text)
         db.session.add(setting)
     db.session.commit()
+    # HyPerAlign：锚例入库时同步提炼结构化风格假设（零 LLM）
+    try:
+        hyp = extract_style_hypothesis(text)
+        if hyp:
+            save_style_hypothesis(hyp)
+    except Exception:
+        pass
 
 
 def load_anchor():
@@ -291,7 +298,84 @@ def format_anchor_for_prompt():
         if last_para > _ANCHOR_MAX_CHARS // 2:
             cut = cut[:last_para]
         text = cut + "\n……（节选）"
-    return f"【文风锚例 — 模仿此风格续写，勿抄情节】\n{_ANCHOR_INSTRUCTION}\n\n{text}"
+    hypothesis = load_style_hypothesis()
+    hyp_block = ""
+    if hypothesis:
+        lines = ["【风格假设（从锚例提炼，优先服从）】"]
+        for k, v in hypothesis.items():
+            if v:
+                lines.append(f"- {k}：{v}")
+        hyp_block = "\n".join(lines) + "\n\n"
+    return (f"【文风锚例 — 模仿此风格续写，勿抄情节】\n{_ANCHOR_INSTRUCTION}\n\n"
+            f"{hyp_block}{text}")
+
+
+# ---------------------------------------------------------------------------
+# 风格假设（HyPerAlign）：从锚例提炼结构化假设，省 token 且更可迁移
+# ---------------------------------------------------------------------------
+
+def extract_style_hypothesis(text):
+    """确定性提炼风格假设（零 LLM）：句长节奏 / 对话密度 / 从不用的词。"""
+    import re as _re
+    text = (text or "").strip()
+    if len(text) < 80:
+        return {}
+    sentences = [s for s in _re.split(r"[。！？…]+", text) if len(s.strip()) >= 4]
+    lens = [len(_re.sub(r"\s", "", s)) for s in sentences]
+    if not lens:
+        return {}
+    avg = sum(lens) / len(lens)
+    short_ratio = sum(1 for l in lens if l < 12) / len(lens)
+    if short_ratio > 0.4:
+        rhythm = "短句为主，节奏碎"
+    elif avg > 35:
+        rhythm = "长句铺开，节奏慢"
+    else:
+        rhythm = "长短混合，中等节奏"
+    dialogue_marks = text.count("「") + text.count("“") + text.count('"')
+    dialogue = "对话密集" if dialogue_marks >= max(3, len(sentences) // 8) else "叙述为主，对话稀疏"
+    # 从不用的词：锚例中零出现的常见 AI 套话（白名单反推）
+    ai_cliches = ["仿佛", "宛如", "命运的齿轮", "说白了", "不是A而是B",
+                  "值得注意", "总而言之", "难以言喻"]
+    never = [w for w in ai_cliches if w not in text]
+    return {
+        "句长节奏": rhythm,
+        "对话密度": dialogue,
+        "从不使用": "、".join(never[:5]) if never else "（无明显禁忌）",
+        "平均句长": f"{avg:.0f} 字",
+    }
+
+
+def save_style_hypothesis(hyp):
+    setting = Setting.query.get("style_anchor_hypothesis")
+    value = json.dumps(hyp, ensure_ascii=False)
+    if setting:
+        setting.value = value
+    else:
+        setting = Setting(key="style_anchor_hypothesis", value=value)
+        db.session.add(setting)
+    db.session.commit()
+
+
+def load_style_hypothesis():
+    setting = Setting.query.get("style_anchor_hypothesis")
+    if not setting or not setting.value:
+        # 懒生成：有锚例无假设时现场提炼（零 LLM）
+        anchor = load_anchor()
+        if anchor and len(anchor) >= 80:
+            hyp = extract_style_hypothesis(anchor)
+            if hyp:
+                try:
+                    save_style_hypothesis(hyp)
+                except Exception:
+                    pass
+                return hyp
+        return {}
+    try:
+        data = json.loads(setting.value)
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        return {}
 
 
 @style_bp.route("/style-anchor", methods=["GET"])

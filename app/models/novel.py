@@ -39,6 +39,10 @@ class Chapter(db.Model):
     # 生成/保存正文时所依据的大纲指纹（借鉴 jarvis-write 大纲级联引擎的失配标记思路）
     # 大纲事后变更时指纹不更新 → outline_stale() 为真，提示正文与大纲已脱节
     outline_hash = db.Column(db.String(64), default="")
+    # 本章事件清单（StoryWriter planning 层）：JSON [{goal,conflict,outcome}]
+    event_plan = db.Column(db.Text, default="")
+    # 跨章 Reflexion：JSON [{source, note}]，下一章生成时注入「前章反思」
+    reflexion_notes = db.Column(db.Text, default="")
     created_at = db.Column(db.String(20), default=now)
 
     novel = db.relationship("Novel", back_populates="chapters")

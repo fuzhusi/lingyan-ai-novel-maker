@@ -14,7 +14,14 @@ if __name__ == "__main__":
     else:
         try:
             from waitress import serve
+            # 打印访问地址：waitress 自己的 "Serving on" 提示走日志系统
+            # （收进 logs/lingyan.log），控制台看不到，容易误以为卡住
+            print(" * Running on http://127.0.0.1:5000  (Ctrl+C 退出)")
             serve(app, host="127.0.0.1", port=5000, threads=8)
         except ImportError:
-            app.run(debug=False, host="127.0.0.1", port=5000)
+            # waitress 是声明过的依赖，正常安装不会走到这里；
+            # Werkzeug 必须开 threaded，否则任一 SSE 长连接会阻塞全站
+            print(" * WARNING: waitress not installed, falling back to "
+                  "Werkzeug dev server (threaded=True)")
+            app.run(debug=False, host="127.0.0.1", port=5000, threaded=True)
 

@@ -3,11 +3,9 @@ import difflib
 import logging
 from flask import Blueprint, request, Response, jsonify, current_app
 from app.models import db, Chapter, ChapterVersion, CriticReview, Novel
-from app.services.prompt_builder import (build_critic_prompt,
-                                          build_rewrite_prompt, assemble_chapter_context)
+from app.services.prompt_builder import build_rewrite_prompt
 from app.services.llm import stream_llm_tokens, LLMError
-from app.services.chapter_approval import (approve_chapter_version, EmptyChapterError,
-                                           extract_json_dict as _extract_json_dict)
+from app.services.chapter_approval import (approve_chapter_version, EmptyChapterError)
 from app.config_utils import get_effective_config
 
 
@@ -43,91 +41,6 @@ def _stream_chat(messages, cfg):
         yield "error", str(e)
     except Exception as e:
         yield "error", str(e)
-
-
-@review_bp.route("/review-stream", methods=["POST"])
-def review_stream():
-    version_id = request.form.get("version_id", type=int)
-    novel_id = request.form.get("novel_id", type=int)
-    chapter_number = request.form.get("chapter_number", type=int)
-    novel_title = request.form.get("novel_title", "")
-
-    version = ChapterVersion.query.get_or_404(version_id)
-    chapter = version.chapter
-
-    kw = {}
-    if novel_id and chapter_number:
-        ctx = assemble_chapter_context(novel_id, chapter_number, db)
-        kw = {
-            "characters": ctx["characters"],
-            "world_settings": ctx["world_settings"],
-            "foreshadowing_items": ctx["foreshadowing_items"],
-        }
-
-    messages = build_critic_prompt(
-        novel_title=novel_title,
-        chapter_title=chapter.title,
-        chapter_content=version.content,
-        outline=chapter.outline,
-        user_directive=chapter.user_directive,
-        db=db,
-        **kw,
-    )
-
-    novel = Novel.query.get(novel_id) if novel_id else None
-    cfg = get_effective_config(novel, agent_type="critic")
-
-    def generate():
-        for kind, payload in _stream_chat(messages, cfg):
-            if kind == "token":
-                yield _sse_event({"token": payload})
-            elif kind == "done":
-                yield _sse_event({"done": True, "full_text": payload})
-                return
-            elif kind == "error":
-                yield _sse_event({"error": payload})
-                return
-
-    return Response(generate(), mimetype="text/event-stream")
-
-
-@review_bp.route("/review/save", methods=["POST"])
-def save_review():
-    version_id = request.form.get("version_id", type=int)
-    full_response = request.form.get("full_response", "")
-    ChapterVersion.query.get_or_404(version_id)
-
-    data = _extract_json_dict(full_response)
-    if data is not None:
-        overall_score = data.get("overall_score")
-        overall_comment = data.get("overall_comment", "")
-        dimensions = data.get("dimensions", [])
-        annotations = data.get("annotations", [])
-    else:
-        # 解析失败降级为纯文本评论（含围栏原文），不再 500
-        overall_score = None
-        dimensions = []
-        annotations = []
-        overall_comment = full_response
-
-    review = CriticReview(
-        version_id=version_id,
-        overall_score=overall_score,
-        dimension_scores_json=json.dumps(dimensions, ensure_ascii=False),
-        annotations_json=json.dumps(annotations, ensure_ascii=False),
-        overall_comment=overall_comment,
-        full_response=full_response,
-    )
-    db.session.add(review)
-    db.session.commit()
-
-    return jsonify({
-        "id": review.id,
-        "overall_score": overall_score,
-        "dimensions": dimensions,
-        "annotations": annotations,
-        "overall_comment": overall_comment,
-    })
 
 
 @review_bp.route("/review/get")

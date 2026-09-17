@@ -141,6 +141,45 @@ $PY cli.py outline create-chapter --novel 1 --id 2
 
 Web 端还有 4 种大纲模板（节拍式 15 节点 / 三幕式 / 英雄之旅 / 四幕式）可套用。
 
+#### 章节大纲 7 字段固定格式（重要）
+
+AI 生成的大纲（一键本章缺大纲时自动补的那份）严格遵循固定格式；
+**手写大纲也请用同一套骨架**——写作页按大纲人名自动勾选出场角色、
+写正文按「场景节拍」逐拍铺场景，都依赖这个格式：
+
+```bash
+# 查看模板（输出可直接粘贴到 --outline 里填充）
+$PY cli.py chapter outline-template
+
+# 手写时按 7 字段写：
+$PY cli.py chapter create --novel 1 --number 1 --title "熄灯" \
+    --outline "【本章定位】推进：主角发现公寓断电规律
+【核心事件】1. 主角比对手早一步发现电表异常
+【出场人物】林晚、房东（背景提及）
+【场景节拍】1. 林晚在天台核对电表读数，发现有人蓄意断电
+【情感基调】平静→警觉
+【伏笔操作】埋设：缺失的第七行用电记录
+【结尾钩子】门禁卡刷开的瞬间，楼道里站着断电那晚她见过的人"
+```
+
+字段缺一不可：本章定位 / 核心事件（1-3条因果）/ 出场人物（与人物卡
+**完全同名**，仅提及的标「（背景提及）」，龙套不起名）/ 场景节拍
+（3-5 条「地点+人物+冲突+结果」）/ 情感基调（含迁移）/ 伏笔操作
+（埋设/强化/回收）/ 结尾钩子。
+
+手写大纲若缺字段，`chapter create/update` 会打印警告提醒（不阻断保存），
+但格式不合规等于放弃自动勾选与节拍施工两项收益。
+
+#### 大纲树「AI 摘要」（Web 端）
+
+```text
+大纲树 → 章/场景节点 →「✨ AI 摘要」→ 自动按 7 字段生成摘要填入编辑框
+→ 人工过目/手改 → 保存（写回大纲树并同步关联章节）
+```
+
+生成时自动带上下文：所属卷、前两章摘要、人物卡、活跃伏笔、旧摘要。
+摘要只填入编辑框，看过才落库。
+
 ### 3.5 伏笔（长篇生命线）
 
 ```bash
@@ -166,10 +205,15 @@ $PY cli.py state rollback --novel 1 --snapshot 3 -y             # 走歪了回�
 
 ```bash
 $PY cli.py chapter list --novel 1
+# --number 可省略：自动取下一章号（与 Web 一致）
+# --outline 建议用 7 字段固定格式（见 3.4；缺字段会有警告提示）
 $PY cli.py chapter create --novel 1 --number 1 --title "熄灯" \
     --outline "本章大纲" --directive "给生成器的特别指示（可含 @技能id）"
 $PY cli.py chapter content --novel 1 --number 1 [--full | --length 2000]
 ```
+
+> ⚠️ 细纲硬门禁：本章大纲不足 **50 字** 时，Web/CLI/流水线都会拒绝写正文
+> （`细纲不足（N 字 < 50 字下限）`）。先用上面 3.4 的模板补全大纲。
 
 **写正文有两条路**：
 
@@ -220,7 +264,7 @@ $PY cli.py novel export --id 1 --format epub --output 你应该好好爱自己.e
 
 ```bash
 $PY cli.py novel list / info / update / export / delete
-$PY cli.py chapter list / content / update / approve / version-list / version-content / deai / delete / stale / pipeline / converge / condense / consistency / create
+$PY cli.py chapter list / content / update / approve / version-list / version-content / deai / delete / stale / pipeline / converge / condense / consistency / create / outline-template
 $PY cli.py character list / create / info / update / delete / template-list
 $PY cli.py world list / create / update / delete
 $PY cli.py outline list / create / update / delete / create-chapter
@@ -241,7 +285,9 @@ $PY cli.py tone check / converge / radar             # 去AI味检测/收敛/困
 $PY cli.py style-anchor view / set / toggle / preview # 文风锚例（真人原文直插prompt）
 $PY cli.py template-outline list / show / apply       # 大纲模板（节拍式/三幕/英雄之旅/四幕）
 $PY cli.py chapter pipeline --novel 1 --number 5 --save  # 一键本章流水线（生成→门禁→收敛→落版本）
-$PY cli.py sys info / backup / sample-data / reset
+$PY cli.py sys info / backup / restore / sample-data / reset
 ```
 
-> 备份习惯：每天收工 `sys backup`，写崩了有退路。
+> 备份习惯：每天收工 `sys backup`，写崩了 `sys restore --output 备份文件.db -y` 有退路
+> （restore 会覆盖当前库，正在运行的服务重启后生效）。注意备份文件内含
+> LLM 厂商 API key，不要分享或提交进仓库。

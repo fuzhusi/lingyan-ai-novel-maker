@@ -500,6 +500,14 @@ input:focus, textarea:focus, select:focus {
     box-shadow: 0 0 0 3px var(--accent-ghost), 0 0 18px var(--accent-glow);
 }
 
+/* 复选/单选是行内小控件，不吃上面的整行宽度——否则评审意见勾选行的
+   checkbox 被拉到 700px+，意见文本被顶出面板（左侧大片空白、字看不见） */
+input[type="checkbox"], input[type="radio"] {
+    width: auto;
+    padding: 0;
+    flex: 0 0 auto;
+}
+
 select {
     cursor: pointer;
     appearance: none;
@@ -1036,11 +1044,19 @@ button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
 }
 .chapter-meta summary:hover { color: var(--text); }
 
+/* 固定格式大纲：字段名高亮（formatOutlineDisplay 生成，纸面容器内走映射后的 accent） */
+.outline-field {
+    color: var(--accent);
+    font-weight: 700;
+}
+
 .meta-block {
     padding: 0.4rem 0;
     color: var(--text-dim);
     font-size: 0.88rem;
     line-height: 1.6;
+    /* 固定格式大纲按字段换行输出，展示层必须保留换行，否则 7 个字段挤成一坨 */
+    white-space: pre-wrap;
 }
 
 /* --- Version Panel ---------------------------------------- */
@@ -1329,6 +1345,8 @@ button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
     color: var(--text-dim);
     padding: 0.15rem 2.5rem 0.4rem;
     line-height: 1.5;
+    /* 大纲树摘要同样可能是固定格式大纲，保留换行 */
+    white-space: pre-wrap;
 }
 
 .outline-actions {

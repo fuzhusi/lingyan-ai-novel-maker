@@ -25,6 +25,7 @@ dependencies = [
     "certifi>=2026.0",
     "tiktoken==0.13.0",
     "langchain-anthropic>=1.7.2",
+    "waitress>=3.0.2",
 ]
 
 [project.optional-dependencies]

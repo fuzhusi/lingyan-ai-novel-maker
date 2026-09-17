@@ -87,7 +87,9 @@ class TestPlanBlock:
         from app.services.narrative_plan import build_plan_block
         block = build_plan_block(novel.id, 3)
         assert "本章必须回收" in block and "玉佩之谜" in block
-        assert "旧伤" not in block.split("悬挂")[0].split("必须回收")[-1] or True
+        # 未到期的不进 must_payoff 段
+        must_section = block.split("必须回收的伏笔")[-1].split("仍在悬挂")[0]
+        assert "旧伤" not in must_section
         # 悬挂提醒包含未到期那条
         assert "旧伤" in block
         # 到期的不重复出现在悬挂列表
@@ -97,15 +99,31 @@ class TestPlanBlock:
     def test_ban_when_over_capacity(self, app_ctx):
         """活跃伏笔达到容量上限 → 禁埋令。"""
         novel = _setup(app_ctx)
-        cap = max(2, 10 // 20 * 3)  # = 2
+        from app.services.narrative_plan import build_plan_block, _foreshadow_capacity
+        # 容量公式已修（目标章数 = max(30, 已写章号, 大纲树章数)），测试直接取公式值
+        cap = _foreshadow_capacity(novel.id)
+        assert cap >= 2
         for i in range(1, cap + 1):
             db.session.add(Foreshadowing(
                 novel_id=novel.id, title=f"伏笔{i}", description="d",
                 planted_chapter=1, status="buried", importance=5))
         db.session.commit()
-        from app.services.narrative_plan import build_plan_block
         block = build_plan_block(novel.id, 2)
         assert "禁埋令" in block
+
+    def test_must_payoff_overdue_ledger(self, app_ctx):
+        """账本式排程：预期回收章已过的伏笔不蒸发，仍进 must_payoff 并标逾期。"""
+        novel = _setup(app_ctx)
+        db.session.add(Foreshadowing(
+            novel_id=novel.id, title="逾期伏笔", description="早该收了",
+            planted_chapter=1, expected_resolve_chapter=2,
+            status="buried", importance=8))
+        db.session.commit()
+        from app.services.narrative_plan import build_plan_block
+        block = build_plan_block(novel.id, 5)  # 已过预期回收章 3 章
+        assert "本章必须回收" in block
+        assert "逾期伏笔" in block
+        assert "已逾期 3 章" in block
 
     def test_enter_exit_characters(self, app_ctx):
         novel = _setup(app_ctx)

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """灵砚 CLI — 命令行操作小说系统。
 
 完整命令列表:
@@ -37,6 +37,7 @@
 """
 import sys
 import os
+import re
 import argparse
 import json
 from datetime import datetime
@@ -51,6 +52,7 @@ from app.models import (
     ShortStory, ShortStoryVersion, ShortStoryReview, PromptTemplate, Setting,
     PlagiarizeTask, DeconstructItem, BlindReview, PendingExtraction,
 )
+from app.services.outline_template import OUTLINE_TEMPLATE
 from app.routes.settings import AGENT_TYPES, get_model_config
 from app.routes.auth import DEFAULT_USERS
 from app.routes.llm_settings import PRESET_PROVIDERS, get_preset_by_type
@@ -164,8 +166,11 @@ def cmd_novel(args):
             print_table(["ID", "标题", "类型", "章节", "角色", "世界观"], rows)
 
         elif args.action == "create":
+            if not (args.title or "").strip():
+                print("✗ 标题不能为空（--title）")
+                return
             novel = Novel(
-                title=args.title,
+                title=args.title.strip(),
                 genre=getattr(args, 'genre', '') or '',
                 synopsis=getattr(args, 'synopsis', '') or '',
                 world_intro=getattr(args, 'world_intro', '') or '',
@@ -246,7 +251,7 @@ def cmd_novel(args):
             if resp.status_code != 200:
                 print(f"✗ 导出失败: HTTP {resp.status_code}")
                 return
-            output = args.output or f"{novel.title}.{fmt}"
+            output = args.output or f"{_safe_filename(novel.title)}.{fmt}"
             with open(output, "wb") as f:
                 f.write(resp.data)
             print(f"✓ 已导出 [{novel.id}] {novel.title} -> {output} ({len(resp.data)} bytes)")
@@ -261,23 +266,10 @@ def cmd_novel(args):
                 if answer != "y":
                     print("已取消")
                     return
+            # 删除单一真源级联（外围引用→FTS→向量→本体），与 Web delete-all 同源
+            from app.services.delete_service import delete_novel_full
             for n in novels:
-                for ch in Chapter.query.filter_by(novel_id=n.id).all():
-                    for v in ChapterVersion.query.filter_by(chapter_id=ch.id).all():
-                        CriticReview.query.filter_by(version_id=v.id).delete()
-                    ChapterVersion.query.filter_by(chapter_id=ch.id).delete()
-                    ChapterSummary.query.filter_by(chapter_id=ch.id).delete()
-                    ChapterMemory.query.filter_by(chapter_id=ch.id).delete()
-                    db.session.delete(ch)
-                Character.query.filter_by(novel_id=n.id).delete()
-                CharacterRelation.query.filter_by(novel_id=n.id).delete()
-                WorldSetting.query.filter_by(novel_id=n.id).delete()
-                OutlineNode.query.filter_by(novel_id=n.id).delete()
-                Foreshadowing.query.filter_by(novel_id=n.id).delete()
-                StoryStateSnapshot.query.filter_by(novel_id=n.id).delete()
-                StoryState.query.filter_by(novel_id=n.id).delete()
-                db.session.delete(n)
-            db.session.commit()
+                delete_novel_full(n.id)
             print(f"✓ 已删除全部 {len(novels)} 部小说")
 
 
@@ -309,16 +301,32 @@ def cmd_chapter(args):
             if existing:
                 print(f"✗ 第{args.number}章已存在")
                 return
+            if not args.number:
+                # 未指定章号则自动递增（对齐 Web），否则落 chapter_number=None 成为不可达脏数据
+                args.number = (db.session.query(db.func.max(Chapter.chapter_number))
+                               .filter_by(novel_id=args.novel).scalar() or 0) + 1
+                print(f"  （未指定 --number，自动使用第{args.number}章）")
+            outline = getattr(args, 'outline', '') or ''
+            _warn_outline_format(outline)
             ch = Chapter(
                 novel_id=args.novel,
                 chapter_number=args.number,
                 title=getattr(args, 'title', '') or '',
-                outline=getattr(args, 'outline', '') or '',
+                outline=outline,
                 user_directive=getattr(args, 'directive', '') or '',
             )
             db.session.add(ch)
             db.session.commit()
             print(f"✓ 已创建: 第{args.number}章 [{ch.id}]")
+
+        elif args.action == "outline-template":
+            # 与 AI 生成提示词、前端「插入大纲模板」同一套契约（7 字段）
+            print("章节大纲固定格式模板（可直接粘贴后填充）：")
+            print("-" * 56)
+            print(OUTLINE_TEMPLATE.rstrip())
+            print("-" * 56)
+            print("说明：出场人物须与人物卡姓名完全一致（系统按人名自动勾选）；")
+            print("      场景节拍按时间排，写正文时逐拍铺成场景；除节拍外建议 ≤250 字。")
 
         elif args.action == "content":
             ch = Chapter.query.filter_by(novel_id=args.novel, chapter_number=args.number).first()
@@ -364,6 +372,7 @@ def cmd_chapter(args):
                 ch.title = args.title
                 changed.append("title")
             if args.outline is not None and str(args.outline).strip():
+                _warn_outline_format(args.outline)
                 ch.outline = args.outline
                 changed.append("outline")
             if args.directive is not None and str(args.directive).strip():
@@ -471,22 +480,31 @@ def cmd_chapter(args):
                                           user_directive=args.directive or "",
                                           auto_save=bool(getattr(args, "save", None)),
                                           character_ids=cids)
-            if "error" in result:
-                print(f"✗ 失败：{result['error']}")
-                return
+            failed = "error" in result
+            # 阶段与分数无论成败都打印：门禁失败时这些诊断正是要看的
             for s in result.get("stages", []):
                 mark = "✓" if s.get("ok") else "✗"
                 extra = s.get("skipped") or s.get("action") or s.get("error") or ""
                 print(f"  [{mark}] {s.get('stage', '?')} {extra}")
-            print(f"人味分: {result.get('human_score')}")
+            if result.get("human_score") is not None:
+                print(f"人味分: {result.get('human_score')}")
+            if failed:
+                print(f"✗ 失败：{result['error']}")
             if result.get("saved_version_id"):
                 print(f"✓ 已保存版本 id={result['saved_version_id']}")
-            if args.out:
-                with open(args.out, "w", encoding="utf-8") as fh:
-                    fh.write(result["text"])
-                print(f"✓ 已写出: {args.out}")
-            else:
-                print(result["text"])
+            # 门禁失败时正文并不算废稿：run_chapter_pipeline 仍会带回 text，
+            # 绝不能像以前那样直接 return 把十几分钟的生成成果丢掉。
+            text = result.get("text")
+            if text:
+                if args.out:
+                    with open(args.out, "w", encoding="utf-8") as fh:
+                        fh.write(text)
+                    suffix = "（门禁未过、未落库，仅供人工取用或改后重跑）" if failed else ""
+                    print(f"✓ 已写出: {args.out}{suffix}")
+                else:
+                    print(text)
+            if failed:
+                sys.exit(1)
 
         elif args.action == "converge":
             from app.config_utils import get_effective_config
@@ -1019,6 +1037,10 @@ def _delete_outline_node(node):
         for child in children_map.get(pid, []):
             to_delete.append(child)
             stack.append(child.id)
+    # FK ON：chapters.outline_node_id 指向待删节点，先解链（对齐 Web outline 路由）
+    from app.models import Chapter
+    Chapter.query.filter(Chapter.outline_node_id.in_([n.id for n in to_delete])).update(
+        {"outline_node_id": None}, synchronize_session=False)
     for n in to_delete:
         db.session.delete(n)
 
@@ -1396,11 +1418,16 @@ def cmd_story_state(args):
             state.arc_phase = data.get("arcPhase", "setup")
             state.arc_intensity = data.get("arcIntensity", 3)
             state.risk_flags = json.dumps(data.get("riskFlags", {}), ensure_ascii=False)
-            # 引擎字段完整回滚（对齐 Web rollback_state：此前只回滚主线字段导致兴奋度/节奏/进度错位）
-            state.excitement_history = json.dumps(data.get("excitementHistory", []), ensure_ascii=False)
-            state.recent_pacing = json.dumps(data.get("recentPacing", []), ensure_ascii=False)
-            state.last_excitement_chapter = data.get("lastExcitementChapter")
-            state.current_excitement_density = data.get("currentExcitementDensity") or 0.0
+            # 引擎字段回滚：旧快照缺键时保留现值（对齐 Web rollback_state 的条件恢复，
+            # 避免把现存兴奋度/节奏清成 []/0）
+            if "excitementHistory" in data:
+                state.excitement_history = json.dumps(data["excitementHistory"], ensure_ascii=False)
+            if "recentPacing" in data:
+                state.recent_pacing = json.dumps(data["recentPacing"], ensure_ascii=False)
+            if "lastExcitementChapter" in data:
+                state.last_excitement_chapter = data["lastExcitementChapter"]
+            if "currentExcitementDensity" in data:
+                state.current_excitement_density = data["currentExcitementDensity"] or 0.0
             state.current_chapter = data.get("currentChapter") or 0
             db.session.commit()
             print(f"✓ 已回滚到快照 [{snap.id}]（阶段 {state.arc_phase}, 强度 {state.arc_intensity}）")
@@ -1759,7 +1786,6 @@ def cmd_blind(args):
             except OSError as e:
                 print(f"✗ 无法读取文件：{e}")
                 return
-            import os
             title = os.path.basename(args.file)
             text, r = resolve_content("text", content=raw)
         else:
@@ -2905,6 +2931,36 @@ def cmd_pipeline(args):
     cmd_chapter(args)
 
 
+def _safe_filename(name, fallback="untitled"):
+    """文件名清洗：Windows 禁用字符/路径分隔符/首尾空白（对齐 Web 导出）。"""
+    cleaned = re.sub(r'[\\/:*?"<>|\r\n]+', "_", (name or "").strip())
+    return cleaned or fallback
+
+
+def _warn_outline_format(outline):
+    """手写大纲的固定格式软校验：缺字段只警告不阻断——自动勾选出场角色
+    与写手的节拍施工指令都依赖该格式，不合规等于放弃这两项收益。"""
+    from app.services.outline_template import check_outline_format
+    ok, missing = check_outline_format(outline)
+    if not ok:
+        print(f"⚠ 大纲未遵循 7 字段固定格式（缺：{'、'.join(missing)}）")
+        print("  查看/套用模板：lingyan chapter outline-template；"
+              "出场角色自动勾选与按节拍铺写正文均依赖此格式。")
+
+
+def _resolve_db_path():
+    """真实库路径：优先 AppConfig.DATABASE_PATH（config.py 已显式落大写 key），
+    兜底从 SQLALCHEMY_DATABASE_URI 反解——绝不再退回 CWD 相对 data.db
+    （此前 backup 会因此静默备份一个陈旧副本）。"""
+    p = app.config.get("DATABASE_PATH")
+    if p:
+        return p
+    uri = app.config.get("SQLALCHEMY_DATABASE_URI", "")
+    if uri.startswith("sqlite:///"):
+        return uri.replace("sqlite:///", "", 1)
+    return "data.db"
+
+
 def cmd_sys(args):
     with app.app_context():
         if args.action == "info":
@@ -2917,9 +2973,7 @@ def cmd_sys(args):
             print(f"  短篇总数: {ShortStory.query.count()}")
             print(f"  提示模板: {PromptTemplate.query.count()}")
 
-            import os
-            # 从 app.config 解析真实 DB 路径（支持 DATABASE_PATH env 覆盖），非硬编码
-            db_path = app.config.get("DATABASE_PATH") or "data.db"
+            db_path = _resolve_db_path()
             if os.path.exists(db_path):
                 size_mb = os.path.getsize(db_path) / (1024 * 1024)
                 print(f"  数据库大小: {size_mb:.2f} MB")
@@ -2932,12 +2986,15 @@ def cmd_sys(args):
 
         elif args.action == "backup":
             import sqlite3
-            db_path = app.config.get("DATABASE_PATH") or "data.db"
+            db_path = _resolve_db_path()
             if not os.path.exists(db_path):
                 print(f"✗ 数据库不存在: {db_path}")
                 return
             if not args.output:
                 args.output = f"data_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+            if os.path.exists(args.output):
+                print(f"✗ 目标文件已存在，拒绝覆盖: {args.output}")
+                return
             try:
                 # 用 SQLite 备份 API 而非裸 copy：WAL/并发写入时裸拷贝会得到撕裂快照
                 src = sqlite3.connect(db_path)
@@ -2947,8 +3004,43 @@ def cmd_sys(args):
                 dst.close()
                 src.close()
                 print(f"✓ 已备份到: {args.output}")
+                print("  注意: 备份包含 LLM 厂商 API key（明文落库），请勿分享/入库该文件")
             except Exception as e:
                 print(f"✗ 备份失败: {e}")
+
+        elif args.action == "restore":
+            import sqlite3
+            src_path = args.output
+            if not src_path or not os.path.exists(src_path):
+                print(f"✗ 备份文件不存在: {src_path}")
+                return
+            db_path = _resolve_db_path()
+            if not args.yes:
+                answer = input(f"用 {src_path} 覆盖当前数据库 {db_path}？当前数据将丢失！ (y/N) ").strip().lower()
+                if answer != "y":
+                    print("已取消")
+                    return
+            try:
+                # 备份文件必须是合法 SQLite 库（含 schema_migrations 表）才允许恢复
+                check = sqlite3.connect(src_path)
+                has_meta = check.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+                ).fetchone()
+                check.close()
+                if not has_meta:
+                    print("✗ 该文件不是灵砚备份（缺 schema_migrations 表），拒绝恢复")
+                    return
+                # backup API 原地覆盖：无需删除/停止服务即可恢复；
+                # 正在运行的服务重启后读到恢复后的数据
+                src = sqlite3.connect(src_path)
+                dst = sqlite3.connect(db_path)
+                with dst:
+                    src.backup(dst)
+                dst.close()
+                src.close()
+                print(f"✓ 已从 {src_path} 恢复到 {db_path}（重启服务生效）")
+            except Exception as e:
+                print(f"✗ 恢复失败: {e}")
 
         elif args.action == "sample-data":
             # 加载示例小说数据（对齐 Web 首页「一键加载示例数据」）
@@ -2966,35 +3058,23 @@ def cmd_sys(args):
             if not args.yes and not confirm("确定要重置数据库吗?"):
                 print("已取消")
                 return
-            # 先删子行再删父（Novel.chapters 无 ORM cascade + novel_id NOT NULL，
-            # 直接删 Novel 会 IntegrityError）——对齐 cmd_novel delete-all 的顺序
+            # FK ON 下的安全顺序：先清引用方（盲审指向 short_stories/chapter_versions、
+            # 拆书条目指向 plagiarize_tasks），再删本体。
+            BlindReview.query.delete()
+            DeconstructItem.query.delete()
             # 短篇及其版本/评审（级联依赖）
             for s in ShortStory.query.all():
                 db.session.delete(s)
-            # 长篇：先删章节→版本→评审→摘要→记忆，再删小说
+            # 长篇：删除单一真源级联，与 Web/CLI delete-all 同源
+            from app.services.delete_service import delete_novel_full
             for n in Novel.query.all():
-                for ch in Chapter.query.filter_by(novel_id=n.id).all():
-                    for v in ChapterVersion.query.filter_by(chapter_id=ch.id).all():
-                        CriticReview.query.filter_by(version_id=v.id).delete()
-                    ChapterVersion.query.filter_by(chapter_id=ch.id).delete()
-                    ChapterSummary.query.filter_by(chapter_id=ch.id).delete()
-                    ChapterMemory.query.filter_by(chapter_id=ch.id).delete()
-                    db.session.delete(ch)
-                Character.query.filter_by(novel_id=n.id).delete()
-                CharacterRelation.query.filter_by(novel_id=n.id).delete()
-                WorldSetting.query.filter_by(novel_id=n.id).delete()
-                OutlineNode.query.filter_by(novel_id=n.id).delete()
-                Foreshadowing.query.filter_by(novel_id=n.id).delete()
-                StoryState.query.filter_by(novel_id=n.id).delete()
-                StoryStateSnapshot.query.filter_by(novel_id=n.id).delete()
-                db.session.delete(n)
+                delete_novel_full(n.id)
             # 无外键归属的孤立数据
             Character.query.filter(Character.novel_id.is_(None)).delete()
             StoryState.query.delete()
             StoryStateSnapshot.query.delete()
-            BlindReview.query.delete()
-            PlagiarizeTask.query.delete()
             PendingExtraction.query.delete()
+            PlagiarizeTask.query.delete()
             db.session.commit()
             print("✓ 业务数据已清空（保留配置）")
             print("  提示: 如需彻底重置含配置，请删除 data.db 后重启")
@@ -3157,13 +3237,14 @@ def main():
     # ========== 章节 ==========
     p_chapter = subparsers.add_parser("chapter", help="章节管理")
     p_chapter.add_argument("action", choices=["list", "create", "content", "approve", "update", "delete",
-                                              "version-list", "version-content", "version-delete", "deai", "stale", "pipeline", "converge", "condense", "consistency"])
+                                              "version-list", "version-content", "version-delete", "deai", "stale", "pipeline", "converge", "condense", "consistency",
+                                              "outline-template"])
     p_chapter.add_argument("--novel", type=int, required=True, help="小说 ID")
     p_chapter.add_argument("--number", type=int, help="章节号")
     p_chapter.add_argument("--version", type=int, help="版本号（version-* 用）")
     p_chapter.add_argument("--save", action="store_true", help="保存结果（deai 用）")
     p_chapter.add_argument("--title", help="章节标题")
-    p_chapter.add_argument("--outline", help="章节大纲")
+    p_chapter.add_argument("--outline", help="章节大纲（建议 7 字段固定格式，chapter outline-template 查看）")
     p_chapter.add_argument("--directive", help="用户指示")
     p_chapter.add_argument("--full", action="store_true", help="显示完整内容")
     p_chapter.add_argument("--out", help="输出正文到文件（pipeline/converge/condense 用）")
@@ -3411,8 +3492,8 @@ def main():
     p_otpl.add_argument("--novel", type=int, help="小说 ID（apply 用）")
 
     p_sys = subparsers.add_parser("sys", help="系统管理")
-    p_sys.add_argument("action", choices=["info", "backup", "reset", "sample-data"], help="操作类型")
-    p_sys.add_argument("--output", help="备份输出路径")
+    p_sys.add_argument("action", choices=["info", "backup", "restore", "reset", "sample-data"], help="操作类型")
+    p_sys.add_argument("--output", help="备份输出路径（backup）/ 备份文件路径（restore）")
     p_sys.add_argument("-y", "--yes", action="store_true", help="跳过确认")
 
     # ========== 一键本章流水线（转发到 chapter pipeline） ==========
@@ -3502,6 +3583,9 @@ def main():
         if os.environ.get("LINGYAN_CLI_DEBUG"):
             import traceback
             traceback.print_exc()
+        # 失败必须给非零退出码：脚本/CI/Agent 调用方靠它判断是否真的写进去了。
+        # （此前只打印不设码，内部异常对调用方"看起来成功"，会静默丢数据。）
+        sys.exit(1)
 
 
 if __name__ == "__main__":

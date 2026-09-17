@@ -1,14 +1,57 @@
 import json
+import logging
+import logging.handlers
+import os
 
 from flask import Flask, request, jsonify
 from datetime import timedelta
 from app.config import AppConfig
 from app.models import db, init_db
 
+_LOG_CONFIGURED = False
+
+
+def _setup_logging(app):
+    """日志配置（全程只配一次）：app.* 命名空间 → 控制台 + logs/lingyan.log 轮转；
+    其他库（sqlalchemy/werkzeug 等）→ 仅文件，WARNING 起。
+    项目此前零日志配置，LLM 重试失败、盲审落库失败等关键故障没有持久现场。
+    """
+    global _LOG_CONFIGURED
+    if _LOG_CONFIGURED:
+        return
+    _LOG_CONFIGURED = True
+    level = logging.DEBUG if os.getenv("LINGYAN_DEBUG", "").strip() == "1" else logging.INFO
+    log_dir = os.getenv("LINGYAN_LOG_DIR") or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    app_logger = logging.getLogger("app")
+    app_logger.setLevel(level)
+    app_logger.propagate = False
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+    app_logger.addHandler(console)
+    file_h = logging.handlers.RotatingFileHandler(
+        os.path.join(log_dir, "lingyan.log"),
+        maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+    file_h.setFormatter(fmt)
+    app_logger.addHandler(file_h)
+
+    root = logging.getLogger()
+    root.setLevel(max(level, logging.WARNING))
+    root.addHandler(file_h)
+    # 第三方库（waitress "Serving on"、sqlalchemy 报警等）的 WARNING 仍要进控制台——
+    # 否则启动后终端一片安静，用户会误以为服务没起来
+    root_console = logging.StreamHandler()
+    root_console.setFormatter(fmt)
+    root.addHandler(root_console)
+
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(AppConfig)
+    _setup_logging(app)
 
     # Session 配置（默认7天）
     app.permanent_session_lifetime = timedelta(days=7)
@@ -96,8 +139,26 @@ def create_app():
     # （如自动提交 /novel/delete-all 清空数据）。无此头的旧客户端放行（fail-open），
     # 配合"仅绑定 127.0.0.1"的默认部署形成纵深。
     # ---------------------------------------------------------------------------
+    import ipaddress
     unsafe_methods = {"POST", "PUT", "PATCH", "DELETE"}
     allowed_fetch_sites = {"same-origin", "same-site", "none"}
+    # Host 白名单：localhost/IP 字面量放行（本机或局域网直连），其他域名默认拒绝——
+    # 封死 DNS rebinding（恶意域名解析到 127.0.0.1 后 Host 头仍是该域名）。
+    # 反代域名部署用 LINGYAN_ALLOWED_HOSTS 放行。
+    allowed_hosts = {"localhost"}
+    allowed_hosts |= {h.strip().lower() for h in
+                      os.getenv("LINGYAN_ALLOWED_HOSTS", "").split(",") if h.strip()}
+
+    @app.before_request
+    def _reject_foreign_host():
+        hostname = (request.host or "").rsplit(":", 1)[0].strip("[]").lower()
+        if not hostname or hostname in allowed_hosts:
+            return None
+        try:
+            ipaddress.ip_address(hostname)
+            return None  # IP 直连（本机/局域网）放行
+        except ValueError:
+            return jsonify({"error": f"host '{hostname}' not allowed"}), 403
 
     @app.before_request
     def _reject_cross_site_writes():
@@ -107,5 +168,27 @@ def create_app():
         if site and site not in allowed_fetch_sites:
             return jsonify({"error": "cross-site write request rejected"}), 403
         return None
+
+    # ---------------------------------------------------------------------------
+    # 全局兜底 errorhandler：此前未捕获异常直接落 Werkzeug 默认 500 页，
+    # 连日志都没有。HTTPException（404/405 等正常错误）交还原生处理；
+    # 真正的未捕获异常：回滚事务、记录堆栈、按请求类型返回 JSON/文本。
+    # ---------------------------------------------------------------------------
+    from werkzeug.exceptions import HTTPException
+
+    @app.errorhandler(Exception)
+    def _unhandled_exception(exc):
+        if isinstance(exc, HTTPException):
+            return exc
+        app.logger.exception("未捕获异常 %s %s", request.method, request.path)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        wants_json = (request.path.startswith("/api/")
+                      or request.accept_mimetypes.best == "application/json")
+        if wants_json:
+            return jsonify({"error": "服务器内部错误", "detail": str(exc)}), 500
+        return "服务器内部错误，详情请查看 logs/lingyan.log", 500
 
     return app

@@ -245,10 +245,17 @@ def expand_inspiration(story_id):
 
     流程：灵感 → 一次 AI 调用 → 解析 JSON → 存「核心概念 + 大纲」到 concept，
     存节点列表到 outline_nodes。内容生成阶段再逐节点一轮一轮写正文。
+    body 可带 {"climax_first": true} 走高潮先行规划。
     """
     story = ShortStory.query.get_or_404(story_id)
     if not (story.inspiration or story.theme or story.character_desc or story.scene_desc):
         return jsonify({"error": "请先填写灵感、主题或角色/场景设定"}), 400
+
+    # 高潮先行模式（BiT-MCTS 轻量落地）：先定高潮再双向补全节点
+    data = request.get_json(silent=True) or {}
+    if data.get("climax_first"):
+        return _expand_climax_first(story)
+
     prev_status = story.status
     story.status = "expanding"
     db.session.commit()
@@ -294,6 +301,65 @@ def expand_inspiration(story_id):
         "concept": story.concept,
         "nodes": nodes if nodes else parse_outline_nodes(story.concept, story.word_target),
     })
+
+
+def _expand_climax_first(story):
+    """高潮先行大纲：先锁定高潮，再倒推铺垫、顺推收束。"""
+    from app.services.climax_first import plan_climax_first
+    concept_src = "\n".join(filter(None, [
+        story.inspiration or "", story.theme or "",
+        story.plan_theme or "", story.plan_characters or "",
+        story.character_desc or "", story.scene_desc or "",
+    ])).strip()
+    if len(concept_src) < 20:
+        concept_src = (story.inspiration or story.theme or "").strip()
+    prev_status = story.status
+    story.status = "expanding"
+    db.session.commit()
+    cfg = get_model_config(agent_type="outline") or get_model_config(agent_type="short_story")
+    result = plan_climax_first(concept_src, cfg,
+                               n_before=3, n_after=2)
+    if result.get("error"):
+        story.status = prev_status
+        db.session.commit()
+        return jsonify({"error": result["error"]}), 502
+
+    climax = result["climax"]
+    plan_nodes = result["nodes"]
+    if not plan_nodes:
+        story.status = prev_status
+        db.session.commit()
+        return jsonify({"error": "高潮先行未产出有效节点"}), 502
+    # 按目标字数分配节点字数：保证总字数目标 ≈ word_target
+    n = max(len(plan_nodes), 1)
+    target = story.word_target or 5000
+    # 单节点目标落在 600-1500，优先保证总和接近 word_target
+    per = target // n
+    per = min(max(per, 600), 1500)
+    act_map = {"before": "铺垫", "climax": "高潮", "after": "收束"}
+    nodes = []
+    for i, pn in enumerate(plan_nodes, 1):
+        nodes.append({
+            "id": i,
+            "act": act_map.get(pn.get("position"), "发展"),
+            "title": pn.get("title", f"节点{i}"),
+            "summary": pn.get("summary", ""),
+            "word_count": per,
+            "status": "pending",
+        })
+    concept_str = (
+        f"【核心冲突】{climax.get('core_conflict', '')}\n"
+        f"【情绪峰值】{climax.get('emotional_peak', '')}\n"
+        f"【高潮节点】{climax.get('title', '')}\n"
+        f"（高潮先行规划：先锁高潮，再双向补全）"
+    )
+    story.concept = _format_concept(concept_str, nodes)
+    story.outline_nodes = json.dumps(nodes, ensure_ascii=False)
+    story.status = "concept_ready"
+    story.content = ""
+    db.session.commit()
+    return jsonify({"ok": True, "concept": story.concept, "nodes": nodes,
+                    "mode": "climax_first"})
 
 
 # ---------------------------------------------------------------------------

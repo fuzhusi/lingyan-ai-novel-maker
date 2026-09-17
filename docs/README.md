@@ -1,6 +1,6 @@
 # 灵砚 (LingYan) 文档索引
 
-> 最后更新：2026-09-08
+> 最后更新：2026-09-17
 
 ## 文档总览
 
@@ -19,6 +19,7 @@
 | [开源调研报告](open-source-survey.md) | `docs/open-source-survey.md` | 45 个开源项目调研、竞品对比、技术趋势、借鉴实现情况 | 📋 归档 (2026-06) |
 | [第二轮开源融合评估](merge-assessment.md) | `docs/merge-assessment.md` | jarvis-write / NovelForge / AI_NovelGenerator 机制拆解 — 采纳/改造/暂缓/拒收逐项裁决表 + 落地顺序建议 | ✅ 最新 (2026-09) |
 | [拆书落库与叙事时间轴调研](拆书落库与叙事时间轴调研.md) | `docs/拆书落库与叙事时间轴调研.md` | 知识库 schema / 伏笔承诺 / 人物生命周期 / 计划-实际一致性的字段级调研 — jarvis-write/ProseForge/NovelForge/StoryForge 七项目 + 编剧工业,含查找索引、横向对比、落地映射 | ✅ 最新 (2026-09) |
+| [系统全面审计报告](system-audit-2026-09-17.md) | `docs/system-audit-2026-09-17.md` | 2026-09-17 五路技术审核团队全量审计（架构/数据层/生成链/评审引擎/前端安全）— 8 个 P0 + P1 分主题清单、健康面证据、五批修复顺序（P0 已全部修复） | ✅ 最新 (2026-09) |
 | [系统审查报告](系统审查报告-2026-09.md) | `docs/系统审查报告-2026-09.md` | 产品经理 × 技术总监双视角审查 — 价值闭环/合规/成本黑箱 + P0 六项/技术债 TOP5/架构演进路线,含合并行动建议 | ✅ 最新 (2026-09) |
 | [Agent 协同方案](agent-collaboration.md) | `docs/agent-collaboration.md` | 双 Agent 改制后的协同设计 — 现状盘点、七项缺口、四条链拓扑（写作/评审/定稿/一致性）、写作包与统一意见契约、编排器分期（P1-P4） | ✅ 已实施 (2026-09) |
 | [产品整改计划](improvement-plan.md) | `docs/improvement-plan.md` | V3.0 整改计划 (P0-P3)、时间线、验收标准 — 大部分已完成 | 📋 归档 (2026-07) |

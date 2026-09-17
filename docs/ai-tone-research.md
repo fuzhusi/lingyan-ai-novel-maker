@@ -199,8 +199,47 @@ HC3 校准统计特征表（供参考，未经小说体裁对照验证）：
 
 ---
 
+## 九、第四轮迭代（2026-09-17）：全线推进 P0–P3
+
+> 依据：oh-story deslop 保护规则 / harshaneel RLHF+标点+burstiness / StoryWriter planning /
+> oh-story 双时间线 / BiT-MCTS 高潮先行 / Reflexion / ARB 生成vs润色阈值。
+
+| 阶段 | 内容 | 落点 |
+|------|------|------|
+| **P0** | 收敛保护（删改上限 轻15/中25/重35 + 只改怎么说不改说什么 + 实词保留率 + 短句过冲弃用）；细纲硬门禁（<50 字拒写正文）；补 Gate 情绪空转/结尾升华/解释腔 | `tone_convergence.py` / `chapter_runner.py` / `routes/generate.py` / `ai_metric.py` / `L2_dynamic.yaml` |
+| **P1** | RLHF 腔词表（27 条）；标点硬限（破折号/分号/空转冒号，门禁始终查）；Burstiness 塌平计分；本章事件清单（StoryWriter planning）；读者已知时间线 | `deai_patterns.py` / `skill_gate.py` / `chapter_events.py` / `reader_knowledge.py` + `ReaderKnowledge` 表 |
+| **P2** | 正向注入扩容（材料密度/不确定性/风格怪癖）；风格假设抽取（HyPerAlign 零 LLM）；高潮先行大纲（短篇 expand 可选 `climax_first`）；跨章 Reflexion | `L1_writer_positive.md` / `style_fingerprint.py` / `climax_first.py` / `reflexion.py` |
+| **P3** | `analyze_ai_tone(mode=generate\|polish)` 双权重（ARB：H2L 结构类降权）；校准点落盘 `data/calibration/points.jsonl` | `ai_metric.py` / `tone_calibration.py` / gate-check API |
+
+### 新增检测项与权重
+
+| key | 名称 | 权重 generate | 权重 polish | 来源 |
+|-----|------|--------------|-------------|------|
+| emotion_spin | 情绪空转 | 12 | 12 | oh-story Gate C |
+| ending_uplift | 结尾升华 | 10 | 10 | oh-story Gate F |
+| explain_tone | 解释腔 | 8 | 8 | oh-story Gate G |
+| burstiness_flat | Burstiness 塌平 | 10 | 4 | harshaneel |
+
+### 否决留痕（本轮未做）
+
+| 方案 | 原因 |
+|------|------|
+| 盲审注入读者已知 | 破坏「零上下文盲审」铁律；读者已知改为写作包 + 后续一致性检查使用 |
+| Fast-DetectGPT/Binoculars 直接集成 | 依赖本地双模型或采样曲率 API，成本与厂商兼容性未验证；雷达升级留待真实 API 确认后 |
+| LightRAG 实体图 | 引入重依赖；info_boundary 的名字子串扫描暂够，待读者已知积累后评估 |
+
+### 校准协议（P3）
+
+1. 日常 `POST /api/skills/gate-check` 可带 `mode=polish|generate`
+2. 回填朱雀率：`{"record_calibration": true, "source": "short#2", "zhuque_rate": 6.61, "pipeline": "..."}`
+3. 样本落 `data/calibration/points.jsonl`；`tone_calibration.summary_stats()` 查看配对样本数
+4. paired ≥15 后可做人味分 ↔ 朱雀率逻辑回归对齐（原 Phase 1b 的延续）
+
 参考来源：
 - 腾讯朱雀检测原理深度解析（腾讯云开发者社区，2026-06）
 - https://github.com/swaylq/humanize-chinese （HC3 校准统计层 + v6 流水线）
 - https://github.com/qoqu/anti-zhuque （朱雀六维诊断）
 - https://github.com/larashero3-dotcom/lieflat-less-ai-tone （283 万字对照语料研究，本地存档 `docs/reference/less-ai-tone/`）
+- https://github.com/zenstory-ai/oh-story-claudecode （7-Gate deslop + 双时间线 + 细纲门禁）
+- https://github.com/harshaneel/humanize （RLHF 腔 / 标点硬限 / burstiness）
+- StoryWriter arXiv:2506.16445；BiT-MCTS arXiv:2603.14410；ARB arXiv:2607.29539；HyPerAlign arXiv:2505.00038

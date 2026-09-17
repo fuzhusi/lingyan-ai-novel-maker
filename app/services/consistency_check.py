@@ -90,13 +90,17 @@ def _check_foreshadow_schedule(text, novel_id, chapter_number):
                     "excerpt": title,
                 })
             continue
-        # 活跃伏笔的排期检查
-        if (f.resolve_chapter or 0) and f.resolve_chapter <= chapter_number:
+        # 活跃伏笔的排期检查：期限 = 实际回收章，缺失时用计划值（预期回收章）兜底——
+        # 此前只看 resolve_chapter，而排程产出的伏笔回收章由真实正文确认后才回写，
+        # 计划值从未接入，逾期检查对拆书伏笔是死代码
+        deadline = f.resolve_chapter or f.expected_resolve_chapter
+        if deadline and deadline <= chapter_number:
+            basis = "约定" if f.resolve_chapter else "计划"
             suspects.append({
                 "kind": "foreshadow_overdue",
                 "agent_type": _KIND_AGENT["foreshadow_overdue"],
-                "title": f"回收逾期：{f.title or f'd伏笔#{f.id}'}",
-                "detail": (f"约定第 {f.resolve_chapter} 章回收，当前已到"
+                "title": f"回收逾期：{f.title or f'伏笔#{f.id}'}",
+                "detail": (f"{basis}第 {deadline} 章回收，当前已到"
                             f"第 {chapter_number} 章仍未回收。"),
                 "excerpt": (f.description or "")[:80],
             })

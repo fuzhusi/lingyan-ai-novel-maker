@@ -20,6 +20,31 @@ class EmptyChapterError(Exception):
     """版本正文为空，拒绝审批。"""
 
 
+def _update_excitement(story_state, chapter_number, content):
+    """确定性激动值生产者（零 LLM 成本）。
+
+    对白密度 + 感叹/问句频率 + 冲突动词密度 → 0~10 分。
+    history 截最近 30 章，recent_pacing 取最近 3 章供节奏判断。
+    """
+    text = content or ""
+    n = max(len(text), 1)
+    per_k = lambda c: c / n * 1000  # noqa: E731
+    dialogue = sum(text.count(m) for m in ("「", "」", '"', "“", "”"))
+    excl = text.count("！") + text.count("？")
+    conflict_hits = sum(text.count(w) for w in ("杀", "冲", "血", "爆", "砸", "吼", "逃", "追"))
+    density = min(10.0, per_k(dialogue) * 0.08 + per_k(excl) * 0.5 + per_k(conflict_hits) * 0.6)
+    try:
+        history = json.loads(story_state.excitement_history or "[]")
+    except (json.JSONDecodeError, TypeError):
+        history = []
+    history.append({"chapter": chapter_number, "density": round(density, 2)})
+    history = history[-30:]
+    story_state.excitement_history = json.dumps(history, ensure_ascii=False)
+    story_state.current_excitement_density = round(density, 2)
+    story_state.last_excitement_chapter = chapter_number
+    story_state.recent_pacing = json.dumps(history[-3:], ensure_ascii=False)
+
+
 def create_version_record(novel_id, chapter_number, content, source,
                           prompt_used="", model_params_json="{}"):
     """创建章节版本的单一入口（Web save-version / MCP save_chapter_content /
@@ -124,6 +149,9 @@ def approve_chapter_version(version, generate_summary=True):
         raise EmptyChapterError("正文为空，无法审批")
     version.approved = True
     chapter = version.chapter
+    # 两阶段提交：审批标记先行落库。此前整个审批事务跨两次同步 LLM 调用
+    # （各数十秒）持有 SQLite 写锁，并发写入 busy_timeout 打满即 database is locked
+    db.session.commit()
     summary_text = ""
 
     if generate_summary:
@@ -207,6 +235,8 @@ def approve_chapter_version(version, generate_summary=True):
         story_state = StoryState.query.filter_by(novel_id=chapter.novel_id).first()
         if story_state:
             story_state.current_chapter = max(story_state.current_chapter or 0, chapter.chapter_number)
+            # 确定性激动值生产者（审计 P0-7：引擎字段此前全系统无写入方，是死仪表盘）
+            _update_excitement(story_state, chapter.chapter_number, version.content)
 
         # P4 风格备忘录（B3）：逐章累积文体要点，写作包注入后续章节
         style_note = (memory_data.get("style_note") or "").strip()
@@ -218,6 +248,16 @@ def approve_chapter_version(version, generate_summary=True):
                 chapter.novel.style_memo_json = json.dumps(memos[-10:], ensure_ascii=False)
             except Exception:
                 logger.warning("风格备忘录更新失败", exc_info=True)
+
+        # 读者已知时间线（oh-story 双真相）：审批时提炼「已向读者揭示」的事实
+        try:
+            from app.services.reader_knowledge import record_reader_facts
+            from app.config_utils import get_effective_config as _gec
+            rk_cfg = _gec(chapter.novel, agent_type="summary")
+            record_reader_facts(chapter.novel_id, chapter.chapter_number,
+                                version.content, rk_cfg)
+        except Exception:
+            logger.warning("读者已知提炼失败（不阻断审批）", exc_info=True)
 
     db.session.commit()
     result = {"approved": True, "summary": summary_text}

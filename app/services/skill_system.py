@@ -712,11 +712,13 @@ def gate_check():
     text = (data.get("text") or request.form.get("text") or "").strip()
     if not text:
         return jsonify({"error": "text required"}), 400
+    # mode: generate（直接生成，默认）| polish（人稿+AI润色，ARB 阈值放宽）
+    mode = data.get("mode") or request.form.get("mode") or "generate"
     from app.services.skill_gate import run_gate
     from app.services.ai_metric import analyze_ai_tone
     rep = run_gate(text)
     try:
-        rep["ai_tone"] = analyze_ai_tone(text)
+        rep["ai_tone"] = analyze_ai_tone(text, mode=mode)
     except Exception:
         pass
     # 困惑度雷达：选词分布层信号（显式 opt-in——每次要 N 次复述调用，有成本）
@@ -736,6 +738,24 @@ def gate_check():
             rep["constraint_assembly"] = asm
     except Exception:
         pass
+    # 校准点落盘（可选，回填朱雀率时用 source 标识）
+    if data.get("record_calibration"):
+        try:
+            import hashlib
+            from app.services.tone_calibration import record_calibration_point
+            th = hashlib.md5(text.encode("utf-8")).hexdigest()[:12]
+            record_calibration_point(
+                source=str(data.get("source") or "adhoc"),
+                text_hash=th,
+                report=rep.get("ai_tone") or {},
+                zhuque_rate=data.get("zhuque_rate"),
+                pipeline=str(data.get("pipeline") or ""),
+                note=str(data.get("note") or ""),
+            )
+            rep["calibration_recorded"] = True
+        except Exception as e:
+            rep["calibration_recorded"] = False
+            rep["calibration_error"] = str(e)[:120]
     return jsonify(rep)
 
 

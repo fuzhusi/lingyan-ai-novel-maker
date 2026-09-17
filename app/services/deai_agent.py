@@ -16,7 +16,7 @@ import re
 from app.services.deai_patterns import (
     BANNED_FILLER_WORDS, BANNED_EMOTIONAL, BANNED_ADVERBS,
     BANNED_PATTERNS_DESC, BANNED_DIALOGUE, BANNED_TRANSITIONS,
-    BANNED_EXPLANATORY, BANNED_IDIOMS,
+    BANNED_EXPLANATORY, BANNED_IDIOMS, BANNED_RLHF,
     BANNED_REPLACEMENTS, BANNED_PATTERNS, COLLOQUIAL_RULES,
 )
 
@@ -229,6 +229,7 @@ def get_banned_patterns_summary():
         "transitions": len(BANNED_TRANSITIONS),
         "explanatory": len(BANNED_EXPLANATORY),
         "idioms": len(BANNED_IDIOMS),
+        "rlhf": len(BANNED_RLHF),
         "total_replacements": len(BANNED_REPLACEMENTS),
         "regex_patterns": len(BANNED_PATTERNS),
         "colloquial_rules": len(COLLOQUIAL_RULES),

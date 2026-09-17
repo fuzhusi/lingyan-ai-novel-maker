@@ -46,16 +46,16 @@
         <div id="gate-report" class="gate-report" style="display:none"></div>
 
         <div class="chapter-meta">
-            {% if outline_context %}
-            <details open>
-                <summary>&#x1F4CB; 大纲树规划</summary>
+            {# 大纲单一事实源 = 大纲树节点：已关联章节直接显示节点实时摘要（可内联编辑、保存写回大纲树）；
+               未关联章节保留旧 chapter.outline 兜底显示。独立的「本章大纲」快照块已并入此处 #}
+            <details id="outline-plan-details"{% if not chapter.outline and not outline_context %} open{% endif %}>
+                <summary>&#x1F4CB; 大纲树规划 <span id="outline-status" style="font-size:0.78rem;color:var(--text-dim)"></span>{% if chapter.outline_stale() %} <span style="font-size:0.78rem;color:#c9862b">&#x26A0; 大纲已变更，当前正文基于旧大纲生成</span>{% endif %}</summary>
+                {% if outline_context %}
                 {% if outline_context.volume %}
                 <div class="meta-block"><strong>所属卷：</strong>{{ outline_context.volume.title }}</div>
                 {% endif %}
                 <div class="meta-block"><strong>节点：</strong>{{ outline_context.node.title }}</div>
-                {% if outline_context.node.summary %}
-                <div class="meta-block">{{ outline_context.node.summary }}</div>
-                {% endif %}
+                <div class="meta-block" id="outline-content">{{ outline_context.node.summary or '（节点暂无摘要，点「编辑大纲」补充）' }}</div>
                 {% if outline_context.scenes %}
                 <div class="meta-block" style="margin-top:0.5rem">
                     <strong>分幕指引：</strong>
@@ -65,13 +65,38 @@
                         <div style="color:var(--text-dim);font-size:0.85rem">{{ s.summary }}</div>
                     </div>
                     {% endfor %}
+                    <div style="font-size:0.75rem;color:var(--text-faint);margin-top:0.3rem">分幕在大纲树页维护</div>
                 </div>
                 {% endif %}
-            </details>
-            {% endif %}
-            <details id="outline-details"{% if chapter.outline and not outline_context %} open{% endif %}>
-                <summary>本章大纲 <span id="outline-status" style="font-size:0.78rem;color:var(--text-dim)"></span>{% if chapter.outline_stale() %} <span style="font-size:0.78rem;color:#c9862b">&#x26A0; 大纲已变更，当前正文基于旧大纲生成</span>{% endif %}</summary>
-                <div id="outline-content" class="meta-block">{% if chapter.outline %}{{ chapter.outline }}{% else %}<span class="empty">暂无大纲，点击「AI 生成本章」将先生成大纲</span>{% endif %}</div>
+                <div style="margin-top:0.5rem">
+                    <button type="button" id="btn-edit-outline" class="btn-sm">&#x270E; 编辑大纲</button>
+                    <span style="font-size:0.75rem;color:var(--text-faint)">保存后写回大纲树，两边保持一致</span>
+                </div>
+                <div id="outline-edit-area" style="display:none;margin-top:0.5rem">
+                    <textarea id="outline-edit-input" rows="12" style="width:100%;font-family:inherit">{{ outline_context.node.summary or '' }}</textarea>
+                    <div style="margin-top:0.4rem;display:flex;gap:0.5rem;align-items:center">
+                        <button type="button" id="btn-save-outline" class="btn-sm">保存到大纲树</button>
+                        <button type="button" id="btn-cancel-outline" class="btn-sm">取消</button>
+                        <button type="button" class="btn-sm" onclick="insertOutlineTemplate('outline-edit-input')">&#x1F4CB; 插入模板</button>
+                    </div>
+                </div>
+                {% else %}
+                <div class="meta-block" id="outline-content">{% if chapter.outline %}{{ chapter.outline }}{% else %}<span class="empty">未关联大纲树节点，点击「AI 生成本章」将先生成大纲</span>{% endif %}</div>
+                {# 未关联章节的大纲可编辑/重生成；编辑区无条件渲染——AI 生成缺字段时要在这里补齐 #}
+                <div style="margin-top:0.5rem">
+                    <button type="button" id="btn-edit-outline" class="btn-sm">&#x270E; 编辑大纲</button>
+                    <button type="button" id="btn-regen-outline" class="btn-sm">&#x21bb; 重新生成大纲</button>
+                    <span style="font-size:0.75rem;color:var(--text-faint)">未关联大纲树：保存写回本章大纲快照（必须 7 字段固定格式）</span>
+                </div>
+                <div id="outline-edit-area" style="display:none;margin-top:0.5rem">
+                    <textarea id="outline-edit-input" rows="12" style="width:100%;font-family:inherit">{{ chapter.outline }}</textarea>
+                    <div style="margin-top:0.4rem;display:flex;gap:0.5rem;align-items:center">
+                        <button type="button" id="btn-save-outline" class="btn-sm">保存大纲</button>
+                        <button type="button" id="btn-cancel-outline" class="btn-sm">取消</button>
+                        <button type="button" class="btn-sm" onclick="insertOutlineTemplate('outline-edit-input')">&#x1F4CB; 插入模板</button>
+                    </div>
+                </div>
+                {% endif %}
             </details>
             <details>
                 <summary>用户指示</summary>
@@ -89,7 +114,9 @@
             <details id="char-select-details">
                 <summary>本章出场角色 <span id="char-select-status" style="font-size:0.78rem;color:var(--text-dim)"></span></summary>
                 <div class="meta-block" style="font-size:0.82rem;color:var(--text-dim);margin-bottom:0.5rem">
-                    勾选本章会登场的角色，生成时只注入这些角色的档案（减少无关设定干扰）。
+                    勾选本章会登场的角色，生成时只注入这些角色的档案并限制其他角色出场（减少无关设定干扰与人物乱入）。
+                    <button id="btn-infer-cast" class="btn-sm" style="font-size:0.72rem;padding:0.1rem 0.45rem;margin-left:0.4rem"
+                            onclick="applyInferredCast && applyInferredCast(true)">按大纲重推</button>
                 </div>
                 <div id="char-select-list" style="display:flex;flex-wrap:wrap;gap:0.4rem">
                     {% for c in characters %}
@@ -163,6 +190,24 @@
         return d.innerHTML;
     }
 
+    // 剥离模型附在正文尾部的元信息（"改动说明：1.… 2.…"等）——不属于正文。
+    // 兜底用：rewrite 提示词已明令禁止，但模型偶发不听话
+    function stripMetaTail(text) {
+        if (!text) return '';
+        const re = /(?:^|\n)[\s>#]*(?:【?(?:改动|修改|修订|变更)说明】?|以下是?(?:本次)?(?:的)?(?:改动|修改)说明|---+\s*改动说明)\s*[：:][\s\S]*$/;
+        const m = text.match(re);
+        return m ? text.slice(0, m.index).trimEnd() : text;
+    }
+
+    // 大纲展示区结构化：7 字段名高亮（服务端渲染的是纯文本；
+    // 等 outline-template.js 就绪后再跑，故挂 DOMContentLoaded）
+    window.addEventListener('DOMContentLoaded', function() {
+        const el = document.getElementById('outline-content');
+        if (el && el.children.length === 0 && el.textContent.trim()) {
+            el.innerHTML = formatOutlineDisplay(el.textContent);
+        }
+    });
+
     const NOVEL_ID = {{ novel.id }};
     const CHAPTER_NUM = {{ chapter.chapter_number }};
     const GENRE = {{ novel_genre|tojson|safe }};
@@ -172,7 +217,10 @@
     let generating = false;
     let fullText = '';
     let currentVersionId = null;
-    let hasOutline = {{ 'true' if chapter.outline else 'false' }};
+    let hasOutline = {{ 'true' if chapter.outline or outline_context else 'false' }};
+    // 大纲树节点关联信息：已关联章节生成时用节点实时组装的大纲（含分幕指引）
+    const OUTLINE_NODE_ID = {{ chapter.outline_node_id or 'null' }};
+    let outlinePlanText = {{ outline_plan_text|tojson|safe }};
 
     const $ = id => document.getElementById(id);
     const btnGen = $('btn-generate');
@@ -194,7 +242,7 @@
     const versionList = $('version-list');
     const outlineContent = $('outline-content');
     const outlineStatus = $('outline-status');
-    const outlineDetails = $('outline-details');
+    const outlineDetails = $('outline-plan-details');
 
     function setButtons(active) {
         const btns = [btnGen, btnSaveAI, btnSaveHuman, btnEdit, btnReview, btnAudit, btnApprove, btnRewrite, btnDiff];
@@ -331,7 +379,7 @@
             : score >= 8 ? 'var(--success)' : score >= 6 ? 'var(--accent)' : 'var(--danger)';
         $('review-score').innerHTML = `
             <span style="color:${scoreColor};font-size:1.4rem;font-weight:700">${hasScore ? score : '—'}</span>
-            <span style="color:var(--text-dim);font-size:0.85rem">/10 · ${grade}级</span>
+            <span style="color:var(--text-dim);font-size:0.85rem">/10 · ${escapeHtml(String(grade))}级</span>
         `;
 
         // 摘要
@@ -359,7 +407,7 @@
         blindHtml += '</div>';
         $('review-dimensions').innerHTML = blindHtml;
 
-        // 问题清单（按严重度排序）
+        // 问题清单（按严重度排序）：问题描述为主体，引文与段落定位辅助
         let issuesHtml = `<div style="margin-bottom:0.5rem;font-size:0.85rem;color:var(--text-bright)">
             共发现 <strong style="color:var(--danger)">${report.high_issue_count || 0}</strong> 个高优先级问题，
             <strong>${report.total_issue_count || 0}</strong> 个总问题
@@ -368,12 +416,14 @@
             const sevColor = issue.severity === 'high' ? 'var(--danger)' :
                               issue.severity === 'medium' ? 'var(--accent)' : 'var(--text-dim)';
             const sevLabel = issue.severity === 'high' ? '高' : issue.severity === 'medium' ? '中' : '低';
+            const locLabel = issue.location || issue.dimension_name || issue.dimension || '';
             issuesHtml += `<div style="padding:0.5rem 0.7rem;margin-bottom:0.4rem;background:var(--bg);border-left:3px solid ${sevColor};border-radius:0 4px 4px 0">
                 <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.3rem">
                     <span style="background:${sevColor};color:var(--bg);padding:0.1rem 0.4rem;border-radius:3px;font-size:0.72rem;font-weight:600">${sevLabel}</span>
-                    <span style="color:var(--accent);font-size:0.82rem;font-weight:600">${escapeHtml(issue.dimension_name || issue.dimension || '')}</span>
+                    <span style="color:var(--accent);font-size:0.82rem;font-weight:600">${escapeHtml(locLabel)}</span>
                 </div>
                 <div style="color:var(--text-bright);font-size:0.85rem;margin-bottom:0.2rem">${escapeHtml(issue.issue || '')}</div>
+                ${issue.quote ? `<div style="color:var(--text-faint);font-size:0.78rem;margin-bottom:0.2rem">引用：「${escapeHtml(issue.quote)}」</div>` : ''}
                 ${issue.suggestion ? `<div style="color:var(--text-dim);font-size:0.78rem">建议：${escapeHtml(issue.suggestion)}</div>` : ''}
             </div>`;
         }
@@ -579,7 +629,8 @@
             } else {
                 fullText = data.text;
                 outputArea.value = data.text;
-                if (data.outline) outlineContent.textContent = data.outline;
+                // 仅未关联节点时回显流水线大纲；已关联章节的大纲显示以大纲树为准
+                if (data.outline && !OUTLINE_NODE_ID && outlineContent) outlineContent.textContent = data.outline;
                 runSkillGate(data.text);
                 const stages = (data.stages || []).map(s => s.stage).join(' → ');
                 alert('流水线完成：' + stages + '\n人味分 ' + (data.human_score ?? '-') +
@@ -650,19 +701,191 @@
     (function initCharSelect() {
         const cbs = document.querySelectorAll('.char-cb');
         if (!cbs.length) return;
-        // 恢复上次的选择（同一章的出场阵容通常连续）
+
+        function setCheckedIds(ids) {
+            const set = new Set(ids.map(String));
+            cbs.forEach(cb => { cb.checked = set.has(cb.value); });
+            try { localStorage.setItem(CHAR_STORE_KEY, JSON.stringify(getSelectedCharacterIds())); } catch(e) {}
+        }
+
+        // 按本章大纲文本推断出场角色并点亮勾选（用户之后仍可手动增删）。
+        // reset=true 时在状态里明示"已重置"——重推会覆盖手动勾选，不能悄悄发生
+        async function applyInferredCast(reset) {
+            try {
+                const resp = await fetch(`/novel/${NOVEL_ID}/api/infer-cast?chapter_number=${CHAPTER_NUM}`);
+                const data = await resp.json();
+                if (!data.ok) return false;
+                setCheckedIds(data.matched.map(m => m.id));
+                if (reset) { const d = $('char-select-details'); if (d) d.open = true; }
+                updateCharSelectStatus();
+                const el = $('char-select-status');
+                if (el) el.textContent = (reset ? '已按新大纲重置勾选；' : '') + (data.outline_empty
+                    ? '（大纲为空，未自动勾选；可手动勾选）'
+                    : (data.matched.length
+                        ? `（${data.matched.length}/${cbs.length} · 按大纲自动勾选，可手动调整）`
+                        : `（大纲未提到任何人物卡名字，默认不注入；可手动勾选）`));
+                return true;
+            } catch(e) { return false; }
+        }
+        window.applyInferredCast = applyInferredCast;
+
+        // 有手动存档则尊重之；无存档（首次写本章）→ 按大纲自动勾选
+        let restored = false;
         try {
             const saved = JSON.parse(localStorage.getItem(CHAR_STORE_KEY) || 'null');
             if (Array.isArray(saved)) {
                 cbs.forEach(cb => { cb.checked = saved.includes(cb.value); });
+                restored = true;
             }
         } catch(e) {}
+        if (!restored) applyInferredCast();
+        else updateCharSelectStatus();
+
         cbs.forEach(cb => cb.addEventListener('change', function() {
             try { localStorage.setItem(CHAR_STORE_KEY, JSON.stringify(getSelectedCharacterIds())); } catch(e) {}
             updateCharSelectStatus();
         }));
-        updateCharSelectStatus();
     })();
+
+    // === 大纲内联编辑：已关联章节改节点摘要（保存写回大纲树并同步章节）；
+    // 未关联章节改本章大纲快照（save-outline）——两条路径都能改，大纲不是刻在石头上的 ===
+    (function initOutlineEdit() {
+        const btnEditOutline = $('btn-edit-outline');
+        if (!btnEditOutline) return;  // 未关联且尚无大纲：生成后再编辑
+        const editArea = $('outline-edit-area'), editInput = $('outline-edit-input');
+        {% if outline_context and outline_context.node %}
+        const linked = true;
+        let lastSaved = {{ outline_context.node.summary|tojson|safe }};
+        {% else %}
+        const linked = false;
+        let lastSaved = {{ chapter.outline|tojson|safe }};
+        {% endif %}
+        btnEditOutline.onclick = function() {
+            const show = editArea.style.display === 'none';
+            editArea.style.display = show ? 'block' : 'none';
+            if (show) editInput.focus();
+        };
+        $('btn-cancel-outline').onclick = function() {
+            editArea.style.display = 'none';
+            editInput.value = lastSaved;
+        };
+        $('btn-save-outline').onclick = async function() {
+            // 固定格式硬限制：空值/缺 7 字段直接拒绝保存
+            if (!editInput.value.trim()) { alert('大纲不能为空'); return; }
+            const fmtErr = outlineFormatError(editInput.value);
+            if (fmtErr) { alert(fmtErr); return; }
+            const btn = $('btn-save-outline');
+            btn.disabled = true; btn.textContent = '保存中...';
+            try {
+                let savedText = '';
+                if (linked) {
+                    const form = new URLSearchParams();
+                    form.append('summary', editInput.value);
+                    const resp = await fetch(`/novel/${NOVEL_ID}/outline/${OUTLINE_NODE_ID}/edit-summary`, { method: 'POST', body: form });
+                    const data = await resp.json();
+                    if (!resp.ok || !data.ok) throw new Error(data.error || 'HTTP ' + resp.status);
+                    outlinePlanText = data.outline_text || '';
+                    savedText = data.summary || '';
+                } else {
+                    const form = new URLSearchParams();
+                    form.append('outline', editInput.value);
+                    const resp = await fetch(`/novel/${NOVEL_ID}/chapter/${CHAPTER_NUM}/save-outline`, { method: 'POST', body: form });
+                    const data = await resp.json();
+                    if (!resp.ok || !data.ok) throw new Error(data.error || 'HTTP ' + resp.status);
+                    hasOutline = true;
+                    savedText = editInput.value;
+                }
+                outlineContent.innerHTML = formatOutlineDisplay(savedText) || '（节点暂无摘要）';
+                lastSaved = savedText;
+                editArea.style.display = 'none';
+                outlineStatus.textContent = linked ? '（✓ 已同步大纲树）' : '（✓ 已保存大纲）';
+                applyInferredCast(true);  // 大纲已变更 → 重推出场角色勾选
+            } catch(e) {
+                alert('保存失败: ' + e.message);
+            } finally {
+                btn.disabled = false; btn.textContent = linked ? '保存到大纲树' : '保存大纲';
+            }
+        };
+    })();
+
+    // 生成并保存本章大纲（写作页快照路径）。返回 true=大纲就绪；
+    // streamInd/按钮收尾由调用方负责——btnGen 成功后要接着写正文，保持转圈。
+    async function generateOutline() {
+        if (hasOutline) return true;
+        outlineDetails.open = true;
+        outlineStatus.textContent = '（生成大纲中...）';
+        outlineContent.innerHTML = '<span class="streaming-indicator" style="position:static">AI 正在规划本章大纲...</span>';
+        streamInd.style.display = 'block';
+
+        const outlineForm = new URLSearchParams();
+        outlineForm.append('novel_id', NOVEL_ID);
+        outlineForm.append('chapter_number', CHAPTER_NUM);
+        outlineForm.append('novel_title', {{ novel.title|tojson|safe }});
+        outlineForm.append('chapter_title', {{ chapter.title|tojson|safe }});
+        outlineForm.append('genre', GENRE);
+        outlineForm.append('synopsis', SYNOPSIS);
+        outlineForm.append('world_intro', WORLD_INTRO);
+
+        let outlineText = '';
+        const prevText = outlineContent.textContent || '';
+        try {
+            await streamFetch('/api/outline-stream', outlineForm, function(token) {
+                outlineText += token;
+                outlineContent.textContent = outlineText;
+            });
+            // AI 偶发缺字段：不落库，填入编辑框要求人工补齐后再保存（限制死）
+            const fmtErr = outlineFormatError(outlineText);
+            if (fmtErr) {
+                outlineStatus.textContent = '（AI 大纲缺字段，请补齐后保存）';
+                const editArea = $('outline-edit-area'), editInput2 = $('outline-edit-input');
+                if (editArea && editInput2) {
+                    editInput2.value = outlineText;
+                    editArea.style.display = 'block';
+                }
+                return false;
+            }
+            const saveForm = new URLSearchParams();
+            saveForm.append('outline', outlineText);
+            const saveResp = await fetch(`/novel/${NOVEL_ID}/chapter/${CHAPTER_NUM}/save-outline`, { method: 'POST', body: saveForm });
+            const saveData = await saveResp.json();
+            if (saveResp.ok && saveData.ok) {
+                hasOutline = true;
+                outlineStatus.textContent = '（✓ 已保存大纲）';
+                outlineContent.innerHTML = formatOutlineDisplay(outlineText);
+                applyInferredCast(true);  // 大纲刚生成 → 按大纲重推出场角色
+                return true;
+            }
+            outlineStatus.textContent = '（大纲保存失败）';
+            return false;
+        } catch(e) {
+            errorBox.textContent = '大纲生成失败: ' + e.message;
+            errorBox.style.display = 'block';
+            if (prevText.trim()) {
+                // 失败时留住旧大纲——别让用户刷新页面才能找回
+                outlineContent.textContent = prevText;
+                outlineStatus.textContent = '（生成失败，原大纲已保留）';
+            } else {
+                outlineContent.innerHTML = '<span style="color:var(--danger)">大纲生成失败: ' + e.message + '</span>';
+                outlineStatus.textContent = '（生成失败）';
+            }
+            return false;
+        }
+    }
+
+    // 重新生成大纲：只重生成大纲并保存，不自动写正文（正文仍由「AI 生成本章」触发）
+    const btnRegenOutline = $('btn-regen-outline');
+    if (btnRegenOutline) btnRegenOutline.onclick = async function() {
+        if (generating) return;
+        if (!confirm('重新生成将覆盖当前大纲，出场角色勾选也会按新大纲重推，确定？')) return;
+        generating = true; btnGen.disabled = true; updateButtons();
+        hasOutline = false;
+        try {
+            await generateOutline();
+        } finally {
+            generating = false; btnGen.disabled = false;
+            streamInd.style.display = 'none'; updateButtons();
+        }
+    };
 
     // === Generate outline first, then content ===
     btnGen.onclick = async function() {
@@ -686,47 +909,26 @@
             }
         } catch(e) {}
 
-        // Step 1: Generate outline if chapter doesn't have one
-        if (!hasOutline) {
-            outlineDetails.open = true;
-            outlineStatus.textContent = '（生成大纲中...）';
-            outlineContent.innerHTML = '<span class="streaming-indicator" style="position:static">AI 正在规划本章大纲...</span>';
-            streamInd.style.display = 'block';
-
-            const outlineForm = new URLSearchParams();
-            outlineForm.append('novel_id', NOVEL_ID);
-            outlineForm.append('chapter_number', CHAPTER_NUM);
-            outlineForm.append('novel_title', {{ novel.title|tojson|safe }});
-            outlineForm.append('chapter_title', {{ chapter.title|tojson|safe }});
-            outlineForm.append('genre', GENRE);
-            outlineForm.append('synopsis', SYNOPSIS);
-            outlineForm.append('world_intro', WORLD_INTRO);
-
-            let outlineText = '';
-            try {
-                await streamFetch('/api/outline-stream', outlineForm, function(token) {
-                    outlineText += token;
-                    outlineContent.textContent = outlineText;
-                });
-                const saveForm = new URLSearchParams();
-                saveForm.append('outline', outlineText);
-                const saveResp = await fetch(`/novel/${NOVEL_ID}/chapter/${CHAPTER_NUM}/save-outline`, { method: 'POST', body: saveForm });
-                const saveData = await saveResp.json();
-                if (saveResp.ok && saveData.ok) {
-                    hasOutline = true;
-                    outlineStatus.textContent = '（✓ 已保存大纲）';
-                } else {
-                    outlineStatus.textContent = '（大纲保存失败）';
+        // 零匹配兜底：书里有角色卡但大纲一个人名都没匹配上时，
+        // cast_constraint 会禁一切具名角色登场——白烧一次 2500 字生成前给一次拦截
+        try {
+            if (document.querySelectorAll('.char-cb').length > 0) {
+                const castResp = await fetch(`/novel/${NOVEL_ID}/api/infer-cast?chapter_number=${CHAPTER_NUM}`);
+                const castData = await castResp.json();
+                if (castData.ok && !castData.outline_empty && castData.matched.length === 0
+                    && !confirm('当前大纲没有匹配到任何人物卡：生成将不注入角色档案，且具名角色一律不得登场。\n可先检查大纲人名是否与人物卡一致，或点「按大纲重推」。仍要继续生成吗？')) {
+                    generating = false; btnGen.innerHTML = '&#x2699; AI 生成本章'; btnGen.disabled = false;
+                    updateButtons();
+                    return;
                 }
-            } catch(e) {
-                outlineStatus.textContent = '（生成失败）';
-                outlineContent.innerHTML = '<span style="color:var(--danger)">大纲生成失败: ' + e.message + '</span>';
-                errorBox.textContent = '大纲生成失败: ' + e.message;
-                errorBox.style.display = 'block';
-                generating = false; btnGen.innerHTML = '&#x2699; AI 生成本章'; btnGen.disabled = false;
-                streamInd.style.display = 'none'; updateButtons();
-                return;
             }
+        } catch(e) {}
+
+        // Step 1: Generate outline if chapter doesn't have one
+        if (!await generateOutline()) {
+            generating = false; btnGen.innerHTML = '&#x2699; AI 生成本章'; btnGen.disabled = false;
+            streamInd.style.display = 'none'; updateButtons();
+            return;
         }
 
         // Step 2: Generate chapter content
@@ -735,7 +937,12 @@
         btnGen.innerHTML = '&#x2699; 写作中...';
 
         const formData = new URLSearchParams();
-        formData.append('outline', outlineContent.textContent || {{ chapter.outline|tojson|safe }});
+        // 大纲来源优先级：大纲树节点实时组装 > AI 刚生成（未关联章节）> 旧快照兜底。
+        // 已关联章节不取 outlineContent.textContent——那里可能是「暂无摘要」占位文案
+        const outlineForGen = outlinePlanText
+            || (OUTLINE_NODE_ID ? '' : (outlineContent ? outlineContent.textContent : ''))
+            || {{ chapter.outline|tojson|safe }};
+        formData.append('outline', outlineForGen);
         formData.append('user_directive', {{ chapter.user_directive|tojson|safe }});
         formData.append('chapter_title', {{ chapter.title|tojson|safe }});
         formData.append('novel_title', {{ novel.title|tojson|safe }});
@@ -759,37 +966,73 @@
         streamInd.style.display = 'none'; updateButtons();
     };
 
-    // === Review ===
+    // === Review（流式）：critic 意见逐 token 实时显示，双盲审并行，最后推结构化报告 ===
     btnReview.onclick = async function() {
         if (generating) return;
         if (!currentVersionId) return alert('请先选择一个版本');
-        generating = true; btnReview.innerHTML = '评审中...'; btnReview.disabled = true;
+        generating = true; btnReview.disabled = true; btnReview.innerHTML = '评审中...';
         $('review-panel').style.display = 'block';
-        $('review-dimensions').innerHTML = '<div class="streaming-indicator" style="position:static">正在评审...</div>';
-        $('review-annotations').innerHTML = '';
-        $('review-comment').textContent = '';
         $('review-score').textContent = '';
+        $('review-dimensions').innerHTML = '<div class="streaming-indicator" style="position:static">双盲审并行进行中…</div>';
+        $('review-annotations').innerHTML = '';
+        $('opinions-box').innerHTML = '';
+        $('review-comment').innerHTML = '<div class="streaming-indicator" style="position:static">评审意见输出中…</div>';
         errorBox.style.display = 'none';
 
         const formData = new URLSearchParams();
-        formData.append('version_id', currentVersionId);
         formData.append('novel_id', NOVEL_ID);
         formData.append('chapter_number', CHAPTER_NUM);
+        formData.append('version_id', currentVersionId);
         formData.append('include_rewrite', '0');
 
-        btnReview.innerHTML = '⏳ 评审+盲审中...';
+        let criticText = '';
+        let rewriteBox = null, rewriteText = '';
+        let gotReport = false;
 
         try {
-            // 一步调用：critic 评审 + 双盲审 + 综合报告
-            const resp = await fetch('/api/unified-review', { method: 'POST', body: formData });
-            const report = await resp.json();
-
-            if (report.error) {
-                errorBox.textContent = '评审失败: ' + report.error;
+            // 一步流式：critic 评审（逐 token）→ 双盲审（并行）→ 合并报告
+            await LingyanStream.sse('/api/unified-review-stream', formData, {
+                onEvent(ev) {
+                    if (ev.status) {
+                        const st = ev.status;
+                        if (st.stage === 'review_start') btnReview.innerHTML = '⏳ 评审+盲审中…';
+                        else if (st.stage === 'critic_done') btnReview.innerHTML = '盲审收尾中…';
+                        else if (st.stage === 'blind_done') btnReview.innerHTML = '合并报告中…';
+                        else if (st.stage === 'rewrite_start') btnReview.innerHTML = '✍ AI 改写中…';
+                        else if (st.stage === 'rewrite_done' && rewriteBox) {
+                            rewriteBox.querySelector('.rw-head').textContent = '✍ AI 改写建议稿（已完成，可复制）';
+                            rewriteText = stripMetaTail(rewriteText);
+                            rewriteBox.querySelector('.rw-body').textContent = rewriteText;
+                        }
+                    } else if (ev.token && ev.phase === 'critic') {
+                        // critic 输出是结构化 JSON（供报告渲染），逐字滚 JSON 观感差——
+                        // 流式期间只显示进度提示，报告事件到达后由 renderUnifiedReport 呈现
+                        criticText += ev.token;
+                        $('review-comment').innerHTML =
+                            '<div class="streaming-indicator" style="position:static">Critic 正在评审（已收 '
+                            + criticText.length + ' 字符），完成后展示结构化报告…</div>';
+                    } else if (ev.token && ev.phase === 'rewrite') {
+                        if (!rewriteBox) {
+                            rewriteBox = document.createElement('div');
+                            rewriteBox.style.cssText = 'margin-top:0.8rem;padding:0.7rem;background:var(--bg);border:1px solid var(--border);border-radius:8px';
+                            rewriteBox.innerHTML = '<div class="rw-head" style="font-weight:600;color:var(--accent);margin-bottom:0.4rem">✍ AI 改写建议稿（流式生成中…）</div>'
+                                + '<pre class="rw-body" style="white-space:pre-wrap;font-size:0.85rem;line-height:1.7;color:var(--text-bright);margin:0;font-family:inherit"></pre>';
+                            $('review-annotations').appendChild(rewriteBox);
+                        }
+                        rewriteText += ev.token;
+                        rewriteBox.querySelector('.rw-body').textContent = rewriteText;
+                    } else if (ev.report) {
+                        gotReport = true;
+                        renderUnifiedReport(ev.report);
+                    } else if (ev.error) {
+                        errorBox.textContent = '评审失败: ' + ev.error;
+                        errorBox.style.display = 'block';
+                    }
+                },
+            });
+            if (!gotReport && errorBox.style.display !== 'block') {
+                errorBox.textContent = '评审未返回报告，请重试';
                 errorBox.style.display = 'block';
-            } else {
-                // 渲染统一报告（评分 + 维度 + 问题清单 + 改写建议）
-                renderUnifiedReport(report);
             }
         } catch(e) {
             errorBox.textContent = '评审请求失败: ' + e.message;
@@ -861,7 +1104,8 @@
                 outputArea.value += token;
                 outputArea.scrollTop = outputArea.scrollHeight;
             });
-            fullText = outputArea.value;
+            fullText = stripMetaTail(outputArea.value);
+            outputArea.value = fullText;  // 剥离尾部"改动说明"等元信息
             if (fullText.trim()) runSkillGate(fullText);
         } catch(e) {
             errorBox.textContent = '重写失败: ' + e.message;
@@ -891,7 +1135,7 @@
     // unified diff 着色渲染：+绿 -红 @@/文件头灰 上下文行暗
     function renderDiffText(diffText) {
         if (!diffText) { $('diff-output').innerHTML = '<span style="color:var(--text-dim)">(无差异)</span>'; return; }
-        const html = diffText.split('n').map(function(line) {
+        const html = diffText.split('\n').map(function(line) {
             const esc = escapeHtml(line);
             if (line.startsWith('+++') || line.startsWith('---')) {
                 return '<span style="color:var(--accent);font-weight:600">' + esc + '</span>';
@@ -906,7 +1150,7 @@
                 return '<span style="color:var(--danger)">' + esc + '</span>';
             }
             return '<span style="color:var(--text-faint)">' + esc + '</span>';
-        }).join('n');
+        }).join('\n');
         $('diff-output').innerHTML = html;
     }
 
@@ -1192,7 +1436,7 @@
             const data = await resp.json();
             if (!resp.ok || data.error) throw new Error(data.error || ('HTTP ' + resp.status));
             $('audit-grade').textContent = `耗时 ${data.elapsed}s`;
-            $('audit-summary').innerHTML = `${data.title || ''} · ${data.word_count} 字 · 结果已存档，<a href="/blind/" style="color:var(--accent)">盲审工作台</a>可回看`;
+            $('audit-summary').innerHTML = `${escapeHtml(data.title || '')} · ${data.word_count} 字 · 结果已存档，<a href="/blind/" style="color:var(--accent)">盲审工作台</a>可回看`;
             $('blind-editors').innerHTML = renderBlindEditors(data.editors);
         } catch(e) {
             $('audit-summary').textContent = '盲审失败: ' + e.message;

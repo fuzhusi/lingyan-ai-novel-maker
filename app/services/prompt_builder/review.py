@@ -119,6 +119,9 @@ def build_rewrite_prompt(original_content="", critic_feedback="", novel_title=""
 【改写特别注意】
 - 只修复评审指出的具体问题，不要"美化"文字
 - 保持原文的人味，不要改得更"流畅优美"
+- 只输出修改后的正文本身：正文中不得出现"改动说明""修改说明""修订清单"
+  等任何元信息或解释性文字，正文前后也不得附加说明（系统会自动核对意见
+  是否落实，无需你自证修改点）
 """
     # 特别指示里的 @skill-id：临时附加技能（仅本次生效）
     from app.services.skill_system import parse_directive_skills
@@ -156,7 +159,8 @@ def build_rewrite_prompt(original_content="", critic_feedback="", novel_title=""
         blocks.append(_section("采纳的评审意见（逐条落实，修完为止）", opinions_block))
     blocks.append(_section("评审意见（务必修改）", critic_feedback))
     blocks.append(_section("原文", original_content))
-    blocks.append("\n请根据评审意见输出修改后的完整章节正文。")
+    blocks.append("\n请根据评审意见输出修改后的完整章节正文。"
+                  "只输出正文本身，禁止附加改动说明、修改清单或任何解释。")
 
     return [
         {"role": "system", "content": full_system},

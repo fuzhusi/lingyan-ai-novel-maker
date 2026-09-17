@@ -329,21 +329,74 @@ def _retry_delay(attempt, exc=None):
 
 
 def _record_llm_call(kind, model, ok, duration_ms, prompt_chars, output_chars, error=""):
-    """调用计量(P1-4):每次 LLM 调用一行,供成本/失败率聚合。失败静默不影响主链路。"""
+    """调用计量(P1-4):每次 LLM 调用一行,供成本/失败率聚合。失败静默不影响主链路。
+
+    两种写入路径：
+    1. 有 Flask 应用上下文 → SQLAlchemy 独立连接（busy_timeout=250ms）
+    2. 无应用上下文（流式 generator 收尾、客户端断开后清理、CLI/后台线程）
+       → 直接 sqlite3 打开 DATABASE_PATH，避免 "Working outside of application context"
+
+    始终独立连接，不走调用方 session（add+commit 会把调用方挂起的未提交变更
+    一并提交；rollback 更会回滚调用方合法数据）。锁竞争时快速放弃——计量是
+    尽力而为数据，主链路延迟优先。
+    """
     try:
-        from app.models.llm_call import LLMCall
-        from app.models import db
-        db.session.add(LLMCall(
-            kind=kind, model=model or "", ok=bool(ok), duration_ms=int(duration_ms),
-            prompt_chars=int(prompt_chars), output_chars=int(output_chars),
-            error=_s(error)[:300],
-        ))
-        db.session.commit()
-    except Exception:
+        from datetime import datetime, timezone
+        created = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        row = {
+            "kind": kind,
+            "model": model or "",
+            "ok": 1 if ok else 0,
+            "duration_ms": int(duration_ms),
+            "prompt_chars": int(prompt_chars),
+            "output_chars": int(output_chars),
+            "error": _s(error)[:300],
+            "created_at": created,
+        }
+
+        has_app_ctx = False
         try:
-            db.session.rollback()
+            from flask import current_app
+            # current_app 在无上下文时抛 RuntimeError
+            _ = current_app.name
+            has_app_ctx = True
         except Exception:
-            pass
+            has_app_ctx = False
+
+        if has_app_ctx:
+            from sqlalchemy import text as _sql_text
+            from app.models import db
+            conn = db.engine.connect()
+            try:
+                conn.exec_driver_sql("PRAGMA busy_timeout=250")
+                conn.execute(_sql_text(
+                    "INSERT INTO llm_calls (kind, model, ok, duration_ms, prompt_chars, "
+                    "output_chars, error, created_at) "
+                    "VALUES (:kind, :model, :ok, :duration_ms, :prompt_chars, "
+                    ":output_chars, :error, :created_at)"), row)
+                conn.commit()
+            finally:
+                conn.close()
+        else:
+            # 无应用上下文：裸 sqlite3（流式收尾 / 断开清理 / CLI）
+            import sqlite3
+            from app.config import AppConfig
+            db_path = getattr(AppConfig, "DATABASE_PATH", None)
+            if not db_path or not os.path.isfile(db_path):
+                return
+            conn = sqlite3.connect(db_path, timeout=0.25)
+            try:
+                conn.execute("PRAGMA busy_timeout=250")
+                conn.execute(
+                    "INSERT INTO llm_calls (kind, model, ok, duration_ms, prompt_chars, "
+                    "output_chars, error, created_at) "
+                    "VALUES (:kind, :model, :ok, :duration_ms, :prompt_chars, "
+                    ":output_chars, :error, :created_at)", row)
+                conn.commit()
+            finally:
+                conn.close()
+    except Exception:
+        logger.warning("LLM 计量写入失败 (kind=%s)", kind, exc_info=True)
 
 
 def _s(v):

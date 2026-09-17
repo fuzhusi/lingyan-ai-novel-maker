@@ -32,11 +32,12 @@ Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI /
 ### 📝 创作链路（写 → 审 → 改 → 定稿）
 
 **写作**
-- **一键本章流水线**：缺大纲自动生成 → 正文 → 确定性门禁 → AI味收敛（人味分不升自动回滚保留原稿），停在人工审阅不自动审批；可 `--save` 落 AI 版本
+- **一键本章流水线**：缺大纲自动生成 → **细纲硬门禁（不足 50 字拒写正文）** → 正文 → 确定性门禁 → AI味收敛（人味分不升自动回滚保留原稿），停在人工审阅不自动审批；可 `--save` 落 AI 版本
 - **流式生成**：SSE 逐字输出 + **实时进度行**（当前阶段：规划大纲/写作/续写补足第 N 轮 · 所用厂商与模型 · 已用时 · 已生成字数）；超 20 秒无新内容提示「厂商 API 可能繁忙/限流，仍在等待」，首字等待超 15 秒标注响应较慢；字数双向保障——不足 2000 字自动续写补足，超目标 1.3 倍可一键「压缩超标」（保留情节节拍/对话/因果，压描写冗余）
 - **创作罗盘**（借鉴 OpenWrite）：`author_intent`（全书承诺）+ `current_focus`（阶段目标）注入 writer/outline/rewrite/focus 四条链路的最高优先位置，上下文压缩永不裁掉；章节列表页内联编辑，防长篇写歪
 - **上下文预算渐进压缩**：超 14000 字符按稳定优先级收缩（远章概要→近章摘要→世界观→检索记忆→角色次要字段）；罗盘/信息边界/上章结尾/大纲/伏笔/因果链永不压缩
 - **大纲失配标记**：保存正文时记录大纲指纹，事后改纲自动标「⚠ 大纲已变更」，章节列表与写作页可见——改纲不再静默漂移
+- **章节大纲 7 字段固定格式**：AI 生成大纲严格遵循「本章定位/核心事件/出场人物/场景节拍/情感基调/伏笔操作/结尾钩子」骨架（借鉴 AI_NovelGenerator 章节蓝图 + jarvis-write 场景节拍）；手写可一键套模板（Web「插入大纲模板」/ CLI `chapter outline-template`），大纲树章/场景节点支持「AI 摘要」一键按此格式生成摘要填入编辑框；**保存硬限制**：章纲/摘要缺 7 字段直接拒绝保存（AI 生成结果同样过闸，不合规不落库、填回编辑框要求补齐），不再接受整段自由文本；大纲人名与人物卡精确匹配 → 出场角色自动勾选；大纲含节拍 → 写手按节拍逐拍铺场景
 - **@skill-id 按需启用**：特别指示里写 `@chapter_hook` 临时附加技能（仅本次生效，不改全局）；只摘除已注册技能 id，未知 @词原样保留，邮箱不误判
 
 **评审**
@@ -54,7 +55,8 @@ Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI /
 - **三层防御**：提示词约束（词库按预算装配）→ 文本后处理（120+ 规则带防误伤守卫，可全局开关）→ AI 痕迹检测 + 盲审把关
 - **篇章 AI 痕迹检测**（ai_metric）：10 项对照语料验证（R≥2）的确定性检测——段首零回指、拟人化喻体、提示语冒号、破折号揭晓式、译文腔、翻案腔、相邻句同构、跨段重复、顿号过密、起首语；输出 0-100 人味分 + 违规摘录
 - **困惑度雷达**：厂商 logprobs 拿逐 token 对数概率 → 逐句 ppl，定位「选词过于可预测」的句子——补上选词分布层（朱雀第一维信号），构式层检测覆盖不到的地方（数据集不够还只是测试）
-- **AI味收敛回滚环**：检测 → 违规指令定向重写 → 复测 → **人味分不升自动回滚**（绝不保留更差版本）
+- **AI味收敛回滚环**：检测 → 违规指令定向重写 → 复测 → **人味分不升自动回滚**（绝不保留更差版本）；收敛自带保护纪律——只改怎么说不改说什么、按违规密度设删改比例/长度收缩硬顶、实词保留率不足或短句占比过冲（假人味）一律弃用
+- **标点硬限门禁**：破折号密度 / 分号绝对数 / 空转冒号常驻检查（门禁级，不挂技能）；重写产出自动剥离「改动说明」等元信息尾巴
 - **修正指令自动注入**：检测违规转为修正指令，注入长篇章节 / 短篇逐节点 / 评审重写三条生成链路
 - **采样惩罚**：writer / short_story 默认 frequency+presence 0.5/0.5，全链路透传，设置页可调
 - **文风锚例**：真人原文直插 prompt 做风格锚定，覆盖全部正文生成链路
@@ -251,7 +253,7 @@ lingyan/
 │   ├── templates/                    # 23 个 Jinja2 模板
 │   └── static/                       # 主题 CSS + 月夜氛围 JS
 ├── docs/                             # 架构/设计/路线/方法论文档（见文末索引）
-└── tests/                            # 260+ 用例（独立临时库，不碰开发数据）
+└── tests/                            # 330+ 用例（独立临时库，不碰开发数据）
 ```
 
 ---
@@ -278,7 +280,7 @@ CLI 与 Web 复用同一套服务层，行为一致（不是各写一套）。28
 | 命令组 | 用途 | 示例 |
 |--------|------|------|
 | `novel` | 小说 CRUD + 导出 | `python cli.py novel list` |
-| `chapter` | 章节 CRUD + 版本 + 大纲失配 + **一键本章/收敛/压缩/一致性核查** | `python cli.py chapter pipeline --novel 1 --number 5 --save` |
+| `chapter` | 章节 CRUD + 版本 + 大纲失配 + **一键本章/收敛/压缩/一致性核查** + `outline-template`（大纲固定格式模板） | `python cli.py chapter pipeline --novel 1 --number 5 --save` |
 | `deconstruct` | **拆书复刻**（create/run/items/adopt/generate-long/short） | `python cli.py deconstruct generate-long --id 1 --title "新书" --run` |
 | `compass` | 创作罗盘 | `python cli.py compass set --novel 1 --intent "复仇外壳写救赎"` |
 | `tone` | AI 痕迹检测 / 收敛 / 困惑度雷达 | `python cli.py tone radar --novel 1 --number 5` |
@@ -288,7 +290,7 @@ CLI 与 Web 复用同一套服务层，行为一致（不是各写一套）。28
 | `blind` | 双盲审（run/latest/rewrite） | `python cli.py blind run --novel 1 --number 5` |
 | `skill` / `constraint` | 写作技巧 / 去AI味约束词库 | `python cli.py constraint show --agent writer` |
 | `llm` | 厂商/模型/Per-Agent 配置 | `python cli.py llm provider-add --preset deepseek` |
-| `sys` | 系统信息 / **安全备份**（SQLite 备份 API） / 重置 | `python cli.py sys backup` |
+| `sys` | 系统信息 / **安全备份与恢复**（SQLite 备份 API） / 重置 | `python cli.py sys backup` / `sys restore --output xx.db -y` |
 | … | 完整清单 | `python cli.py --help` |
 
 新章一条龙：
@@ -353,6 +355,7 @@ uv run python run.py          # 打开 http://127.0.0.1:5000（免登录）
 | `LINGYAN_INSECURE_SSL` | `0` | =1 时跳过 LLM 接口证书校验（仅公网自签域需要） |
 | `MAX_UPLOAD_MB` | `50` | 上传文件大小上限 |
 | `DATABASE_PATH` | `data.db` | 数据库文件路径（支持覆盖，测试/多实例用） |
+| `LINGYAN_ALLOWED_HOSTS` | （空） | 额外放行的 Host 域名（反代域名部署用；localhost/IP 直连默认放行，其他域名 403） |
 
 ---
 
@@ -360,7 +363,8 @@ uv run python run.py          # 打开 http://127.0.0.1:5000（免登录）
 
 - 全部数据（小说/章节/记忆/配置/厂商）都在 `data.db` 单文件里，直接拷贝即备份
 - 数据库已启用 **WAL 模式**（读写并发友好）；注意 WAL 下运行中裸拷贝 `data.db` 会缺 `-wal` 附属文件导致快照不完整
-- CLI 提供安全备份：`python cli.py sys backup`（走 SQLite 备份 API，WAL/并发下也是完整快照，优于裸文件拷贝）
+- CLI 提供安全备份与恢复：`python cli.py sys backup`（走 SQLite 备份 API，WAL/并发下也是完整快照，优于裸文件拷贝）；`python cli.py sys restore --output 备份文件.db -y` 原地覆盖恢复（无需停服，服务重启后生效）。注意备份文件内含 LLM 厂商 API key，勿分享/入库
+- 运行日志写入 `logs/lingyan.log`（轮转保留 3 份）；未捕获异常统一记录堆栈，前端得到友好错误页
 - 开发库与测试库隔离：测试自动用 `.tmp-test/test.db`，`pytest` 永远不碰你的写作数据
 - 数据库可随时重建（应用启动时自动建表 + 自动迁移旧库）
 
@@ -384,7 +388,7 @@ uv run python run.py          # 打开 http://127.0.0.1:5000（免登录）
 
 ```bash
 uv sync --group dev
-uv run pytest            # tests/ 目录（260+ 例），独立临时数据库，不碰开发数据
+uv run pytest            # tests/ 目录（330+ 例），独立临时数据库，不碰开发数据
 ```
 
 测试覆盖：路由级接线（罗盘/意见/审批）、困惑度雷达对齐算法、收敛回滚环、一致性三查、编排器全阶段、抽取队列、写作包注入等。

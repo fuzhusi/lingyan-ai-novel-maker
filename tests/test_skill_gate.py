@@ -17,7 +17,8 @@ class TestGateClean:
     def test_inactive_skill_not_checked(self):
         rep = run_gate("她愤怒地说道。", active_skills=[])
         assert rep["passed"] is True
-        assert rep["checks"] == []
+        # 标点硬限是门禁级常驻检查（2026-09 新增，不挂技能）；技能级检查不得出现
+        assert all(c["skill"] == "punctuation_limits" for c in rep["checks"])
 
 
 class TestGateViolations:

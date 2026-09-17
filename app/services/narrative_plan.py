@@ -11,7 +11,7 @@ import json
 import logging
 
 from app.models import (
-    db, Novel, Chapter, Character, Foreshadowing,
+    db, Novel, Chapter, Character, Foreshadowing, OutlineNode,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,9 +53,16 @@ R3 禁止把节拍写成剧情梗概式叙述（如「随后他经历了一场�
 
 
 def _foreshadow_capacity(novel_id):
-    """活跃伏笔容量上限:max(2, 目标章数//20*3)。超容触发「禁埋令」。"""
-    target = db.session.query(db.func.max(Chapter.chapter_number)).filter_by(
-        novel_id=novel_id).scalar() or 30
+    """活跃伏笔容量上限:max(2, 目标章数//20*3)。超容触发「禁埋令」。
+
+    目标章数 = max(30, 已写最大章号, 大纲树规划章数)——此前只看已写章号,
+    开篇(第5-19章)容量恒为 2,恰在埋伏笔高峰期触发禁埋令,与 docstring 相悖。
+    """
+    written_max = db.session.query(db.func.max(Chapter.chapter_number)).filter_by(
+        novel_id=novel_id).scalar() or 0
+    planned = db.session.query(db.func.count(OutlineNode.id)).filter_by(
+        novel_id=novel_id, node_type="chapter").scalar() or 0
+    target = max(30, written_max, planned)
     return max(2, target // 20 * 3)
 
 
@@ -84,12 +91,15 @@ def resolve_plan_chapters(novel_id, event_map=None):
     db.session.commit()
 
 
-def build_plan_block(novel_id, chapter_number):
+def build_plan_block(novel_id, chapter_number, allowed_names=None):
     """第 N 章的叙事计划块(写作包注入,层4 尾部之前的硬约束区)。
 
     若本书来自拆书复刻(存在以本书为目标的拆书任务),先注入**生成期差异化
     红线**(少而硬:3 红线 + 1 配额 + 1 置换,调研依据 jarvis-write/ASP 论文:
     约束要少而硬,堆软约束反而劣化)与差异轴;随后是排程任务。
+
+    allowed_names: 本章出场角色白名单（写作页出场勾选传入）；None=不限制。
+    拆书排程与本章勾选冲突时以勾选为准——排程不能命令未勾选的角色登场。
 
     返回 "" 表示本章无计划约束。
     """
@@ -114,17 +124,21 @@ def build_plan_block(novel_id, chapter_number):
         if gf_lines:
             lines.append(gf_lines)
 
-    # 1) must_payoff:本章到期的伏笔(预期回收章 == 本章),≤2 条,
-    #    排序 = 重要度降序;写法指导照搬 jarvis-write
+    # 1) must_payoff:本章应回收的伏笔(预期回收章 <= 本章,账本式而非日历式:
+    #    一章脱靶不等于欠账蒸发),逾期项标注并优先;≤2 条,排序 = 最逾期优先→重要度
     due = Foreshadowing.query.filter(
         Foreshadowing.novel_id == novel_id,
-        Foreshadowing.expected_resolve_chapter == chapter_number,
+        Foreshadowing.expected_resolve_chapter.isnot(None),
+        Foreshadowing.expected_resolve_chapter <= chapter_number,
         Foreshadowing.status.in_(ACTIVE_FS_STATUSES),
-    ).order_by(Foreshadowing.importance.desc()).limit(_MUST_PAYOFF_LIMIT).all()
+    ).order_by(Foreshadowing.expected_resolve_chapter.asc(),
+               Foreshadowing.importance.desc()).limit(_MUST_PAYOFF_LIMIT).all()
     if due:
         lines.append("【本章必须回收的伏笔（排程硬性任务，不是可选提醒）】")
         for f in due:
-            lines.append(f"- {f.title or f.description[:30]}：{f.description or ''}")
+            overdue = chapter_number - (f.expected_resolve_chapter or 0)
+            mark = f"（已逾期 {overdue} 章，本章必须收）" if overdue > 0 else ""
+            lines.append(f"- {f.title or f.description[:30]}：{f.description or ''}{mark}")
         lines.append("  收伏笔要比埋伏笔好看：把揭晓放进一次冲突、一个动作、或一句没说完的话。")
 
     # 2) 悬挂提醒 + 禁埋令(容量 = max(2, 目标章数//20*3))
@@ -148,6 +162,8 @@ def build_plan_block(novel_id, chapter_number):
     # 3) 本章登场/退场角色(人物生命周期计划)
     enter_names, exit_notes = [], []
     for c in Character.query.filter_by(novel_id=novel_id).all():
+        if allowed_names is not None and c.name not in allowed_names:
+            continue  # 未勾选的角色不进登场/退场排程，防"计划点名"导致角色乱入
         try:
             plan = (json.loads(c.status_json or "{}").get("plan")) or {}
         except (json.JSONDecodeError, TypeError):

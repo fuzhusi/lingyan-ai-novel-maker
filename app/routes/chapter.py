@@ -61,6 +61,7 @@ def write_chapter(novel_id, chapter_number):
 
     # Build outline node context if chapter is linked
     outline_context = None
+    outline_plan_text = ""
     if chapter.outline_node_id:
         node = OutlineNode.query.get(chapter.outline_node_id)
         if node:
@@ -81,6 +82,10 @@ def write_chapter(novel_id, chapter_number):
                 "volume": parent_volume,
                 "scenes": scene_nodes,
             }
+            # 大纲树是唯一事实源：生成用的大纲文本从节点实时组装
+            # （节点摘要 + 分幕指引），旧 chapter.outline 快照仅作未关联章节兜底
+            from app.services.outline_sync import compose_node_outline
+            outline_plan_text = compose_node_outline(node)
 
     # 本章出场角色（前端勾选，控制生成时注入哪些角色档案）
     characters = Character.query.filter_by(novel_id=novel_id).order_by(Character.id).all()
@@ -93,7 +98,21 @@ def write_chapter(novel_id, chapter_number):
                            novel_genre=novel.genre, novel_synopsis=novel.synopsis,
                            novel_world_intro=novel.world_intro,
                            characters=characters,
-                           outline_context=outline_context)
+                           outline_context=outline_context,
+                           outline_plan_text=outline_plan_text)
+
+
+@chapter_bp.route("/api/infer-cast")
+def api_infer_cast(novel_id):
+    """按本章大纲文本推断出场角色（写作页自动点亮勾选，用户可手动覆盖）。"""
+    from app.services.cast_inference import infer_cast
+    chapter_number = request.args.get("chapter_number", type=int)
+    ch = (Chapter.query.filter_by(novel_id=novel_id, chapter_number=chapter_number)
+          .first()) if chapter_number else None
+    text = (ch.outline or "") if ch else ""
+    matched = infer_cast(novel_id, text)
+    return jsonify({"ok": True, "matched": matched,
+                    "outline_empty": not (text or "").strip()})
 
 
 @chapter_bp.route("/chapter/<int:chapter_number>/save-outline", methods=["POST"])

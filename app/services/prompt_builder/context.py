@@ -35,6 +35,10 @@ def _load_system_prompt(db, template_type, fallback):
          .filter_by(template_type=template_type)
          .order_by(PromptTemplate.id.desc()).first())
     if t and t.template_content and t.template_content.strip():
+        # 覆盖发生要留痕：尤其 outline——代码内置的固定字段格式契约会随覆盖整体失效。
+        # 用 warning 级：项目未配置日志时 root logger 默认 WARNING，info 会静默不可见
+        logger.warning("系统提示词被模板库覆盖: type=%s (模板 id=%s)，内置默认格式不再生效",
+                       template_type, t.id)
         return t.template_content.strip()
     return fallback
 

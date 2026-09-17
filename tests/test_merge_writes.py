@@ -14,19 +14,26 @@ from app.services.style_fingerprint import extract_anchor_candidate
 # ---------------------------------------------------------------------------
 
 def test_converge_adopts_improvement(app, monkeypatch):
-    """重写产物人味分更高 → 采纳，converged=True。"""
-    monkeypatch.setattr(tc, "analyze_ai_tone",
-                        lambda t: {"passed": "不是" not in t,
-                                   "human_score": 70 if "不是" in t else 90})
-    monkeypatch.setattr(tc, "build_tone_instructions",
-                        lambda t: "- 禁翻案腔" if "不是" in t else "")
-    monkeypatch.setattr(tc, "call_llm_sync", lambda **kw: "干净流畅的正文。" * 30)
+    """重写产物人味分更高 → 采纳，converged=True。
 
-    result = tc.converge_tone("不是风而是人。" * 30, {"model_name": "m"})
+    2026-09 收敛保护（删改比例/长度收缩/实词保留）上线后，重写稿必须是
+    原稿的高保留微改——整段换内容的 mock 会被新保护规则合理拒收。
+    """
+    monkeypatch.setattr(tc, "analyze_ai_tone",
+                        lambda t: {"passed": "值得注意的是" not in t,
+                                   "human_score": 70 if "值得注意的是" in t else 90})
+    monkeypatch.setattr(tc, "build_tone_instructions",
+                        lambda t: "- 禁总结腔" if "值得注意的是" in t else "")
+    # 原稿三连句，重写只替换第一句（高保留，过删改/收缩/实词三道硬顶）
+    original_unit = "值得注意的是。风不是风而是人。雨落在屋顶上。"
+    rewritten_unit = "要说的是。风不是风而是人。雨落在屋顶上。"
+    monkeypatch.setattr(tc, "call_llm_sync", lambda **kw: rewritten_unit * 30)
+
+    result = tc.converge_tone(original_unit * 30, {"model_name": "m"})
     assert result["converged"] is True
     assert result["original_score"] == 70
     assert result["final_score"] == 90
-    assert "不是" not in result["text"]
+    assert "值得注意的是" not in result["text"]
 
 
 def test_converge_rolls_back_on_no_improvement(app, monkeypatch):
@@ -73,8 +80,9 @@ def test_condense_threshold_and_success(app, monkeypatch):
     assert result["ok"] is False and result["text"] == short
 
     long_text = "细节描写很多很冗长的句子。" * 400  # 5200 字
+    # 压缩稿须通过实词保留率检查（≥0.70）：保留原句、只删重复次数（5200→3900）
     monkeypatch.setattr(tc, "call_llm_sync",
-                        lambda **kw: "压缩后的正文。" * 200)  # 1400 字
+                        lambda **kw: "细节描写很多很冗长的句子。" * 300)  # 3900 字
     result = tc.condense_text(long_text, {"model_name": "m"}, target_chars=2500)
     assert result["ok"] is True
     assert result["original_chars"] == len(long_text)
