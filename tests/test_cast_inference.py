@@ -49,7 +49,7 @@ def test_infer_cast_excludes_background_mentions(app):
     with app.app_context():
         n, chars, _ = _setup(app)
         outline = ("【本章定位】推进：主角夜探账房\n"
-                   f"【出场人物】林晚照、沈青梧（背景提及）\n"
+                   "【出场人物】林晚照、沈青梧（背景提及）\n"
                    "【场景节拍】1. 林晚照翻墙入院，惊动账房夜值\n"
                    "【结尾钩子】暗处沈青梧的目光一直跟着她")
         matched = infer_cast(n.id, outline)

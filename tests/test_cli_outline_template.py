@@ -5,7 +5,6 @@ AI 生成走共享提示词已内置固定格式，手写路径由本组测试�
 """
 import argparse
 
-import pytest
 
 from app import db
 from app.models import Novel, Chapter
