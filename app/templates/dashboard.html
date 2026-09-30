@@ -246,16 +246,13 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/lingyan-stream.js"></script>
 <script>
 (function() {
     const novelId = {{ novel.id }};
 
     // XSS protection helper
-    function escapeHtml(s) {
-        const d = document.createElement('div');
-        d.textContent = s == null ? '' : s;
-        return d.innerHTML;
-    }
+    const escapeHtml = LingyanStream.escapeHtml;   // 单一实现（引号也转义，属性上下文更安全）
 
     document.getElementById('btn-diagnose').addEventListener('click', async function() {
         this.disabled = true;

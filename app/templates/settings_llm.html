@@ -153,6 +153,7 @@
     {% endif %}
 </div>
 
+<script src="/static/js/lingyan-stream.js"></script>
 <script>
 const PROVIDER_URLS = {
     deepseek: 'https://api.deepseek.com',
@@ -180,11 +181,7 @@ function hideAddProvider() {
     document.getElementById('add-provider-modal').style.display = 'none';
 }
 
-function escapeHtml(str) {
-    const d = document.createElement('div');
-    d.textContent = str;
-    return d.innerHTML;
-}
+const escapeHtml = LingyanStream.escapeHtml;   // 单一实现（引号也转义，属性上下文更安全）
 
 function onPresetSelect(sel) {
     const form = sel.closest('form');

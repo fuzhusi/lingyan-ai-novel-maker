@@ -55,8 +55,13 @@
         &mdash; 笔落惊风雨，墨染见天机 &mdash;
     </footer>
     {% block scripts %}{% endblock %}
-<script type="module" src="/static/js/aurora.js"></script>
-<script src="/static/js/outline-template.js"></script>
+    {# 大气层 WebGL：登录等轻页不加载（连带省掉 three.module.min.js 的
+       拉取与着色开销；页面可用 block 覆盖为空进一步跳过）#}
+    {% block atmosphere %}
+    <script type="module" src="/static/js/aurora.js"></script>
+    {% endblock %}
+    {# 大纲固定格式模板工具：仅写作/章节列表/大纲树三页使用，按页加载
+       （各页在自己 scripts 块顶部引入，避免全站白付 67 行 + DOM 探测）#}
 <script>
 // 移动端菜单切换
 (function() {
@@ -109,64 +114,6 @@
     }, { passive: true });
 })();
 </script>
-<style>
-/* 移动端响应式 (P2-3) */
-@media (max-width: 768px) {
-    .topbar { flex-wrap: wrap; padding: 0.6rem 0.8rem !important; }
-    .topbar .logo { font-size: 1rem; }
-    .topbar-nav { display: none; }
-    .mobile-menu-btn { display: inline-flex; align-items: center; margin-left: auto; }
-    .topbar-nav { gap: 0.5rem; }
-    .nav-sep { width: 1px; height: 14px; background: var(--border); align-self: center; opacity: .7; }
-    .topbar-nav a, .user-link, .login-link, .user-name { display: none; }
-    .mobile-menu-btn {
-        background: transparent;
-        border: 1px solid var(--border);
-        color: var(--text);
-        padding: 0.3rem 0.6rem;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 1.2rem;
-    }
-    .mobile-menu {
-        display: none;
-        position: fixed;
-        top: 50px;
-        right: 0;
-        background: rgba(26, 17, 13, 0.96);
-        backdrop-filter: blur(14px);
-        -webkit-backdrop-filter: blur(14px);
-        border: 1px solid var(--border-light);
-        border-radius: 10px;
-        padding: 0.5rem 0;
-        min-width: 180px;
-        box-shadow: 0 12px 36px rgba(2, 6, 18, 0.65), 0 0 24px rgba(93, 211, 241, 0.06);
-        z-index: 100;
-    }
-    .mobile-menu.open { display: block; }
-    .mobile-menu a {
-        display: block;
-        padding: 0.6rem 1rem;
-        color: var(--text);
-        text-decoration: none;
-        font-size: 0.92rem;
-        transition: background 0.2s ease, color 0.2s ease;
-    }
-    .mobile-menu a:hover {
-        background: linear-gradient(90deg, rgba(93, 211, 241, 0.12), transparent);
-        color: var(--text-bright);
-    }
-    .main-content { padding: 1rem !important; }
-    .container { padding: 0 !important; }
-    /* 仪表盘统计卡片在小屏幕上 2 列布局 */
-    [style*="grid-template-columns:repeat(auto-fit, minmax(160px, 1fr))"] {
-        grid-template-columns: repeat(2, 1fr) !important;
-    }
-}
-@media (min-width: 769px) {
-    .mobile-menu-btn { display: none; }
-    .mobile-menu { display: none !important; }
-}
-</style>
+
 </body>
 </html>

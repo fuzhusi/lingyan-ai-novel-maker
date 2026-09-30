@@ -27,6 +27,18 @@
 
     var LingyanStream = {
 
+        /* ===== HTML 转义（全站单一实现）=====
+         * 此前 chapter_write/dashboard/settings_llm/short_story 各有一份本地
+         * 实现（DOM 往返版不转义引号），属性上下文有隐患——统一走这里。 */
+        escapeHtml: function (s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        },
+
         /* ===== raw 流 → 渲染到元素（含 ===NODE:id:title=== 标记处理）=====
          * 返回 AbortController（页面用其 abort() 实现「暂停生成」）。
          * opts:
@@ -55,10 +67,16 @@
             var rawText = initialText;      // 含节点标记的原文
             var displayText = initialText;  // 剔除节点标记后展示
 
+            var reportedNodes = {};   // 已回调过的节点标记：每个 chunk 全文重扫，
+                                      // 不去重会每帧重复触发历史 onNode（幂等调用方
+                                      // 只是侥幸没炸，长流下是 O(n²) + 状态反复重写）
+
             function handleNodeMarkers() {
                 NODE_RE.lastIndex = 0;
                 var m;
                 while ((m = NODE_RE.exec(rawText)) !== null) {
+                    if (reportedNodes[m[0]]) continue;
+                    reportedNodes[m[0]] = true;
                     var cleanBefore = rawText.slice(0, m.index)
                         .replace(/===NODE:\d+:.*?===/g, '');
                     if (opts.onNode) opts.onNode(parseInt(m[1], 10), m[2].trim(), cleanBefore.length);
@@ -124,6 +142,13 @@
             var controller = new AbortController();
             var startLen = editor.value.length;
 
+            function fail(err, acc) {
+                // 有 onError 处理器的页面走回调（可给续跑入口）；
+                // 没有时才回退旧式内联提示——错误文本进 editor 会污染可保存正文
+                if (opts.onError) { opts.onError(err, acc || ''); return; }
+                editor.value += '\n[失败: ' + err.message + ']';
+            }
+
             openStream(url, body, controller.signal).then(function (resp) {
                 var reader = resp.body.getReader();
                 var decoder = new TextDecoder();
@@ -137,15 +162,11 @@
                         if (opts.onCount) opts.onCount(editor.value);
                         read();
                     }).catch(function (err) {
-                        if (err.name !== 'AbortError') {
-                            editor.value += '\n[失败: ' + err.message + ']';
-                        }
+                        if (err.name !== 'AbortError') fail(err, acc);
                     });
                 })();
             }).catch(function (err) {
-                if (err.name !== 'AbortError') {
-                    editor.value += '\n[失败: ' + err.message + ']';
-                }
+                if (err.name !== 'AbortError') fail(err);
             });
 
             return controller;
@@ -208,7 +229,9 @@
                     var lines = buffer.split('\n');
                     buffer = lines.pop() || '';
                     for (var i = 0; i < lines.length; i++) {
-                        var line = lines[i];
+                        // 剥行尾 \r：经 CRLF 规范化代理时帧尾多出 \r 会让
+                        // JSON.parse 每帧必败并被静默吞掉（全流静默死的另一变体）
+                        var line = lines[i].replace(/\r$/, '');
                         if (!line.startsWith('data: ')) continue;
                         try {
                             var data = JSON.parse(line.slice(6));
@@ -217,7 +240,9 @@
                             if (data.status && handlers.onStatus) handlers.onStatus(data.status);
                             if (data.error) {
                                 errorMsg = data.error;
-                                if (handlers.onApiError) handlers.onApiError(data.error);
+                                // 第二参透传服务端已流出的全文：断流时页面
+                                // 可回填编辑区，不必整章重生成
+                                if (handlers.onApiError) handlers.onApiError(data.error, data.full_text || '');
                             }
                             if (data.done) return;
                         } catch (e) { /* 跨 chunk 半帧，忽略 */ }

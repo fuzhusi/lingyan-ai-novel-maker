@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}第 {{ chapter.chapter_number }} 章 — {{ novel.title }}{% endblock %}
+{% block title %}第 {{ chapter.chapter_number }} 章 {{ chapter.title|strip_chapter_no if chapter.title }} — {{ novel.title }}{% endblock %}
 
 {% block nav %}
 <a href="/novel/{{ novel.id }}/">&larr; 章节列表</a>
@@ -10,28 +10,29 @@
 <span class="sep">|</span>
 <a href="/novel/{{ novel.id }}/outline">大纲</a>
 <span class="sep">|</span>
-<span>第 {{ chapter.chapter_number }} 章{% if chapter.title %}：{{ chapter.title }}{% endif %}</span>
+<span>第 {{ chapter.chapter_number }} 章{% if chapter.title %}：{{ chapter.title|strip_chapter_no }}{% endif %}</span>
 {% endblock %}
 
 {% block content %}
 <div class="write-layout" id="app">
     <div class="write-main">
-        <div class="toolbar">
+        <div class="toolbar" id="main-toolbar">
             <button id="btn-generate" class="btn-primary">&#x2699; AI 生成本章</button>
-            <button id="btn-save-ai" class="btn-save" disabled>保存 AI 版本</button>
-            <button id="btn-save-human" class="btn-save-human" disabled>保存人工版本</button>
-            <button id="btn-edit" class="btn-edit" disabled>手动编辑</button>
-            <span class="sep">|</span>
-            <button id="btn-review" class="btn-review" disabled title="评审+双盲审 一键完成">全面评审</button>
-            <button id="btn-approve" class="btn-approve" disabled>批准</button>
-            <button id="btn-rewrite" class="btn-rewrite" disabled>重写</button>
-            <span class="sep">|</span>
-            <button id="btn-audit" class="btn-sm btn-edit" disabled title="两位毒舌编辑零上下文盲审">双盲审</button>
-            <button id="btn-diff" class="btn-sm btn-edit" disabled>版本对比</button>
-            <button id="btn-converge" class="btn-sm btn-edit" disabled title="检测 AI 痕迹 → 定向重写 → 复测；人味分不升自动回滚保留原稿">AI味收敛</button>
-            <button id="btn-condense" class="btn-sm btn-edit" disabled title="超字数时压缩：保留情节节拍/对话/因果，压描写冗余">压缩超标</button>
-            <button id="btn-pipeline" class="btn-sm btn-edit" title="一键流水线：缺大纲生成 → 正文 → 门禁 → AI味收敛，停在人工审阅">一键本章</button>
-            <button id="btn-consistency" class="btn-sm btn-edit" disabled title="确定性交叉核对（时序真相/伏笔排期），疑点可交 AI 裁决">一致性核查</button>
+            <button id="btn-pipeline" class="btn-edit t-secondary" title="一键流水线：缺大纲生成 → 正文 → 门禁 → AI味收敛，停在人工审阅">一键本章</button>
+            <button type="button" id="btn-more-tools" class="btn-edit t-more-toggle" aria-expanded="false" aria-controls="main-toolbar">&#x22EF; 更多操作</button>
+            <button id="btn-save-ai" class="btn-save t-secondary" disabled>保存 AI 版本</button>
+            <button id="btn-save-human" class="btn-save-human t-secondary" disabled>保存人工版本</button>
+            <button id="btn-edit" class="btn-edit t-secondary" disabled>手动编辑</button>
+            <span class="sep t-secondary">|</span>
+            <button id="btn-review" class="btn-review t-secondary" disabled title="评审+双盲审 一键完成">全面评审</button>
+            <button id="btn-approve" class="btn-approve t-secondary" disabled>批准</button>
+            <button id="btn-rewrite" class="btn-rewrite t-secondary" disabled>重写</button>
+            <span class="sep t-secondary">|</span>
+            <button id="btn-audit" class="btn-sm btn-edit t-secondary" disabled title="两位毒舌编辑零上下文盲审">双盲审</button>
+            <button id="btn-diff" class="btn-sm btn-edit t-secondary" disabled>版本对比</button>
+            <button id="btn-converge" class="btn-sm btn-edit t-secondary" disabled title="检测 AI 痕迹 → 定向重写 → 复测；人味分不升自动回滚保留原稿">AI味收敛</button>
+            <button id="btn-condense" class="btn-sm btn-edit t-secondary" disabled title="超字数时压缩：保留情节节拍/对话/因果，压描写冗余">压缩超标</button>
+            <button id="btn-consistency" class="btn-sm btn-edit t-secondary" disabled title="确定性交叉核对（时序真相/伏笔排期），疑点可交 AI 裁决">一致性核查</button>
         </div>
 
         <div id="error-box" class="error-box" style="display:none"></div>
@@ -184,11 +185,7 @@
 <script>
 (function() {
     // XSS protection helper
-    function escapeHtml(s) {
-        const d = document.createElement('div');
-        d.textContent = s;
-        return d.innerHTML;
-    }
+    const escapeHtml = LingyanStream.escapeHtml;   // 单一实现（引号也转义，属性上下文更安全）
 
     // 剥离模型附在正文尾部的元信息（"改动说明：1.… 2.…"等）——不属于正文。
     // 兜底用：rewrite 提示词已明令禁止，但模型偶发不听话
@@ -205,6 +202,16 @@
         const el = document.getElementById('outline-content');
         if (el && el.children.length === 0 && el.textContent.trim()) {
             el.innerHTML = formatOutlineDisplay(el.textContent);
+        }
+        // 移动端工具栏收纳：次要操作折进「更多操作」（桌面端全展示，CSS 控制）
+        const moreBtn = document.getElementById('btn-more-tools');
+        const toolbar = document.getElementById('main-toolbar');
+        if (moreBtn && toolbar) {
+            moreBtn.addEventListener('click', function () {
+                const open = toolbar.classList.toggle('tools-open');
+                moreBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+                moreBtn.textContent = open ? '\u22EF 收起' : '\u22EF 更多操作';
+            });
         }
     });
 
@@ -1201,12 +1208,13 @@
     // 超 20 秒收不到任何帧即提示「厂商可能繁忙」，不中断等待。
     const genStatusEl = $('gen-status');
     const GEN_STALL_MS = 20000;
-    let genStartAt = 0, genLastFrame = 0, genChars = 0, genTimer = null, genLabel = '', genPhase = '';
+    let genStartAt = 0, genLastFrame = 0, genChars = 0, genTimer = null,
+        genLabel = '', genPhase = '', genBeatMode = false, genSlowNote = '';
 
     function genStatusRender() {
         const elapsed = Math.round((Date.now() - genStartAt) / 1000);
         const stallMs = Date.now() - genLastFrame;
-        let text = genLabel + ' · 已用时 ' + elapsed + 's · 已生成 ' + genChars + ' 字';
+        let text = genLabel + genSlowNote + ' · 已用时 ' + elapsed + 's · 已生成 ' + genChars + ' 字';
         if (stallMs > GEN_STALL_MS) {
             text += ' ⚠ 已 ' + Math.round(stallMs / 1000) + 's 未收到新内容——厂商 API 可能繁忙/限流，仍在等待…';
         }
@@ -1215,7 +1223,7 @@
 
     function genStatusStart() {
         genStartAt = genLastFrame = Date.now(); genChars = 0; genPhase = '';
-        genLabel = '正在生成';
+        genLabel = '正在生成'; genBeatMode = false; genSlowNote = '';
         genStatusEl.style.display = 'block';
         // 新进度行已覆盖阶段信息，旧的静态指示器隐藏，避免同屏两行"正在生成"
         streamInd.style.display = 'none';
@@ -1232,16 +1240,28 @@
         genLastFrame = Date.now();
         if (st.stage === 'stream_start') {
             genPhase = st.phase || 'write';
+            genBeatMode = false; genSlowNote = '';
             genLabel = genPhase === 'outline' ? '正在规划本章大纲'
                      : genPhase === 'focus' ? '正在生成角色聚焦片段'
                      : '正在写作';
             if (st.model) genLabel += '（' + st.provider + ' · ' + st.model + '）';
+        } else if (st.stage === 'beat_start') {
+            // 节拍级拆锅：每拍一次调用（round_no=拍号），必须先于 round_start
+            // 分支接管标签，否则逐拍首写会被误报成"续写补足"
+            genBeatMode = true; genSlowNote = '';
+            genLabel = '逐拍生成中（第 ' + st.beat + '/' + st.of + ' 拍'
+                     + (st.tension ? ' · 张力 ' + st.tension + '/5' : '') + '）';
+        } else if (st.stage === 'beat_end') {
+            if (st.chars) genChars = st.chars;   // 服务端累计字数校正（含拍间分隔符）
         } else if (st.stage === 'continue_start') {
+            genBeatMode = false; genSlowNote = '';   // 拍全部写完，回到字数补足语义
             genLabel = '正文不足 ' + st.floor + ' 字，自动续写补足（第 ' + (st.round - 1) + ' 轮）';
         } else if (st.stage === 'first_token') {
             genLastFrame = Date.now();
-            if (st.ttft_s >= 15) genLabel += ' —— 等了 ' + st.ttft_s + 's 才开始出字（厂商响应较慢）';
-        } else if (st.stage === 'round_start' && st.round > 1) {
+            // 慢提示走独立变量，不叠进 genLabel——逐拍模式每拍都有
+            // first_token，直接 += 会把标签滚成长串
+            if (st.ttft_s >= 15) genSlowNote = ' —— 本轮等了 ' + st.ttft_s + 's 才出字（厂商响应较慢）';
+        } else if (st.stage === 'round_start' && st.round > 1 && !genBeatMode) {
             genLabel = '续写补足中（第 ' + (st.round - 1) + ' 轮）';
         }
         genStatusRender();

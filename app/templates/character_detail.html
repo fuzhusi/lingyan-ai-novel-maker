@@ -100,6 +100,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/lingyan-stream.js"></script>
 <script>
 (function() {
     const NOVEL_ID = {{ novel.id }};
@@ -132,26 +133,14 @@
         if (chNum) formData.append('chapter_number', chNum);
 
         try {
-            const resp = await fetch('/api/focus-generate-stream', { method: 'POST', body: formData });
-            const reader = resp.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const data = JSON.parse(line.slice(6));
-                            if (data.token) { output.value += data.token; output.scrollTop = output.scrollHeight; }
-                            if (data.error) alert('生成错误: ' + data.error);
-                        } catch(e) {}
-                    }
-                }
-            }
+            // SSE 解析走共享库（lingyan-stream.js）：此前手写版不查 resp.ok、
+            // 丢 status 帧、CRLF 代理下帧解析静默失败——与全站其他页对齐
+            await LingyanStream.sse('/api/focus-generate-stream', formData, {
+                onToken: function (t) {
+                    output.value += t;
+                    output.scrollTop = output.scrollHeight;
+                },
+            });
             fullText = output.value;
             btnSave.disabled = !fullText.trim();
         } catch(e) { alert('生成失败: ' + e.message); }

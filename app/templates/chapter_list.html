@@ -104,7 +104,7 @@
         <div class="chapter-card">
             <a href="/novel/{{ novel.id }}/chapter/{{ ch.chapter_number }}/write" style="text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:0.3rem;flex:1">
                 <span class="ch-num">第 {{ ch.chapter_number }} 章</span>
-                <span class="ch-title">{{ ch.title or '无标题' }}</span>
+                <span class="ch-title">{{ ch.title|strip_chapter_no if ch.title else '无标题' }}</span>
                 {% if ch.outline_node_id and outline_nodes.get(ch.outline_node_id) %}
                 <span class="ch-outline-ref">&#x1F4CB; {{ outline_nodes[ch.outline_node_id].title }}</span>
                 {% endif %}

@@ -363,11 +363,7 @@
 <script>
 (function() {
     // XSS protection helper
-    function escapeHtml(s) {
-        const d = document.createElement('div');
-        d.textContent = s;
-        return d.innerHTML;
-    }
+    const escapeHtml = LingyanStream.escapeHtml;   // 单一实现（引号也转义，属性上下文更安全）
 
     const storyId = {{ story.id }};
     const mode = "{{ story.mode }}";
