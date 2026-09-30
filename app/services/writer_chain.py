@@ -405,9 +405,23 @@ def _beat_context_block(kw):
         parts.append(kw["cast_constraint"])
     chars = kw.get("characters") or []
     if chars:
-        lines = [f"- {c.get('name', '')}：{(c.get('personality') or '')[:80]}"
-                 f"｜{(c.get('speaking_style') or '')[:60]}" for c in chars]
-        parts.append("【出场人物速写（性格｜说话风格）】\n" + "\n".join(lines))
+        lines = []
+        for c in chars:
+            line = f"- {c.get('name', '')}：{(c.get('personality') or '')[:60]}"
+            style = (c.get('speaking_style') or '')[:40]
+            if style:
+                line += f"｜{style}"
+            m_deep = re.search(r"深层[:：]\s*([^;；\n]+)", c.get('motivation') or '')
+            if m_deep:
+                line += f"｜需求：{m_deep.group(1).strip()[:40]}"
+            arc = c.get("arc_state") or {}
+            arc_bits = "；".join(filter(None, [
+                (arc.get("want_now") or "")[:30],
+                (arc.get("change_stage") or "")[:30]]))
+            if arc_bits:
+                line += f"｜现态：{arc_bits}"
+            lines.append(line)
+        parts.append("【出场人物速写（性格｜说话风格｜现态）】\n" + "\n".join(lines))
     if kw.get("narrative_plan"):
         parts.append("【本章叙事计划（硬性任务）】\n" + kw["narrative_plan"])
     if kw.get("boundary_context"):

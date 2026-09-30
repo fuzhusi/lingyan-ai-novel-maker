@@ -217,6 +217,8 @@ MIGRATIONS = [
             "ALTER TABLE chapters ADD COLUMN event_plan TEXT DEFAULT ''",
             # 跨章 Reflexion 笔记
             "ALTER TABLE chapters ADD COLUMN reflexion_notes TEXT DEFAULT ''",
+            # 对手网（Truby）：关系攻击弱点
+            "ALTER TABLE character_relations ADD COLUMN attack_weakness TEXT DEFAULT ''",
         ]
 
 

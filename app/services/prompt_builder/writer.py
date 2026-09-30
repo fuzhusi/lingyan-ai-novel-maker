@@ -1,12 +1,46 @@
 """Writer 类提示词构建：章节生成、大纲生成。"""
 import logging
 
-from app.services.prompt_builder.context import (
-    _section, _load_system_prompt, _load_constraints, DEFAULT_WRITER_CONSTRAINTS,
+from app.services.prompt_builder.context import (    _section, _load_system_prompt, _load_constraints, DEFAULT_WRITER_CONSTRAINTS,
     get_skill_prompt, build_compass_block,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _render_motivation(motivation):
+    """动机拆愿望/需求双轨（Truby）：识别「表层/深层」标记拆两行，
+    无标记时保持单行动机。零字数净增（重组既有内容）。"""
+    text = (motivation or "").strip()
+    if not text:
+        return "动机：（未设定）"
+    import re as _re
+    m_super = _re.search(r"表层[:：]\s*([^;；\n]+)", text)
+    m_deep = _re.search(r"深层[:：]\s*([^;；\n]+)", text)
+    if m_super and m_deep:
+        return (f"愿望（表层目标）：{m_super.group(1).strip()}\n"
+                f"需求（深层缺陷）：{m_deep.group(1).strip()}")
+    return f"动机：{text}"
+
+
+def _render_arc_state(arc_state):
+    """角色现态行（审批流逐章回写的 arc_state）：想什么/怕什么/走到哪。"""
+    if not isinstance(arc_state, dict) or not arc_state:
+        return ""
+    bits = []
+    if arc_state.get("want_now"):
+        bits.append(f"现在想要：{arc_state['want_now']}")
+    if arc_state.get("fear_now"):
+        bits.append(f"现在怕：{arc_state['fear_now']}")
+    if arc_state.get("change_stage"):
+        bits.append(f"弧光进度：{arc_state['change_stage']}")
+    relations = arc_state.get("relations") or {}
+    for target, rel in list(relations.items())[:3]:
+        if rel:
+            bits.append(f"与{target}：{rel}")
+    if not bits:
+        return ""
+    return "现态（以此为准，覆盖背景设定中的过时描述）：" + "；".join(bits)
 
 
 def build_writer_prompt(novel_title="", chapter_title="", outline="", user_directive="",
@@ -117,14 +151,17 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
             for field, label in [
                 ("personality", "性格"), ("speaking_style", "说话风格"),
                 ("appearance", "外貌"), ("background", "背景"),
-                ("motivation", "动机"), ("arc_direction", "角色弧光"),
             ]:
                 val = c.get(field, "")
                 if val:
                     parts.append(f"{label}：{val}")
-            status = c.get("status_json", "{}")
-            if status and status != "{}":
-                parts.append(f"当前状态：{status}")
+            # 动机拆愿望/需求双轨（Truby）：表层目标驱动情节，深层缺陷驱动转变
+            parts.append(_render_motivation(c.get("motivation", "")))
+            if c.get("arc_direction"):
+                parts.append(f"角色弧光：{c['arc_direction']}")
+            arc_line = _render_arc_state(c.get("arc_state"))
+            if arc_line:
+                parts.append(arc_line)
             char_lines.append("\n".join(parts))
         blocks.append(_section("人物设定", "\n\n---\n\n".join(char_lines)))
 
@@ -257,7 +294,7 @@ def build_outline_prompt(novel_title="", genre="", synopsis="", world_intro="",
         "章节大纲固定格式：\n"
         "【本章定位】从「推进／转折／揭示／过渡／高潮铺垫」中选一个主定位，"
         "再用一句话说明本章在整个故事中的作用，并标注本章主悬念类型（信息差/道德困境/时间压力/身份谜团/危机迫近，选其一）\n"
-        "【本章契约】三句话写清戏剧任务：他要什么（可量化）／谁拦他／"
+        "【本章契约】三句话写清戏剧任务：他要什么（可量化）／谁拦他（对手回合：攻他哪条弱点）／"
         "不做成会失去什么（具体代价）——这是正文必须体现的戏，不是可选提醒\n"
         "【核心事件】1-3条，每条一句话，写成「谁+做了什么+导致什么结果」；"
         "只写章级因果主线，不要复述【场景节拍】里的细节\n"

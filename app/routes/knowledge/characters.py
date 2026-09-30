@@ -248,5 +248,15 @@ def character_detail(novel_id, char_id):
         if mentions:
             chapter_mentions.append({"chapter": ch, "mentions": mentions})
 
+    # 审批流回写的角色现态（arc_state + history 链，只读展示）
+    arc_state, arc_history = {}, []
+    try:
+        _status = _json.loads(character.status_json or "{}")
+        arc_state = _status.get("arc_state") or {}
+        arc_history = _status.get("arc_history") or []
+    except (ValueError, TypeError):
+        pass
+
     return render_template("character_detail.html", novel=novel, character=character,
-                           chapter_mentions=chapter_mentions)
+                           chapter_mentions=chapter_mentions,
+                           arc_state=arc_state, arc_history=arc_history)

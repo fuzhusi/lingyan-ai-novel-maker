@@ -9,7 +9,9 @@ import logging
 
 from app import db
 from app.config_utils import get_effective_config
-from app.models import ChapterMemory, ChapterSummary, Character, StoryState
+from app.models import (
+    ChapterMemory, ChapterSummary, Character, StoryState, Foreshadowing,
+)
 from app.services.llm import call_llm_sync, LLMError
 from app.services.prompt_builder import build_summary_prompt
 
@@ -106,24 +108,38 @@ def extract_json_dict(text):
     return data if isinstance(data, dict) else None
 
 
-def _build_memory_prompt(chapter_content="", chapter_number=0, novel_title="", characters=None):
+def _build_memory_prompt(chapter_content="", chapter_number=0, novel_title="",
+                         characters=None, foreshadowings=None):
     """Build prompt for structured chapter memory generation."""
     char_names = ", ".join(c.name for c in characters) if characters else ""
+    # 活跃伏笔回名录：让 foreshadow_events 能对齐账本 id（写活 last_mentioned）
+    fs_lines = []
+    for f in (foreshadowings or []):
+        fs_lines.append(f"- id={f.id} 《{f.title}》（当前状态 {f.status}）")
 
     system_prompt = (
         "你是一位小说分析专家。请分析章节内容，提取结构化记忆信息。"
         "输出严格的JSON格式，不要输出其他内容。"
     )
+    fs_block = ""
+    if fs_lines:
+        fs_block = ("本书活跃伏笔（事件涉及其中之一时，foreshadow_id 必须填对应 id；"
+                    "无关则填 null）：\n" + "\n".join(fs_lines) + "\n\n")
+
     user_prompt = (
         f"小说：{novel_title}\n"
         f"第{chapter_number}章\n"
         f"已知角色：{char_names}\n\n"
+        f"{fs_block}"
         f"章节正文：\n{chapter_content}\n\n"
         "请提取以下信息并输出JSON：\n"
         '{"summary": "200字以内章节摘要", '
         '"style_note": "30字以内：本章最突出的文体特征（句式/意象/对话密度），供后续章节延续", '
         '"key_events": ["事件1", "事件2", ...], '
-        '"character_changes": {"角色名": "变化描述", ...}, '
+        '"character_changes": {"角色名": {"want_now": "本章结束时他想要什么（现值）", '
+        '"fear_now": "他现在怕什么（现值）", "change_stage": "本章 arc 推进了一步的描述", '
+        '"relation_changes": [{"target": "对方角色名", "relation": "两人关系现值"}]}}, '
+        '无变化的角色不要出现；'
         '"foreshadow_events": [{"description": "伏笔相关事件", "foreshadow_id": null}], '
         '"new_characters": ["新出场角色名", ...], '
         '"scenes": [{"setting": "场景地点", "characters": ["角色1"], "summary": "50字场景摘要"}, ...]}'
@@ -194,6 +210,12 @@ def approve_chapter_version(version, generate_summary=True):
                 chapter_number=chapter.chapter_number,
                 novel_title=chapter.novel.title,
                 characters=Character.query.filter_by(novel_id=chapter.novel_id).all(),
+                foreshadowings=(Foreshadowing.query
+                                .filter_by(novel_id=chapter.novel_id)
+                                .filter(Foreshadowing.status.in_(
+                                    ["open", "planned", "buried", "advancing",
+                                     "reclaimable"]))
+                                .all()),
             )
             memory_text = call_llm_sync(
                 model=memory_cfg["model_name"], messages=memory_prompt,
@@ -230,6 +252,27 @@ def approve_chapter_version(version, generate_summary=True):
                     scenes_json=json.dumps(memory_data.get("scenes", []), ensure_ascii=False),
                 )
                 db.session.add(cm)
+
+        # 步骤③b：角色状态回写 + 伏笔账本接线（role_state.py）。
+        # 数据全部来自上面的 memory_data（零额外 LLM 调用）；失败降级不阻断审批。
+        try:
+            from app.services.role_state import (
+                apply_arc_updates, apply_foreshadow_touches)
+            arc_updated = apply_arc_updates(
+                chapter.novel_id, chapter.chapter_number,
+                memory_data.get("character_changes"))
+            if arc_updated:
+                stages_note = f"角色状态回写：{'、'.join(arc_updated)}"
+            else:
+                stages_note = ""
+            fs_touched = apply_foreshadow_touches(
+                chapter.novel_id, chapter.chapter_number,
+                memory_data.get("foreshadow_events"))
+            if stages_note or fs_touched:
+                logger.info("审批账本更新（第%s章）：%s；伏笔触碰 %s",
+                            chapter.chapter_number, stages_note, fs_touched)
+        except Exception:
+            logger.warning("角色/伏笔账本更新失败（不阻断审批）", exc_info=True)
 
         # Update story state chapter counter
         story_state = StoryState.query.filter_by(novel_id=chapter.novel_id).first()

@@ -101,6 +101,8 @@ class CharacterRelation(db.Model):
     character_b_id = db.Column(db.Integer, db.ForeignKey("characters.id"), nullable=False)
     relation_type = db.Column(db.String(50), default="ordinary")
     description = db.Column(db.Text, default="")
+    # 对手网（Truby）：这条关系里对方攻击主角的哪条弱点 + 携带的异质价值观
+    attack_weakness = db.Column(db.Text, default="")
     # Multi-dimensional scores (0-100)
     trust = db.Column(db.Integer, default=50)
     affection = db.Column(db.Integer, default=50)

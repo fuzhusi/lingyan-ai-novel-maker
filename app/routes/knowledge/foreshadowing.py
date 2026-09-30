@@ -174,11 +174,20 @@ def advance_foreshadow(novel_id, fs_id):
     old_status = fs.status
     fs.status = new_status
 
+    payoff_warning = ""
     if new_status == "resolved":
         latest = Chapter.query.filter_by(novel_id=novel_id).order_by(
             Chapter.chapter_number.desc()).first()
         if latest:
             fs.resolve_chapter = latest.chapter_number
+        # 前置展示核验（Sanderson 第一定律，advisory）：埋设后零回响直接收线
+        try:
+            from app.services.role_state import payoff_setup_note
+            payoff_warning = payoff_setup_note(fs, fs.resolve_chapter or 0)
+            if payoff_warning:
+                fs.notes = ((fs.notes or "") + "\n" + payoff_warning).strip()
+        except Exception:
+            pass
 
     db.session.commit()
 
@@ -187,4 +196,5 @@ def advance_foreshadow(novel_id, fs_id):
         "id": fs.id,
         "oldStatus": old_status,
         "newStatus": new_status,
+        "payoffWarning": payoff_warning,
     })

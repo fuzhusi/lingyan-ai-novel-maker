@@ -34,6 +34,21 @@
         {% if character.arc_direction %}
         <div class="kb-field" style="margin-top:0.5rem"><strong>角色弧光：</strong>{{ character.arc_direction }}</div>
         {% endif %}
+        {% if arc_state %}
+        <div class="kb-field" style="margin-top:0.75rem;padding:0.5rem;background:var(--accent-ghost);border-radius:6px">
+            <strong>现态（审批时逐章回写）：</strong>
+            {% if arc_state.want_now %}<div>现在想要：{{ arc_state.want_now }}</div>{% endif %}
+            {% if arc_state.fear_now %}<div>现在怕：{{ arc_state.fear_now }}</div>{% endif %}
+            {% if arc_state.change_stage %}<div>弧光进度：{{ arc_state.change_stage }}</div>{% endif %}
+            {% for target, rel in (arc_state.relations or {}).items() %}
+            <div>与{{ target }}：{{ rel }}</div>
+            {% endfor %}
+            {% if arc_history %}
+            <div style="margin-top:0.4rem;color:var(--text-faint);font-size:0.78rem">
+                回写轨迹：{% for h in arc_history %}第{{ h.chapter }}章{% if not loop.last %} · {% endif %}{% endfor %}</div>
+            {% endif %}
+        </div>
+        {% endif %}
     </div>
 
     <!-- Chapter Appearances -->

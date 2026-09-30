@@ -68,6 +68,17 @@ DEFAULT_WRITER_CONSTRAINTS = """【写作质量约束 — 应急兜底版】
 """
 
 
+def _parse_arc_state(status_json):
+    """从 status_json 里取角色现态（arc_state），容错返回 {}。"""
+    import json as _json
+    try:
+        data = _json.loads(status_json or "{}")
+        arc = data.get("arc_state") if isinstance(data, dict) else None
+        return arc if isinstance(arc, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
 def assemble_chapter_context(novel_id, chapter_number, db, character_ids=None):
     """Gather all relevant context for generating a chapter.
 
@@ -95,6 +106,7 @@ def assemble_chapter_context(novel_id, chapter_number, db, character_ids=None):
             "speaking_style": c.speaking_style, "appearance": c.appearance,
             "background": c.background, "motivation": c.motivation,
             "arc_direction": c.arc_direction, "status_json": c.status_json,
+            "arc_state": _parse_arc_state(c.status_json),
         }
         for c in characters
     ]
