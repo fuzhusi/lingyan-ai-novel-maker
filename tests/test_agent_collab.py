@@ -170,8 +170,9 @@ def _patch_gates_ok(monkeypatch):
                         lambda text, mode="generate": {"passed": True, "human_score": 95})
     monkeypatch.setattr(
         "app.services.web_novel_gate.analyze_web_novel",
-        lambda text, outline="": {"passed": True, "readability_score": 95,
-                                  "checks": [], "hint": ""})
+        lambda text, outline="", event_count=None, is_first_chapter=False,
+           protagonist_names=None: {"passed": True, "readability_score": 95,
+                                    "checks": [], "hint": ""})
 
 
 def test_runner_full_pipeline_with_auto_save(app, monkeypatch):
@@ -249,8 +250,9 @@ def test_runner_stops_when_final_gate_fails(app, monkeypatch):
                         lambda text, mode="generate": {"passed": True, "human_score": 95})
     monkeypatch.setattr(
         "app.services.web_novel_gate.analyze_web_novel",
-        lambda text, outline="": {"passed": True, "readability_score": 95,
-                                  "checks": [], "hint": ""})
+        lambda text, outline="", event_count=None, is_first_chapter=False,
+           protagonist_names=None: {"passed": True, "readability_score": 95,
+                                    "checks": [], "hint": ""})
     monkeypatch.setattr("app.services.tone_convergence.converge_tone",
                         lambda text, cfg, max_rounds=2, outline="": {
                             "converged": False, "text": text,

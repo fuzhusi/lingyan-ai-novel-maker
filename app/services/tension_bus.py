@@ -191,6 +191,14 @@ def temperature_for_level(base_temp, level):
 AROUSAL_RE = re.compile(r"吼|喊|怒|骂|砸|摔|拍桌|炸|冲上|嘶吼|发抖|颤抖|眼泪|哭")
 
 
+_QUIET_REGISTER_RE = re.compile(r"安静|克制|隐忍|白描|冷峻|平实|氛围")
+
+
+def quiet_register_of(tone_text):
+    """【情感基调】是否安静向（安静的煎熬是合法写法，审计与断章门禁都让路）。"""
+    return bool(_QUIET_REGISTER_RE.search(tone_text or ""))
+
+
 def measured_intensity(text):
     """正文情绪强度的只读审计值（不改稿，仅供对比张力档）。
 
@@ -212,17 +220,78 @@ def intensity_gap_note(chapter_level, measured, tone_text=""):
 
     返回空串表示无落差。阈值按实测数据定标：书 1 均值档位下的
     平淡章 measured ≈ 5-15；张力档 ≥4 的章实测应显著高于此。
-    基调感知：大纲【情感基调】标注安静/克制/隐忍/白描的书，
-    期望下限减半——安静的煎熬是合法写法，审计不该把"稳"当"平"。
+    基调感知：安静向基调期望下限减半——安静的煎熬是合法写法。
     """
     if measured is None:
         return ""
-    quiet_register = bool(re.search(r"安静|克制|隐忍|白描|冷峻|平实", tone_text or ""))
     floor = {1: 0, 2: 3, 3: 8, 4: 15, 5: 25}.get(chapter_level, 8)
-    if quiet_register:
+    if quiet_register_of(tone_text):
         floor = max(0, floor // 2)
     if chapter_level >= 3 and measured < floor:
         return (f"本章张力档 {chapter_level} 但正文情绪强度仅 {measured}/千字"
                 f"（档位参考下限 {floor}）：场面写得平，"
                 "下一章把冲突拍正面摊开写，允许情绪失控与大幅度动作。")
     return ""
+
+
+def pacing_debt(history, beat_tensions=None):
+    """爽点间距账本（零 LLM）：压抑超期 + 无兑现拍检测。
+
+    history: story_states.excitement_history 的 [{"chapter", "density"}]
+    （审批时 _update_excitement 确定性写入，逐章）。
+    规则（网文工业参数）：
+    - 压抑超期：连续 >2 章 density 低于可用序列 30 分位；
+    - 无兑现拍：本章逐拍张力全平（beat_tensions 提供时检查）。
+    返回提示串列表（空 = 无欠账）。
+    """
+    notes = []
+    densities = [h.get("density") for h in (history or [])
+                 if isinstance(h.get("density"), (int, float))]
+    if len(densities) >= 3:
+        # 基线用中位数：30 分位会被低谷段自己拉低，长压抑自满足（实测教训）
+        import statistics as _stat
+        baseline = _stat.median(densities)
+        streak = 0
+        for d in reversed(densities):
+            if d < baseline:
+                streak += 1
+            else:
+                break
+        if streak > 2:
+            notes.append(f"连续 {streak} 章情绪密度低于该书常态（压抑超期）："
+                         "下一章必须给一次兑现——打脸/确认/进账，任选其一写足")
+    if beat_tensions and len(set(beat_tensions)) < 2:
+        notes.append("本章逐拍张力全平（无峰值拍）：至少一拍把冲突正面写足")
+    return notes
+
+
+def hook_progression(prev_hook, curr_hook, protagonist_names=None):
+    """钩子递进校验（advisory）：本章钩须沿「更具体/更贴身/更难撤回」推进。
+
+    返回 {"score": 命中维度数(0-3), "notes": [...]}；prev_hook 为空时
+    返回 None（首章无递进可言）。
+    """
+    prev, curr = (prev_hook or "").strip(), (curr_hook or "").strip()
+    if not prev or not curr:
+        return None
+    score = 0
+    notes = []
+    # 更具体：新增数字或带引号专名
+    prev_digits, curr_digits = set(re.findall(r"\d+", prev)), set(re.findall(r"\d+", curr))
+    prev_terms = set(re.findall(r"[「《\"“]([^」》\"”]{1,12})[」》\"”]", prev))
+    curr_terms = set(re.findall(r"[「《\"“]([^」》\"”]{1,12})[」》\"”]", curr))
+    if (curr_digits - prev_digits) or (curr_terms - prev_terms):
+        score += 1
+    else:
+        notes.append("钩子可更具体：落一个数字或专名，别停在抽象局面")
+    # 更贴身：主角名在场
+    if any(n and n in curr for n in (protagonist_names or [])):
+        score += 1
+    else:
+        notes.append("钩子可更贴身：让主角的名字直接进钩子")
+    # 更难撤回：代价/期限词
+    if re.search(r"代价|失去|错过|期限|之前|截止|最后|再不|就没了|只好|只能", curr):
+        score += 1
+    else:
+        notes.append("钩子可更难撤回：点出不做会失去什么")
+    return {"score": score, "notes": notes}

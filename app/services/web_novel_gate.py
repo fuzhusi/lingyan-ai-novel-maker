@@ -39,7 +39,7 @@ _HOOK_EXTERNAL_RE = re.compile(
 )
 _SOFT_END_RE = re.compile(
     r"(?:沉沉睡去|回房睡|不知过了多久|心里五味杂陈|或许|也许这就是|他沉默了|没有答案"
-    r"|还是全天|犹豫|没发出去|算了|看了看表)"
+    r"|还是全天|犹豫|没发出去|算了|看了看表|就这样吧|生活就是这样|也许吧)"
 )
 # 设定倾泻：去掉「阶/分为/所谓」等易误伤的单字/泛词
 _SETTING_MARK_RE = re.compile(
@@ -190,7 +190,53 @@ def _stage_cues(text):
 
 
 # 情绪唤醒词单一来源在 tension_bus（峰值检测与强度审计共用，防两处漂移）
-from app.services.tension_bus import AROUSAL_RE as _PEAK_AROUSAL_RE
+from app.services.tension_bus import (
+    AROUSAL_RE as _PEAK_AROUSAL_RE,
+    parse_outline_field as _parse_outline_field,
+)
+
+# 断章四法（网文工业 + Swain Scene-Sequel 交叉印证）：章末必须断在变化时刻。
+# 四类信号的词表口径刻意宽松（mid 软检查起步，实测定标后再定档）。
+_ENDING_DECISION_RE = re.compile(
+    r"决定|答应|拒绝|摊牌|认了|回绝|应下|允了|选了|定了|动身|出发|启程|辞职|退了|告吹|应了"
+    r"|就(?:去|回|来|走|办|到)|明天就|这就定")
+_ENDING_DISCOVERY_RE = re.compile(
+    "发现|原来|真相|才晓得|才知道|揭晓|认出|看穿|败露|曝光|浮出|到账|名单|出来了")
+_ENDING_MISJUDGE_RE = re.compile(r"误会|错认|冤枉|错怪|看走眼|以为[^。]{0,10}其实|认错[^人]{0,2}了")
+_ENDING_COST_RE = re.compile(
+    r"失去|去世|走了|没了|迟到|错过|泡汤|作废|赔了|罚了|丢了|分手|决裂|翻脸|砸了|黄了|鸽了")
+
+
+def _chapter_ending(text, quiet_register=False):
+    """断章四法：章末 300 字须落在「决定/发现/误判/代价」之一的变化时刻。
+
+    依据（调研交叉印证）：追读率八成取决于章末最后几行；Swain 的
+    scene-sequel 循环要求章末是 disaster 或 decision。安静向基调
+    （【情感基调】标注安静/克制/白描）只提示不扣分——氛围收尾是合法写法。
+    """
+    tail = (text or "")[-300:]
+    if not tail.strip():
+        return {"passed": True, "detail": "无章末文本"}
+    hits = []
+    if _ENDING_DECISION_RE.search(tail):
+        hits.append("决定")
+    if _ENDING_DISCOVERY_RE.search(tail):
+        hits.append("发现")
+    if _ENDING_MISJUDGE_RE.search(tail):
+        hits.append("误判")
+    if _ENDING_COST_RE.search(tail):
+        hits.append("代价")
+    if hits:
+        return {"passed": True,
+                "detail": f"章末落在变化时刻：{'/'.join(hits)}"}
+    soft = _SOFT_END_RE.search(tail)
+    if quiet_register:
+        return {"passed": True,
+                "detail": "安静基调的氛围收尾（未检出四法信号，不扣分）"}
+    detail = "章末未落在变化时刻（决定/发现/误判/代价）"
+    if soft:
+        detail += "，且呈总结式收尾——断在变化发生那一刻，别断在回味里"
+    return {"passed": False, "detail": detail, "hits": 0}
 
 
 def _emotion_peak(text):
@@ -217,8 +263,41 @@ def _emotion_peak(text):
     }
 
 
-def analyze_web_novel(text, outline=""):
+# 信息密度：前 300 字「人物+异常」可懂（编辑只看前三章，首屏定生死）
+_ANOMALY_RE = re.compile(
+    r"突然|竟然|居然|不对劲|出事|意外|陌生|头一回|第一次|反常|异样|怪|从没|罕见|偏偏|偏偏就|就在这时")
+
+
+def _info_density(text, protagonist_names=None, event_count=None,
+                  is_first_chapter=False):
+    """信息密度：①首章前 300 字「人物+异常」可懂；②每章有用变化事件数。
+
+    事件数来自 chapter_events 提取（审批前已产出，纯读数）；event_count
+    为 None 时（调用方拿不到事件）跳过②，只查首章①。
+    """
+    problems = []
+    if is_first_chapter:
+        head = (text or "")[:300]
+        has_person = bool(protagonist_names) and any(
+            n and n in head for n in protagonist_names)
+        has_anomaly = bool(_ANOMALY_RE.search(head))
+        if not has_person:
+            problems.append("前300字未见具名人物（读者不知道跟谁入局）")
+        if not has_anomaly:
+            problems.append("前300字未见异常信号（平静开场缺「有事」预告）")
+    if event_count is not None and event_count < 2:
+        problems.append(f"本章有效事件仅 {event_count} 个（<2）：章内缺有用变化")
+    if not problems:
+        return {"passed": True, "detail": "信息密度达标"}
+    return {"passed": False, "detail": "；".join(problems)}
+
+
+def analyze_web_novel(text, outline="", event_count=None,
+                      is_first_chapter=False, protagonist_names=None):
     """好看度双轨报告（零 LLM）。
+
+    event_count/is_first_chapter/protagonist_names: 信息密度检查的可选
+    输入（chapter_runner 传，其他调用方可省略——缺省时对应子检查跳过）。
 
     Returns:
         {
@@ -233,6 +312,9 @@ def analyze_web_novel(text, outline=""):
         return {"passed": True, "readability_score": None, "checks": [],
                 "skipped": "文本过短，跳过好看度检测"}
 
+    from app.services.tension_bus import quiet_register_of
+    tone_text = _parse_outline_field(outline, "情感基调") if outline else ""
+
     checks_raw = [
         ("opening", "开场钩（前200字）", _opening_signal(text), 25),
         ("chapter_goal", "本章目标/代价信号", _goal_signal(text, outline), 20),
@@ -242,6 +324,11 @@ def analyze_web_novel(text, outline=""):
         ("dialogue_ratio", "对白占比", _dialogue_ratio(text), 5),
         ("stage_cues", "舞台指示腔", _stage_cues(text), 3),
         ("emotion_peak", "章内情绪峰值", _emotion_peak(text), 8),
+        ("chapter_ending", "断章四法", _chapter_ending(
+            text, quiet_register=quiet_register_of(tone_text)), 8),
+        ("info_density", "信息密度", _info_density(
+            text, protagonist_names=protagonist_names,
+            event_count=event_count, is_first_chapter=is_first_chapter), 10),
     ]
     checks = []
     deduction = 0
@@ -294,6 +381,12 @@ def build_readability_instructions(text, outline=""):
         elif key == "emotion_peak":
             lines.append("全章幅宽塌平：挑冲突最重的一拍正面写足——允许失控、"
                          "吼/摔/眼泪直接上，别再用动作暗示带过情绪")
+        elif key == "chapter_ending":
+            lines.append("断章落在变化时刻：决定/发现/误判/代价任选其一，"
+                         "切在事情发生的那一拍，禁止总结式回味收尾")
+        elif key == "info_density":
+            lines.append("信息密度不足：首屏立起人物与异常，本章至少推进两个"
+                         "有用变化（事件要有结果，不是只起头）")
     if not lines:
         return ""
     return ("【追读结构修正 — 优先于文风微调】\n" + "\n".join(f"- {ln}" for ln in lines))

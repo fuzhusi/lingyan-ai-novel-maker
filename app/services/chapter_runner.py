@@ -111,6 +111,7 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
 
     # ---- Stage 1b: event plan（StoryWriter planning 层）----
     # 从大纲提炼 2-4 个必须推进的事件（目标-冲突-微结局），落库供写作包注入
+    events = []
     try:
         from app.services.chapter_events import ensure_event_plan
         events = ensure_event_plan(novel_id, chapter_number, outline=outline_for_write)
@@ -152,7 +153,12 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
     from app.services.web_novel_gate import analyze_web_novel
     gate = run_gate(text)
     tone = analyze_ai_tone(text)
-    readability = analyze_web_novel(text, outline=outline_for_write or "")
+    protagonist_names = [c.get("name") for c in kw.get("characters", [])
+                         if c.get("name")]
+    readability = analyze_web_novel(
+        text, outline=outline_for_write or "", event_count=len(events),
+        is_first_chapter=(chapter_number == 1),
+        protagonist_names=protagonist_names)
     human_score = tone.get("human_score")
     read_score = readability.get("readability_score")
     gate_passed = bool(gate.get("passed"))
@@ -173,6 +179,7 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
         from app.services.tension_bus import (
             chapter_tension as _chapter_tension, measured_intensity,
             intensity_gap_note, parse_outline_field,
+            pacing_debt, hook_progression,
         )
         from app.services.reflexion import add_reflexion_note
         level = (scene_plan or {}).get("tension") or _chapter_tension(
@@ -185,6 +192,42 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
                  "tension": level, "measured": measured}
         if gap:
             add_reflexion_note(novel_id, chapter_number, gap, source="tension")
+        # 爽点间距账本：逐章密度序列 + 本章逐拍曲线
+        try:
+            from app.models import StoryState
+            ss = StoryState.query.filter_by(novel_id=novel_id).first()
+            hist = []
+            if ss and (ss.excitement_history or "").strip():
+                hist = json.loads(ss.excitement_history)
+            debts = pacing_debt(
+                hist, beat_tensions=(scene_plan or {}).get("beat_tensions"))
+            audit["pacing_debts"] = debts
+            for d in debts:
+                add_reflexion_note(novel_id, chapter_number, d, source="tension")
+            if debts:
+                audit["ok"] = False
+        except Exception as e:
+            logger.warning("爽点账本降级: %s", e)
+        # 钩子递进（advisory）：本章钩 vs 上章钩，沿三维应单调推进
+        try:
+            from app.models import Chapter as _Chapter
+            prev_ch = (_Chapter.query
+                       .filter_by(novel_id=novel_id,
+                                  chapter_number=chapter_number - 1)
+                       .first())
+            prev_hook = (parse_outline_field(prev_ch.outline or "", "结尾钩子")
+                         if prev_ch and prev_ch.outline else "")
+            prog = hook_progression(
+                prev_hook, parse_outline_field(outline_for_write, "结尾钩子"),
+                protagonist_names=protagonist_names or [])
+            if prog is not None:
+                audit["hook_progression"] = prog["score"]
+                if prog["score"] == 0:
+                    note = "章尾钩零递进（更具体/更贴身/更难撤回一个都没占）：下一章钩子至少推进一维"
+                    add_reflexion_note(novel_id, chapter_number, note,
+                                       source="tension")
+        except Exception as e:
+            logger.warning("钩子递进降级: %s", e)
         try:
             from app.models import Chapter as _Chapter
             recent = (_Chapter.query
@@ -235,7 +278,10 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
         # 收敛会重写全文，门禁必须对最终稿复测，不能沿用旧稿结果。
         gate = run_gate(text)
         tone = analyze_ai_tone(text)
-        readability = analyze_web_novel(text, outline=outline_for_write or "")
+        readability = analyze_web_novel(
+            text, outline=outline_for_write or "", event_count=len(events),
+            is_first_chapter=(chapter_number == 1),
+            protagonist_names=protagonist_names)
         gate_passed = bool(gate.get("passed"))
         tone_passed = bool(tone.get("passed"))
         read_passed = bool(readability.get("passed"))
