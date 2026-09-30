@@ -102,6 +102,23 @@ llm agent-set --agent-type bogus --llm-model 1:x  exit=0
 
 **已修**（`cli.py` pipeline 分支）：无论成败都打印 stages 与人味分；有 `text` 时照样写 `--out`（并注明"门禁未过、未落库，仅供人工取用或改后重跑"）；失败路径补 `sys.exit(1)`，让脚本能识别。修后重跑第 3 章，正文不再丢失。
 
+### 坑 11 ★★ 生成时会注入**两个**大纲，只改一个＝拿混合口径写正文
+
+写作链同时注入两处大纲：
+
+| 字段 | 存在哪 | 谁改它 |
+|---|---|---|
+| 本章大纲 | `chapters.outline` | `cli.py chapter update --outline` |
+| 大纲树节点摘要 | `outline_nodes.summary` | `cli.py outline update --id N --summary` |
+
+**两者不一致时，模型会同时看到新版和旧版**。实测踩过：我把章节指引改成了新版（去掉护身符），
+但大纲树节点摘要里还留着"他贴身揣着爷爷给的一枚护身符"——正文里就长出了一个平安符。
+
+**规矩**：改大纲一律走 `09_sync_outline_to_chapters.py`（它同时写两处），不要单独敲 `chapter update --outline`。
+`08_generate_chapter.py` 已加**防呆**：两处不一致直接跳过该章并提示先跑 09（状态标 `outline_drift`），不会再拿混合口径生成。
+
+> 不算产品 bug：系统本就有 `chapters.outline_hash` + `outline_stale()` 提示"大纲事后变更"，只是不拦生成。
+
 ### 坑 9 ★★ CLI **没有任何命令能改章节正文**（人工润稿只能走 Web）
 
 `chapter` 命令组只有 list / content（读）/ update（改标题）/ delete / version-*（查删）/ deai / pipeline / converge / condense。**没有 `save-content` 之类的写正文入口**。所以：

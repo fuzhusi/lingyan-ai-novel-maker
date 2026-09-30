@@ -101,6 +101,21 @@ def main():
             results.append((n, "skipped", None, 0))
             continue
 
+        # 防呆：生成时系统会同时注入「章节指引」与「大纲树节点摘要」两个大纲。
+        # 只改其中一个就会拿混合口径写正文（实测踩过：节点里还留着"护身符"，
+        # 正文就写了个平安符出来）。两处必须一致，否则拒绝生成。
+        drift = L.sql_rows(
+            "select c.chapter_number, c.outline as ch_outline, o.summary as node_summary"
+            " from chapters c left join outline_nodes o on o.id = c.outline_node_id"
+            " where c.novel_id=? and c.chapter_number=?", (nid, n))
+        if drift:
+            row = drift[0]
+            if (row["ch_outline"] or "").strip() != (row["node_summary"] or "").strip():
+                L.warn("第 %d 章的大纲没同步：章节指引与大纲树节点摘要不一致 —— 已跳过" % n)
+                L.warn("   跑 `python lingyi_setup/09_sync_outline_to_chapters.py --apply` 同步后再生成")
+                results.append((n, "outline_drift", None, 0))
+                continue
+
         out_file = os.path.join(args.out_dir, "第%d章.md" % n)
         argv = ["chapter", "pipeline", "--novel", str(nid), "--number", str(n),
                 "--save", "--out", out_file]
@@ -152,7 +167,8 @@ def main():
     ok_n = sum(1 for r in results if r[1] == "ok")
     L.ok("成功落库 %d 章 / 共 %d 章" % (ok_n, len(results)))
     for n, status, score, dt in results:
-        mark = {"ok": "✓", "skipped": "·", "gate_failed": "✗", "unknown": "?"}[status]
+        mark = {"ok": "✓", "skipped": "·", "gate_failed": "✗", "unknown": "?",
+                "outline_drift": "⚠"}[status]
         L.info("   %s 第%d章 %s%s" % (mark, n, status,
                                     (" 人味分 " + score) if score else ""))
 
@@ -165,7 +181,7 @@ def main():
             f.write("\n".join(log_lines) + "\n")
         L.info("日志追加：%s" % log_path)
 
-    return 1 if any(r[1] in ("gate_failed", "unknown") for r in results) else 0
+    return 1 if any(r[1] in ("gate_failed", "unknown", "outline_drift") for r in results) else 0
 
 
 if __name__ == "__main__":
