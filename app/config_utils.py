@@ -188,6 +188,11 @@ def _explicit_agent_cfg(agent_type, base, novel_overridden_keys=None):
     tokens_override = get_setting(f"max_tokens_{agent_type}", "")
     if tokens_override:
         cfg["max_tokens"] = _safe_int(tokens_override, base["max_tokens"])
+    # 请求超时按任务粒度（借鉴 AI_NovelGenerator 预设级 timeout）：
+    # 长章生成顶 300s 上限、短任务不能快速失败，都靠这个键调
+    timeout_override = get_setting(f"timeout_{agent_type}", "")
+    if timeout_override:
+        cfg["timeout"] = _safe_float(timeout_override, 300.0)
     # 采样惩罚：仅显式设置时下发（None = 不传该参数，兼容不支持厂商）
     for key in ("frequency_penalty", "presence_penalty"):
         val = get_setting(f"{key}_{agent_type}", "")

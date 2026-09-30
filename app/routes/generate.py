@@ -4,8 +4,9 @@ from flask import Blueprint, request, Response, jsonify, stream_with_context
 from app.services.prompt_builder import (
     build_outline_prompt, build_writer_prompt, assemble_chapter_context,
 )
+from app.services.prompt_builder.context import get_excitement_recent
 from app.services.writer_chain import (
-    build_writer_kwargs, generation_tokens,
+    build_writer_kwargs, build_scene_plan, generation_tokens,
     CHAPTER_WORD_TARGET,
 )
 from app.services.llm import LLMError
@@ -19,12 +20,15 @@ def _sse_event(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _stream_to_sse(messages, cfg, word_target=None, phase="write"):
+def _stream_to_sse(messages, cfg, word_target=None, phase="write",
+                   scene_plan=None):
     """Shared streaming helper — yields SSE event strings.
 
     word_target: 传入时启用字数保障——流结束后正文不足字数底线
     则携带前文尾部自动续写，续写 token 继续推入同一 SSE 流。
-    生成逻辑（含续写轮）在 writer_chain.generation_tokens，与编排器共用。
+    scene_plan: 节拍级生成计划（大纲含 ≥2 拍时逐拍生成，见 writer_chain）。
+    生成逻辑（含节拍轮/续写轮）在 writer_chain.generation_tokens，
+    与编排器共用。
 
     进度帧（{"status": {...}}）：阶段/轮次/首字延迟/耗时等诊断信息穿插在
     token 帧之间。旧前端只认 token/error/done 字段，未知帧自动忽略，
@@ -45,7 +49,7 @@ def _stream_to_sse(messages, cfg, word_target=None, phase="write"):
             "provider": cfg.get("provider_type", ""),
         }})
         for token in generation_tokens(messages, cfg, word_target=word_target,
-                                       on_event=on_event):
+                                       on_event=on_event, scene_plan=scene_plan):
             while pending:
                 yield _sse_event({"status": pending.pop(0)})
             collected.append(token)
@@ -87,20 +91,22 @@ def generate_stream():
     elif raw_ids is not None:
         character_ids = []
 
-    # 细纲硬门禁：请求未带大纲时回落到章节已存大纲；两者皆空/过短则拒写
-    # （oh-story guard-outline-before-prose：无细纲不进正文）
-    _MIN_OUTLINE_CHARS = 50
+    # 细纲硬门禁（戏剧字段，旧格式软通过）：请求未带大纲时回落到章节已存大纲
+    from app.services.outline_drama import write_ready_outline, outline_gate_error
     if not (outline or "").strip() and novel_id and chapter_number:
         ch = (Chapter.query
               .filter_by(novel_id=novel_id, chapter_number=chapter_number)
               .first())
         if ch and (ch.outline or "").strip():
             outline = ch.outline.strip()
-    if len((outline or "").strip()) < _MIN_OUTLINE_CHARS:
+    ready = write_ready_outline(outline)
+    if not ready["ok"]:
         return jsonify({
-            "error": f"细纲不足（需至少 {_MIN_OUTLINE_CHARS} 字）。"
-                     f"请先生成/填写本章大纲再写正文。",
+            "error": outline_gate_error(outline),
+            "drama": {"blocking": ready["blocking"], "warnings": ready["warnings"],
+                      "has": ready["has"]},
         }), 400
+    outline = ready.get("effective_outline") or outline
 
     # 写作包：上下文组装/预算压缩/锚例/罗盘/tone 指令/备忘录统一在 writer_chain
     kw, novel = build_writer_kwargs(novel_id, chapter_number, outline,
@@ -113,12 +119,19 @@ def generate_stream():
         outline=outline,
         user_directive=user_directive,
         db=db,
+        chapter_number=chapter_number,
         **kw,
     )
 
     cfg = get_effective_config(novel, agent_type="writer")
+    # 节拍级生成计划（大纲含 ≥2 拍时逐拍写；None 则整章路径，行为不变）
+    scene_plan = build_scene_plan(outline, kw=kw, word_target=CHAPTER_WORD_TARGET,
+                                  novel_id=novel_id, chapter_number=chapter_number)
+    if scene_plan is not None:
+        scene_plan["prev_ending"] = kw.get("prev_ending", "")
     return Response(stream_with_context(
-        _stream_to_sse(messages, cfg, word_target=CHAPTER_WORD_TARGET, phase="write")),
+        _stream_to_sse(messages, cfg, word_target=CHAPTER_WORD_TARGET,
+                       phase="write", scene_plan=scene_plan)),
         mimetype="text/event-stream")
 
 
@@ -142,6 +155,7 @@ def outline_stream():
             "author_intent": ctx["author_intent"],
             "current_focus": ctx["current_focus"],
             "world_settings": ctx["world_settings"],
+            "excitement_recent": get_excitement_recent(novel_id),
         }
 
     messages = build_outline_prompt(

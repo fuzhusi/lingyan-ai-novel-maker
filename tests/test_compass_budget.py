@@ -47,16 +47,17 @@ def test_outline_prompt_fixed_format(app):
     msgs = build_outline_prompt(
         novel_title="测试", characters=[{"name": "林昭"}])
     sys_prompt = msgs[0]["content"]
-    for field in ("【本章定位】", "【核心事件】", "【出场人物】", "【场景节拍】",
-                  "【情感基调】", "【伏笔操作】", "【结尾钩子】"):
+    for field in ("【本章定位】", "【本章契约】", "【核心事件】", "【出场人物】",
+                  "【场景节拍】", "【情感基调】", "【伏笔操作】", "【结尾钩子】"):
         assert field in sys_prompt, f"缺少固定格式字段 {field}"
     # 出场人物与人物卡同名（infer_cast 自动勾选依赖人名精确匹配）
     assert "完全一致" in sys_prompt
     assert "背景提及" in sys_prompt
-    # 三条硬性要求：字数上限 / 禁正文式描写 / 名单外角色不得进节拍
-    assert "250" in sys_prompt
+    # 硬性要求：字数上限 / 禁正文式描写 / 名单外角色 / 契约字段必填
+    assert "280" in sys_prompt
     assert "禁止出现对白" in sys_prompt
     assert "名单之外" in sys_prompt
+    assert "缺一不可" in sys_prompt
     # 场景节拍施工语义（jarvis-write 式 beats）
     assert "施工" in sys_prompt
     # 条件化引用：冷启动（无角色卡/无前情）时指令不得悬空引用
@@ -338,7 +339,7 @@ def test_outline_stream_wires_compass(app, client, monkeypatch):
 
     captured = {}
 
-    def fake_tokens(messages, cfg, word_target=None, on_event=None):
+    def fake_tokens(messages, cfg, word_target=None, on_event=None, scene_plan=None):
         captured["messages"] = messages
         yield "大纲：主角进入北境。"
 

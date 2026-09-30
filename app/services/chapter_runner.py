@@ -6,13 +6,15 @@ auto_save=True 时落 AI 版本，仍不自动审批）。
 
 纪律：自动化到「待人工审阅」为止；任一阶段失败即停，不跨闸门。
 """
+import json
 import logging
 
 from app import db
 from app.models import Novel, Chapter, OutlineNode
 from app.config_utils import get_effective_config
 from app.services.writer_chain import (
-    build_writer_kwargs, collect_full_text, CHAPTER_WORD_TARGET,
+    build_writer_kwargs, build_scene_plan, collect_full_text,
+    CHAPTER_WORD_TARGET,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,6 +38,7 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
     """
     from app.services.prompt_builder import (
         build_outline_prompt, build_writer_prompt, assemble_chapter_context)
+    from app.services.prompt_builder.context import get_excitement_recent
     from app.services.skill_gate import run_gate
     from app.services.ai_metric import analyze_ai_tone
 
@@ -69,6 +72,7 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
             author_intent=novel.author_intent or "",
             current_focus=novel.current_focus or "",
             world_settings=ctx["world_settings"],
+            excitement_recent=get_excitement_recent(novel_id),
         )
         outline_text = collect_full_text(messages, cfg_o).strip()
         if not outline_text:
@@ -80,38 +84,63 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
     else:
         stages.append({"stage": "outline", "ok": True, "skipped": "已有大纲"})
 
-    # 细纲硬门禁（oh-story guard-outline-before-prose）：无有效细纲禁止写正文
+    # 细纲硬门禁（戏剧字段，兼容旧格式软通过）：无戏不进正文
+    from app.services.outline_drama import write_ready_outline, outline_gate_error
     outline_ready = (chapter.outline or "").strip()
-    if len(outline_ready) < _MIN_OUTLINE_CHARS:
+    ready = write_ready_outline(outline_ready)
+    stages.append({"stage": "outline_drama", "ok": ready["ok"],
+                   "soft_pass": ready.get("soft_pass"),
+                   "has": ready["has"], "warnings": ready["warnings"]})
+    if not ready["ok"]:
         stages.append({"stage": "outline_gate", "ok": False,
-                       "chars": len(outline_ready),
-                       "min_chars": _MIN_OUTLINE_CHARS})
+                       "blocking": ready["blocking"]})
         return {
-            "error": f"细纲不足（{len(outline_ready)} 字 < {_MIN_OUTLINE_CHARS} 字下限），"
-                     f"禁止进入正文阶段。请先补全本章大纲。",
+            "error": outline_gate_error(outline_ready),
             "stages": stages,
+            "drama": ready,
         }
+    # 软通过：把缺失字段转成戏剧备注，并入大纲注入写作包
+    outline_for_write = ready.get("effective_outline") or outline_ready
+    if ready.get("drama_notes"):
+        chapter.outline = outline_for_write
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            outline_for_write = chapter.outline or outline_ready
 
     # ---- Stage 1b: event plan（StoryWriter planning 层）----
     # 从大纲提炼 2-4 个必须推进的事件（目标-冲突-微结局），落库供写作包注入
     try:
         from app.services.chapter_events import ensure_event_plan
-        events = ensure_event_plan(novel_id, chapter_number, outline=chapter.outline)
+        events = ensure_event_plan(novel_id, chapter_number, outline=outline_for_write)
         stages.append({"stage": "event_plan", "ok": True, "count": len(events)})
     except Exception as e:
         logger.warning("事件清单提取降级: %s", e)
         stages.append({"stage": "event_plan", "ok": True, "skipped": str(e)[:120]})
 
     # ---- Stage 2: body ----
-    kw, novel = build_writer_kwargs(novel_id, chapter_number, chapter.outline,
+    kw, novel = build_writer_kwargs(novel_id, chapter_number, outline_for_write,
                                     user_directive=user_directive,
                                     character_ids=character_ids)
     cfg_w = get_effective_config(novel, agent_type="writer")
     messages = build_writer_prompt(
         novel_title=novel.title, chapter_title=chapter.title,
-        outline=chapter.outline, user_directive=user_directive, db=db, **kw)
+        outline=outline_for_write, user_directive=user_directive, db=db,
+        chapter_number=chapter_number, **kw)
+    # 节拍级生成计划（大纲含 ≥2 拍时拆锅逐拍写；None 则整章一锅原路径）
+    scene_plan = build_scene_plan(outline_for_write, kw=kw,
+                                  word_target=word_target,
+                                  novel_id=novel_id, chapter_number=chapter_number)
+    if scene_plan is not None:
+        scene_plan["prev_ending"] = kw.get("prev_ending", "")
+        stages.append({"stage": "beat_plan", "ok": True,
+                       "beats": len(scene_plan["beats"]),
+                       "tension": scene_plan["tension"],
+                       "beat_tensions": scene_plan["beat_tensions"]})
     try:
-        text = collect_full_text(messages, cfg_w, word_target=word_target).strip()
+        text = collect_full_text(messages, cfg_w, word_target=word_target,
+                                 scene_plan=scene_plan).strip()
     except Exception as e:
         stages.append({"stage": "body", "ok": False, "error": str(e)[:200]})
         return {"error": f"正文生成失败：{e}", "stages": stages}
@@ -119,70 +148,157 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
     if not text:
         return {"error": "正文生成为空", "stages": stages}
 
-    # ---- Stage 3: gates（确定性门禁束）----
+    # ---- Stage 3: gates（确定性门禁束：人味双轨 = 去AI + 追读好看度）----
+    from app.services.web_novel_gate import analyze_web_novel
     gate = run_gate(text)
     tone = analyze_ai_tone(text)
+    readability = analyze_web_novel(text, outline=outline_for_write or "")
     human_score = tone.get("human_score")
+    read_score = readability.get("readability_score")
     gate_passed = bool(gate.get("passed"))
     tone_passed = bool(tone.get("passed"))
-    stages.append({"stage": "gates", "ok": gate_passed and tone_passed,
+    read_passed = bool(readability.get("passed"))
+    stages.append({"stage": "gates", "ok": gate_passed and tone_passed and read_passed,
                    "gate_passed": gate.get("passed"),
-                   "human_score": human_score})
+                   "human_score": human_score,
+                   "readability_score": read_score,
+                   "readability_passed": read_passed})
 
-    # ---- Stage 4: convergence（人味分不达标才触发，回滚兜底）----
+    # ---- Stage 3b: 张力审计（零 LLM）----
+    # 章张力档 vs 正文实测情绪强度：落差大说明"规划了强场面但写平了"，
+    # 写入 Reflexion 供下一章主动修正（审计闭环，不改本章稿）。
+    # 另做全书平线体检（jarvis-write is_flat 的章级版）：近几章实测强度
+    # 极差过小 = 跨章平线，同样进 Reflexion。
+    try:
+        from app.services.tension_bus import (
+            chapter_tension as _chapter_tension, measured_intensity,
+            intensity_gap_note, parse_outline_field,
+        )
+        from app.services.reflexion import add_reflexion_note
+        level = (scene_plan or {}).get("tension") or _chapter_tension(
+            novel_id, chapter_number, outline_for_write)
+        measured = measured_intensity(text)
+        gap = intensity_gap_note(
+            level, measured,
+            tone_text=parse_outline_field(outline_for_write, "情感基调"))
+        audit = {"stage": "tension_audit", "ok": not gap,
+                 "tension": level, "measured": measured}
+        if gap:
+            add_reflexion_note(novel_id, chapter_number, gap, source="tension")
+        try:
+            from app.models import Chapter as _Chapter
+            recent = (_Chapter.query
+                      .filter(_Chapter.novel_id == novel_id,
+                              _Chapter.chapter_number < chapter_number)
+                      .order_by(_Chapter.chapter_number.desc())
+                      .limit(5).all())
+            vals = [measured_intensity(ch.versions[-1].content or "")
+                    for ch in recent if ch.versions]
+            vals = [v for v in vals if v is not None]
+            if measured is not None:
+                vals.append(measured)
+            if len(vals) >= 3:
+                # 阈值定标：书 1 实测 24 章情绪强度 5-15/千字、章间自然
+                # 波动极差约 5+；极差 <3 且连续多章即"全书平线"（jarvis-write
+                # is_flat 的章级版），误伤面小（仅提示，不阻断）
+                spread = max(vals) - min(vals)
+                audit["recent_spread"] = round(spread, 1)
+                if spread < 3:
+                    audit["ok"] = False
+                    flat_note = (f"近 {len(vals)} 章情绪强度近乎平线"
+                                 f"（极差 {spread:.1f}/千字）：节奏单调，"
+                                 "下一章至少安排一场正面冲突并把峰值写足。")
+                    add_reflexion_note(novel_id, chapter_number, flat_note,
+                                       source="tension")
+        except Exception as e:
+            logger.warning("平线体检降级: %s", e)
+        stages.append(audit)
+    except Exception as e:
+        logger.warning("张力审计降级: %s", e)
+
+    # ---- Stage 4: convergence（人味分/好看度不达标才触发，回滚兜底）----
     final_score = human_score
     should_converge = (
         converge
         and (not gate_passed
              or not tone_passed
-             or (human_score is not None and human_score < 90))
+             or not read_passed
+             or (human_score is not None and human_score < 90)
+             or (read_score is not None and read_score < 70))
     )
     if should_converge:
         from app.services.tone_convergence import converge_tone
         cfg_r = get_effective_config(novel, agent_type="rewrite")
-        conv = converge_tone(text, cfg_r, max_rounds=1)
+        conv = converge_tone(text, cfg_r, max_rounds=2, outline=outline_for_write or "")
         text = conv["text"]
         final_score = conv["final_score"]
         # 收敛会重写全文，门禁必须对最终稿复测，不能沿用旧稿结果。
         gate = run_gate(text)
         tone = analyze_ai_tone(text)
+        readability = analyze_web_novel(text, outline=outline_for_write or "")
         gate_passed = bool(gate.get("passed"))
         tone_passed = bool(tone.get("passed"))
+        read_passed = bool(readability.get("passed"))
         final_score = tone.get("human_score", final_score)
+        read_score = readability.get("readability_score")
         stages.append({"stage": "converge", "ok": True,
                        "converged": conv["converged"],
                        "score": final_score,
-                       "gate_passed": gate_passed})
+                       "readability_score": read_score,
+                       "gate_passed": gate_passed,
+                       "readability_passed": read_passed})
         # 跨章 Reflexion：收敛失败时把原因写入章节笔记，下一章注入
         try:
             from app.services.reflexion import note_from_convergence
             note_from_convergence(conv, novel_id, chapter_number)
         except Exception as e:
             logger.warning("Reflexion 笔记写入降级: %s", e)
+        # 好看度失败也进 Reflexion：下一章主动避开
+        try:
+            from app.services.reflexion import add_reflexion_note
+            from app.services.web_novel_gate import build_readability_instructions
+            rinstr = build_readability_instructions(text, outline_for_write or "")
+            if not read_passed and rinstr:
+                add_reflexion_note(novel_id, chapter_number,
+                                   "追读结构：" + rinstr.split("\n", 1)[-1][:120],
+                                   source="readability")
+        except Exception as e:
+            logger.warning("好看度 Reflexion 降级: %s", e)
     else:
         stages.append({"stage": "converge", "ok": True,
-                       "skipped": "人味分达标/未开启"})
+                       "skipped": "人味分/好看度达标或未开启"})
 
-    if not gate_passed or not tone_passed:
+    if not gate_passed or not tone_passed or not read_passed:
         stages.append({"stage": "gates_final", "ok": False,
                        "gate_passed": gate_passed,
-                       "tone_passed": tone_passed})
+                       "tone_passed": tone_passed,
+                       "readability_passed": read_passed,
+                       "human_score": final_score,
+                       "readability_score": read_score})
+        hint = ""
+        if not read_passed:
+            hint = "（追读结构未达标：优先改大纲契约/钩子，而非只跑去AI收敛）"
         return {
-            "error": "终稿门禁未通过，已停在人工审阅前",
+            "error": f"终稿门禁未通过，已停在人工审阅前{hint}",
             "text": text,
             "stages": stages,
             "human_score": final_score,
-            "outline": chapter.outline,
+            "readability_score": read_score,
+            "readability": readability,
+            "outline": outline_for_write,
         }
 
     # ---- Stage 5: 人工闸门 ----
     result = {"text": text, "stages": stages, "human_score": final_score,
-              "outline": chapter.outline}
+              "outline": outline_for_write}
     if auto_save:
         from app.services.chapter_approval import create_version_record
         try:
+            # prompt 留痕：审批页可查本章发模型的完整 prompt（透明度第一步）
             version = create_version_record(novel_id, chapter_number, text,
-                                            source="ai")
+                                            source="ai",
+                                            prompt_used=json.dumps(
+                                                messages, ensure_ascii=False))
             result["saved_version_id"] = version.id
             stages.append({"stage": "save", "ok": True,
                            "version_id": version.id})

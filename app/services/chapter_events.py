@@ -14,9 +14,10 @@ logger = logging.getLogger(__name__)
 
 _EVENT_SYSTEM = (
     "你是小说章节的事件规划编辑。从给定大纲提炼本章必须推进的 2-4 个事件。"
-    "每个事件写清：目标（谁要什么）、冲突（挡路的是什么）、微结局（本章结束时状态变化）。"
+    "每个事件写清：目标（谁要什么、可量化）、冲突（谁/什么拦他）、"
+    "微结局（本章结束时状态如何变化）、代价（做不成会失去什么）。"
     "只输出 JSON，不要解释。格式："
-    '{"events":[{"goal":"...","conflict":"...","outcome":"..."}]}'
+    '{"events":[{"goal":"...","conflict":"...","outcome":"...","stake":"..."}]}'
 )
 
 
@@ -36,7 +37,7 @@ def extract_events_from_outline(outline, cfg, max_events=4):
             ],
             api_key=cfg.get("api_key", ""), base_url=cfg.get("base_url", ""),
             provider_type=cfg.get("provider_type", "deepseek"),
-            temperature=0.3, max_tokens=800)
+            temperature=0.3, max_tokens=1600)
     except LLMError as e:
         logger.warning("事件清单提取失败: %s", e)
         return []
@@ -46,8 +47,22 @@ def extract_events_from_outline(outline, cfg, max_events=4):
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        logger.warning("事件清单 JSON 解析失败: %s", raw[:120])
-        return []
+        # 截断抢救：max_tokens 不足时 JSON 死在半截字符串上（实测 GLM 的
+        # verbose goal 一写就破 800）。逐个捞截断前完整的 {...} 对象。
+        events = []
+        for m in re.finditer(r"\{[^{}]*\}", raw, re.S):
+            try:
+                ev = json.loads(m.group(0))
+            except json.JSONDecodeError:
+                continue
+            if isinstance(ev, dict) and (ev.get("goal") or ev.get("conflict")):
+                events.append(ev)
+        if events:
+            logger.warning("事件清单 JSON 截断，抢救回 %d 个完整事件", len(events))
+            data = {"events": events}
+        else:
+            logger.warning("事件清单 JSON 解析失败: %s", raw[:120])
+            return []
     events = data.get("events") if isinstance(data, dict) else None
     if not isinstance(events, list):
         return []
@@ -58,8 +73,10 @@ def extract_events_from_outline(outline, cfg, max_events=4):
         goal = str(ev.get("goal") or "").strip()
         conflict = str(ev.get("conflict") or "").strip()
         outcome = str(ev.get("outcome") or "").strip()
+        stake = str(ev.get("stake") or ev.get("cost") or "").strip()
         if goal:
-            cleaned.append({"goal": goal, "conflict": conflict, "outcome": outcome})
+            cleaned.append({"goal": goal, "conflict": conflict,
+                            "outcome": outcome, "stake": stake})
     return cleaned
 
 
@@ -74,8 +91,11 @@ def format_events_block(events):
             parts.append(f"冲突={ev['conflict']}")
         if ev.get("outcome"):
             parts.append(f"微结局={ev['outcome']}")
+        if ev.get("stake"):
+            parts.append(f"代价={ev['stake']}")
         lines.append("；".join(parts))
-    lines.append("历史上下文按出场实体与上述事件相关性压缩，无关旧章一笔带过。")
+    lines.append("每场戏都要服务上述目标/冲突；历史上下文按相关性压缩，无关旧章一笔带过。")
+    lines.append("章尾必须落在外部事件钩上，禁止犹豫收束。")
     return "\n".join(lines)
 
 

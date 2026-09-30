@@ -202,6 +202,7 @@ def get_llm(
     frequency_penalty: float | None = None,
     presence_penalty: float | None = None,
     logprobs: bool = False,
+    timeout: float = 300.0,
 ) -> ChatOpenAI:
     """构建 ChatOpenAI 实例。
 
@@ -236,7 +237,7 @@ def get_llm(
             # ChatAnthropic 1.7.x 没有 http_client 字段：传入会被转进
             # model_kwargs 并混入 /v1/messages 请求体（每次调用必失败）。
             # SDK 自管 httpx 客户端，超时经 default_request_timeout 下发。
-            "default_request_timeout": 300.0,
+            "default_request_timeout": float(timeout),
         }
         if base_url:
             # SDK 会在 base_url 后自行拼接 v1/messages（要求以 / 结尾）——预置表里的
@@ -265,7 +266,17 @@ def get_llm(
         kwargs["logprobs"] = True
 
     if base_url:
-        kwargs["base_url"] = base_url.rstrip("/")
+        # base_url 归一（借鉴 AI_NovelGenerator check_base_url）：custom 类型
+        # 用户常漏 /v1 导致 404——自动补 /v1；以 # 结尾可显式逃逸（非标准路径网关）。
+        # 预设厂商类型不动（预设表已带正确路径）
+        normalized = base_url.rstrip("/")
+        if provider_type == "custom" and not normalized.endswith("/v1"):
+            if normalized.endswith("#"):
+                normalized = normalized[:-1].rstrip("/")
+            else:
+                normalized += "/v1"
+        kwargs["base_url"] = normalized
+    kwargs["request_timeout"] = float(timeout)
     if api_key:
         kwargs["api_key"] = api_key
 
@@ -312,7 +323,12 @@ def _friendly_error(e: Exception) -> str:
 
 _LLM_RETRY_ATTEMPTS = max(1, int(os.getenv("LINGYAN_LLM_RETRIES", "3")))
 _TRANSIENT_MARKERS = ("429", "rate limit", "timeout", "timed out", "connect",
-                      "connection", "temporarily", "502", "503", "504", "overloaded", "eof")
+                      "connection", "temporarily", "502", "503", "504", "overloaded",
+                      "eof", "empty output")
+
+# 厂商返回 200 但零输出（内容被安全过滤/网关异常）——视为可重试失败
+# （借鉴 AI_NovelGenerator invoke_with_cleaning 对空结果的实战处理）
+_EMPTY_OUTPUT_MSG = "LLM returned empty output (possibly blocked by provider safety filter)"
 
 
 def _is_transient_error(exc):
@@ -413,6 +429,7 @@ def _stream_llm_tokens_once(
     max_tokens: int = 4096,
     frequency_penalty: float | None = None,
     presence_penalty: float | None = None,
+    timeout: float = 300.0,
 ) -> Generator[str, None, None]:
     """流式调用 LLM，逐段 yield 文本片段。
 
@@ -427,6 +444,7 @@ def _stream_llm_tokens_once(
             max_tokens=max_tokens, streaming=True,
             frequency_penalty=frequency_penalty,
             presence_penalty=presence_penalty,
+            timeout=timeout,
         )
         lc_messages = _messages_to_langchain(messages)
         for chunk in llm.stream(lc_messages):
@@ -453,6 +471,55 @@ def _stream_llm_tokens_once(
     # http_client 已是共享连接池（_HTTP_CLIENT_CACHE），不再逐调用关闭
 
 
+_THINK_OPEN, _THINK_CLOSE = "<think>", "</think>"
+
+
+def _partial_tag_suffix(buf, tag):
+    """buf 尾部与 tag 前缀的最长匹配长度（处理标签被分片切断的情况）。"""
+    for k in range(min(len(buf), len(tag) - 1), 0, -1):
+        if buf.endswith(tag[:k]):
+            return k
+    return 0
+
+
+def _strip_think_stream(tokens):
+    """流式剥离内联思维链：抑制 <think>...</think> 区间的所有输出。
+
+    部分自托管网关把思维链内联在 content 里（reasoning_content 通道之外）；
+    分片可能把标签切断，用尾部缓冲处理跨片标签。
+    """
+    inside = False
+    tail = ""
+    for t in tokens:
+        buf = tail + t
+        tail = ""
+        while buf:
+            if inside:
+                idx = buf.find(_THINK_CLOSE)
+                if idx < 0:
+                    keep = _partial_tag_suffix(buf, _THINK_CLOSE)
+                    tail, buf = buf[len(buf) - keep:], ""
+                else:
+                    buf = buf[idx + len(_THINK_CLOSE):]
+                    inside = False
+            else:
+                idx = buf.find(_THINK_OPEN)
+                if idx < 0:
+                    keep = _partial_tag_suffix(buf, _THINK_OPEN)
+                    out = buf[:len(buf) - keep] if keep else buf
+                    if out:
+                        yield out
+                    tail, buf = buf[len(buf) - keep:], ""
+                else:
+                    pre = buf[:idx]
+                    if pre:
+                        yield pre
+                    buf = buf[idx + len(_THINK_OPEN):]
+                    inside = True
+    if tail and not inside:
+        yield tail
+
+
 def stream_llm_tokens(
     model: str,
     messages: list[dict],
@@ -463,6 +530,7 @@ def stream_llm_tokens(
     max_tokens: int = 4096,
     frequency_penalty: float | None = None,
     presence_penalty: float | None = None,
+    timeout: float = 300.0,
 ) -> Generator[str, None, None]:
     """流式调用(带瞬态重试):仅在尚未吐出任何 token 前才重试——
     已开始输出的流不可安全重放,中途失败直接抛 LLMError 由调用方处置。"""
@@ -472,15 +540,19 @@ def stream_llm_tokens(
         yielded = False
         collected = 0
         try:
-            for text in _stream_llm_tokens_once(
+            for text in _strip_think_stream(_stream_llm_tokens_once(
                 model=model, messages=messages, api_key=api_key, base_url=base_url,
                 provider_type=provider_type, temperature=temperature,
                 max_tokens=max_tokens, frequency_penalty=frequency_penalty,
-                presence_penalty=presence_penalty,
-            ):
+                presence_penalty=presence_penalty, timeout=timeout,
+            )):
                 yielded = True
                 collected += len(text)
                 yield text
+            if collected == 0:
+                # 200 + 零输出（被安全过滤/网关异常）按失败记账并可重试——
+                # 此前记 ok=1/output=0，成本与失败率统计失真
+                raise LLMError(_EMPTY_OUTPUT_MSG)
             _record_llm_call("stream", model, True, (_time.time() - started) * 1000,
                              sum(len(m.get("content") or "") for m in messages), collected)
             return
@@ -552,6 +624,7 @@ def _call_llm_sync_once(
     max_tokens: int = 4096,
     frequency_penalty: float | None = None,
     presence_penalty: float | None = None,
+    timeout: float = 300.0,
 ) -> str:
     """非流式调用 LLM，返回完整文本。
 
@@ -565,6 +638,7 @@ def _call_llm_sync_once(
             max_tokens=max_tokens, streaming=False,
             frequency_penalty=frequency_penalty,
             presence_penalty=presence_penalty,
+            timeout=timeout,
         )
         lc_messages = _messages_to_langchain(messages)
         result = llm.invoke(lc_messages)
@@ -573,7 +647,11 @@ def _call_llm_sync_once(
             content = "".join(
                 p.get("text", "") for p in content if isinstance(p, dict)
             )
-        return content if isinstance(content, str) else str(content)
+        content = content if isinstance(content, str) else str(content)
+        # 部分自托管网关（Ollama/llama.cpp 类）把思维链以 <think> 标签内联在
+        # content 里（reasoning_content 通道之外的第三条路）——一律剥离
+        return re.sub(r"<think>.*?</think>\s*", "", content, flags=re.S).lstrip()
+
     except LLMError:
         raise
     except Exception as e:
@@ -591,6 +669,7 @@ def call_llm_sync(
     max_tokens: int = 4096,
     frequency_penalty: float | None = None,
     presence_penalty: float | None = None,
+    timeout: float = 300.0,
 ) -> str:
     """非流式调用(带瞬态重试:429/超时/连接类失败指数退避,非瞬态立即抛)。"""
     import time as _time
@@ -603,8 +682,10 @@ def call_llm_sync(
                 model=model, messages=messages, api_key=api_key, base_url=base_url,
                 provider_type=provider_type, temperature=temperature,
                 max_tokens=max_tokens, frequency_penalty=frequency_penalty,
-                presence_penalty=presence_penalty,
+                presence_penalty=presence_penalty, timeout=timeout,
             )
+            if not (out or "").strip():
+                raise LLMError(_EMPTY_OUTPUT_MSG)
             _record_llm_call("sync", model, True, (_time.time() - started) * 1000,
                              prompt_chars, len(out or ""))
             return out
@@ -619,6 +700,44 @@ def call_llm_sync(
                            attempt + 1, _LLM_RETRY_ATTEMPTS, delay, e)
             _time.sleep(delay)
     raise last_exc  # 理论不可达
+
+
+def call_llm_auto(
+    model: str,
+    messages: list[dict],
+    api_key: str = "",
+    base_url: str = "",
+    provider_type: str = "custom",
+    temperature: float = 0.8,
+    max_tokens: int = 4096,
+    frequency_penalty: float | None = None,
+    presence_penalty: float | None = None,
+    timeout: float = 600.0,
+) -> str:
+    """流式优先、同步兜底的整段调用。
+
+    实测（书1 ch25，智谱 glm-5.3-flash）：同一厂商流式稳定出全文，
+    非流式 sync 整文生成 900-1800s 撞总时长墙全灭——流式分块保活没有
+    总时长墙。收敛环/盲审/压缩等"要整段文本"的调用一律走这里；
+    个别不支持 SSE 的网关流式抛错时回落 call_llm_sync。
+    """
+    try:
+        parts = list(stream_llm_tokens(
+            model=model, messages=messages, api_key=api_key, base_url=base_url,
+            provider_type=provider_type, temperature=temperature,
+            max_tokens=max_tokens, frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty, timeout=timeout))
+        text = "".join(parts).strip()
+        if text:
+            return text
+        logger.warning("流式调用空产出，回落同步重试")
+    except Exception as e:
+        logger.warning("流式调用失败，回落同步: %s", e)
+    return call_llm_sync(
+        model=model, messages=messages, api_key=api_key, base_url=base_url,
+        provider_type=provider_type, temperature=temperature,
+        max_tokens=max_tokens, frequency_penalty=frequency_penalty,
+        presence_penalty=presence_penalty, timeout=timeout)
 
 
 def _call_embedding(text, cfg):

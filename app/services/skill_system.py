@@ -714,6 +714,7 @@ def gate_check():
         return jsonify({"error": "text required"}), 400
     # mode: generate（直接生成，默认）| polish（人稿+AI润色，ARB 阈值放宽）
     mode = data.get("mode") or request.form.get("mode") or "generate"
+    outline = data.get("outline") or request.form.get("outline") or ""
     from app.services.skill_gate import run_gate
     from app.services.ai_metric import analyze_ai_tone
     rep = run_gate(text)
@@ -721,6 +722,12 @@ def gate_check():
         rep["ai_tone"] = analyze_ai_tone(text, mode=mode)
     except Exception:
         pass
+    # 双轨之二：网文好看度（追读结构，与人味分正交）
+    try:
+        from app.services.web_novel_gate import analyze_web_novel
+        rep["web_novel"] = analyze_web_novel(text, outline=outline)
+    except Exception as e:
+        rep["web_novel"] = {"passed": False, "error": str(e)[:200]}
     # 困惑度雷达：选词分布层信号（显式 opt-in——每次要 N 次复述调用，有成本）
     if data.get("with_ppl") or request.form.get("with_ppl"):
         try:

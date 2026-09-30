@@ -18,7 +18,7 @@ import threading
 
 from flask import current_app
 
-from app.services.llm import call_llm_sync, stream_llm_tokens, LLMError
+from app.services.llm import call_llm_auto, call_llm_sync, stream_llm_tokens, LLMError
 from app.models import (db, ChapterVersion, CriticReview, Chapter, Novel)
 from app.services.blind_review import run_dual_review
 from app.services.prompt_builder import (build_critic_prompt, build_rewrite_prompt,
@@ -169,7 +169,7 @@ def _call_critic_sync(chapter_content, novel_title, chapter_title, chapter_numbe
     )
 
     try:
-        text = call_llm_sync(
+        text = call_llm_auto(
             cfg["model_name"], messages,
             cfg["api_key"], cfg["base_url"],
             cfg.get("provider_type", "deepseek"),

@@ -251,7 +251,7 @@ class TestUnifiedReviewStream:
             calls.append(kwargs.get("messages"))
             return "【判决】追读\n意见正文……"
 
-        with patch.object(br, "call_llm_sync", side_effect=fake_llm):
+        with patch.object(br, "call_llm_auto", side_effect=fake_llm):
             result = br.run_dual_review("正文内容……")
         assert len(calls) == 2  # 两位编辑 = 两次独立请求
         keys = [e["key"] for e in result["editors"]]

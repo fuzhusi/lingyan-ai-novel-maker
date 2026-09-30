@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from flask import current_app
 
 from app.config_utils import get_model_config, get_effective_config
-from app.services.llm import call_llm_sync, LLMError
+from app.services.llm import call_llm_auto, LLMError
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ def run_dual_review(content, novel=None):
                 cfg = get_effective_config(novel, agent_type="critic")
             else:
                 cfg = get_model_config(agent_type="critic")
-            text = call_llm_sync(
+            text = call_llm_auto(
                 model=cfg["model_name"],
                 messages=build_editor_messages(editor["system"], content),
                 api_key=cfg.get("api_key", ""),
@@ -190,7 +190,7 @@ def run_rewrite(content, reviews, writer_agent="short_story"):
         cfg = get_model_config(agent_type=writer_agent)
         round_cap = min(8192, max(4096, len(content) * 2))
         messages = build_rewrite_messages(content, reviews)
-        full = (call_llm_sync(
+        full = (call_llm_auto(
             model=cfg["model_name"], messages=messages,
             api_key=cfg.get("api_key", ""), base_url=cfg.get("base_url", ""),
             provider_type=cfg.get("provider_type", "deepseek"),
@@ -213,7 +213,7 @@ def run_rewrite(content, reviews, writer_agent="short_story"):
                     f"继续补完剩余约 {max(remaining, 200)} 字。"
                 )},
             ]
-            piece = call_llm_sync(
+            piece = call_llm_auto(
                 model=cfg["model_name"], messages=cont,
                 api_key=cfg.get("api_key", ""), base_url=cfg.get("base_url", ""),
                 provider_type=cfg.get("provider_type", "deepseek"),

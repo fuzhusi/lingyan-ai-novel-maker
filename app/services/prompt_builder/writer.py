@@ -18,7 +18,8 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
                         tone_instructions="", author_intent="", current_focus="",
                         style_memo="", creator_preferences="", narrative_plan="",
                         reference_passages="", cast_constraint="", chapter_events="",
-                        reader_known="", reflexion_lessons=""):
+                        reader_known="", reflexion_lessons="", chapter_number=None,
+                        next_chapter_brief=""):
     system_prompt = _load_system_prompt(db, "writer", (
         "你是一位专业的畅销网文作家，具备丰富的网文学创作经验，擅长使用细腻的描写和生动的对话来刻画人物和推动情节发展。"
         "根据提供的创作指引，写出高质量的小说章节内容。严格遵守世界观设定和人物设定，"
@@ -130,6 +131,13 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
     # 分层记忆：上章结尾原文（衔接）-> 近章详细摘要 -> 更早章节压缩概要
     if prev_ending:
         blocks.append(_section("上一章结尾（原文，请自然衔接文风与情节）", prev_ending))
+    # 下一章方向（借鉴 AI_NovelGenerator next-chapter 块）：保证本章收束时
+    # 给下一章留出承接接口，不把戏写满
+    if next_chapter_brief:
+        hint = "（本章【结尾钩子】应自然引向该方向，但不得提前展开下一章的情节）"
+        blocks.append(_section(
+            "下一章方向（本章结尾须为其留出接口）",
+            next_chapter_brief + "\n" + hint))
     if summaries:
         sum_lines = []
         for s in summaries:
@@ -192,6 +200,30 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
                 "每一拍至少落成一个完整场景（动作必备，有人物互动的拍须落到对话），"
                 "不得略拍、不得把多拍合并为梗概式叙述；拍与拍之间过渡自然，"
                 "大纲含【结尾钩子】时，最后一拍须落在该钩子上。"))
+        # 大纲缺本章契约/钩子时，用 drama 词库+契约块兜底注入（旧大纲兼容）
+        if "【本章契约】" not in outline and ("【核心事件】" in outline or len(outline) > 80):
+            blocks.append(_section(
+                "戏剧施工提醒",
+                "正文必须让读者感到：本章有人在争具体的东西（目标/谁拦/代价），"
+                "章尾有带代价的外部事件钩。禁止把大纲写成流程说明或氛围散文。"))
+        if "【结尾钩子】" not in outline and "系统补注" not in outline and len(outline) > 80:
+            blocks.append(_section(
+                "章尾硬要求",
+                "最后一段须落在外部事件/倒计时/既成事实，并写清代价；"
+                "禁止落在主角犹豫、回房睡去或无代价邀约。"))
+
+    # 黄金三章（第1-3章特化）：矛盾直入、设定抛出低、强钩
+    if chapter_number and 1 <= int(chapter_number) <= 3 and outline:
+        blocks.append(_section(
+            f"黄金三章 · 第{chapter_number}章",
+            "第1章：0-500字矛盾直入；500-1500字侧面带出设定；尽快点亮核心异常/金手指；"
+            "设定抛出全文占比 <10%；章尾必须强钩。"
+            "第2章：能力或危机第一次被外部验证，禁止主角自己解释「我蒙的」。"
+            "第3章：冲突升级，出现更大代价或更强对手，章尾双线压力。"
+            "禁止静物开场、禁止家世成段倾泻。"
+            if int(chapter_number) == 1 else
+            "本章属黄金三章：能力/冲突必须有一次外部验证或升级；设定继续克制；"
+            "章尾钩带代价，禁止落在犹豫。"))
 
     # 行文指纹修正指令（基于近期章节检测，位于特别指示之前、优先级次高）
     if tone_instructions:
@@ -215,7 +247,8 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
 def build_outline_prompt(novel_title="", genre="", synopsis="", world_intro="",
                          chapter_title="", chapter_number=1, characters=None,
                          summaries=None, foreshadowing_items=None, db=None,
-                         author_intent="", current_focus="", world_settings=None):
+                         author_intent="", current_focus="", world_settings=None,
+                         excitement_recent=None):
     system_prompt = _load_system_prompt(db, "outline", (
         "你是一位资深小说大纲策划师。你输出的每一份章节大纲都必须严格遵守下方的"
         "【章节大纲固定格式】：它是后续自动勾选出场角色、按节拍铺写正文的施工依据，"
@@ -223,7 +256,9 @@ def build_outline_prompt(novel_title="", genre="", synopsis="", world_intro="",
         "\n"
         "章节大纲固定格式：\n"
         "【本章定位】从「推进／转折／揭示／过渡／高潮铺垫」中选一个主定位，"
-        "再用一句话说明本章在整个故事中的作用\n"
+        "再用一句话说明本章在整个故事中的作用，并标注本章主悬念类型（信息差/道德困境/时间压力/身份谜团/危机迫近，选其一）\n"
+        "【本章契约】三句话写清戏剧任务：他要什么（可量化）／谁拦他／"
+        "不做成会失去什么（具体代价）——这是正文必须体现的戏，不是可选提醒\n"
         "【核心事件】1-3条，每条一句话，写成「谁+做了什么+导致什么结果」；"
         "只写章级因果主线，不要复述【场景节拍】里的细节\n"
         "【出场人物】列出本章有戏份的角色名：若下方列出现有人物，人名必须与其姓名"
@@ -237,16 +272,19 @@ def build_outline_prompt(novel_title="", genre="", synopsis="", world_intro="",
         "【情感基调】本章基调及其迁移过程（例：怀疑→恐惧→决绝）\n"
         "【伏笔操作】结合下方【待回收伏笔】（若有）与既有剧情安排：埋设：…／强化：…／回收：…"
         "（可只写其中一两种）；本章确无伏笔动作写「无」\n"
-        "【结尾钩子】一句话写出本章最后一拍留下的悬念，必须让读者想立刻读下一章\n"
+        "【结尾钩子】一句话写出本章最后一拍留下的悬念：必须是外部事件/倒计时/既成事实，"
+        "并带清代价——禁止落在主角犹豫、情绪留白或回房睡去\n"
         "\n"
         "节奏自检（软指导）：若【前情提要】显示近几章均为高强度推进，本章宜作过渡缓冲；"
-        "全篇每3-5章应构成一个含小高潮的悬念单元\n"
+        "全篇每3-5章应构成一个含小高潮的悬念单元，可用「认知过山车」配方：连续2章紧张推进后接1章缓冲沉淀；"
+        "第1-3章遵守黄金三章：第1章矛盾直入+金手指/核心异常尽早点亮，设定抛出 <10%，章尾强钩\n"
         "\n"
         "硬性要求：\n"
         "1. 大纲是施工图不是正文：禁止出现对白、心理描写与环境渲染；"
-        "除【场景节拍】外全文不超过250字\n"
+        "除【场景节拍】外全文不超过280字\n"
         "2. 【出场人物】名单之外的角色一律不得出现在【场景节拍】中；（背景提及）与龙套不算登场\n"
-        "3. 输出纯文本大纲，不要输出小说正文，不要解释格式本身"
+        "3. 【本章契约】【核心事件】【结尾钩子】三项缺一不可，缺任何一项视为无效大纲\n"
+        "4. 输出纯文本大纲，不要输出小说正文，不要解释格式本身"
     ))
 
     # 大纲也吃节奏类技巧（钩子/张弛），但跳过页面级笔法协议包（正文级技法对大纲是噪音）
@@ -307,6 +345,15 @@ def build_outline_prompt(novel_title="", genre="", synopsis="", world_intro="",
     if foreshadowing_items:
         fs_lines = [f"• {f['description']}" for f in foreshadowing_items]
         blocks.append(_section("待回收伏笔", "\n".join(fs_lines)))
+
+    # 近章激动值回看（审批时确定性算出的曲线）：把"事后测量"回注为
+    # "事前规划"——连续高强度时明确提示缓冲，比纯文字软指导更可执行
+    if excitement_recent:
+        curve = "、".join(
+            f"第{e.get('chapter', '?')}章 {e.get('density', '?')}"
+            for e in excitement_recent[-5:])
+        blocks.append(_section(
+            "近章激动值曲线（≥6 为高强度，节奏规划参考）", curve))
 
     blocks.append("\n请严格按系统要求中的【章节大纲固定格式】输出本章大纲。")
 

@@ -1,22 +1,32 @@
 """去AI味收敛回滚环 + 字数超标压缩。
 
-收敛环（借鉴 jarvis-write + oh-story story-deslop 保护规则）：
-    检测(ai_metric) → 定向重写(违规指令注入) → 复测 → 人味分不升则回滚。
-    「绝不保留更差版本」：任何一轮重写产物只要人味分未超过历史最优，一律丢弃。
+收敛环（借鉴 jarvis-write + oh-story story-deslop + 调研 P0 双轨）：
+    检测(ai_metric + web_novel_gate) → 定向重写 → 复测 → 分数不升则回滚。
+    「绝不保留更差版本」：重写产物只要人味分未超过历史最优（或好看度未升且人味不降），丢弃。
 
-保护纪律（oh-story deslop + Anbeeld WRITING.md）：
-    - 只改怎么说，不改说什么
-    - 按违规密度分级设定删改上限（轻≤15%/中≤25%/重≤35%），超限弃用
-    - 范围/归因/条件/术语不得因润色漂移
+保护纪律：
+    - 只改怎么说，不改说什么；允许加强钩子/开场，禁止删情节
+    - Jaccard 改动率与长度收缩比双硬顶（阈值见 _DENSITY_CAPS / _LENGTH_SHRINK_CAP）
     - 防「marker 过冲」：短句占比冲到异常高位时视为假人味，弃用
 """
 import logging
 import re
 
 from app.services.ai_metric import analyze_ai_tone, build_tone_instructions
-from app.services.llm import call_llm_sync, LLMError
+from app.services.llm import call_llm_auto, LLMError
 
 logger = logging.getLogger(__name__)
+
+
+def _call_llm_flexible(cfg, messages, temperature, max_tokens):
+    """兼容旧名：转发共享的流式优先实现（见 llm.call_llm_auto）。"""
+    return call_llm_auto(
+        model=cfg["model_name"], messages=messages,
+        api_key=cfg.get("api_key", ""), base_url=cfg.get("base_url", ""),
+        provider_type=cfg.get("provider_type", "deepseek"),
+        temperature=temperature, max_tokens=max_tokens,
+        timeout=cfg.get("timeout") or 600.0)
+
 
 _MAX_ROUNDS = 2          # 单次收敛最多重写轮数（每轮都要真实调用，贵）
 _MIN_LEN = 200           # 产物低于此长度视为失败（analyze 的最小可测长度）
@@ -50,7 +60,6 @@ _CONDENSE_SYSTEM = (
     "你是一位小说稿件的压缩编辑。在完整保留全部情节节拍、对话关键信息与"
     "因果推进的前提下，压缩环境描写、心理独白与重复修饰，把正文控制在"
     "目标字数附近。禁止删除情节点，禁止改变叙事顺序。只输出压缩后的完整正文。")
-
 
 def _violation_density(report):
     """按 high 项数量与人味分推断违规密度档：light / mid / heavy。"""
@@ -103,13 +112,14 @@ def _overshoot_check(original_report, rewritten_report):
     return r >= _SHORT_RATIO_OVERSHOOT and r > o + 0.15
 
 
-def converge_tone(text, cfg, max_rounds=_MAX_ROUNDS):
+def converge_tone(text, cfg, max_rounds=_MAX_ROUNDS, outline=""):
     """去AI味收敛回滚环。
 
     Args:
         text: 待收敛正文。
         cfg: effective config（rewrite Agent 配置，模型要能承担整章重写）。
         max_rounds: 最多重写轮数。
+        outline: 可选本章大纲——注入追读结构修正（双轨门禁）。
 
     Returns:
         {"converged": bool, "text": str,       # converged=False 时 text 为原稿
@@ -131,33 +141,49 @@ def converge_tone(text, cfg, max_rounds=_MAX_ROUNDS):
     edit_cap = _DENSITY_CAPS[density]
     best_text, best_score = text, original_score
     best_report = report
+    best_read = None
     rounds = []
 
     for r in range(1, max_rounds + 1):
-        if best_score >= _CLEAN_SCORE and analyze_ai_tone(best_text)["passed"]:
-            rounds.append({"round": r, "action": "已达标，提前结束"})
+        # 人味分达标但仍可能追读不达标——两轨都干净才提前结束
+        try:
+            from app.services.web_novel_gate import analyze_web_novel as _anw
+            _r_now = _anw(best_text, outline or "")
+        except Exception:
+            _r_now = {"passed": True, "readability_score": 100}
+        human_clean = (best_score >= _CLEAN_SCORE
+                       and analyze_ai_tone(best_text).get("passed"))
+        read_clean = bool(_r_now.get("passed")) or (
+            (_r_now.get("readability_score") or 0) >= 85)
+        if human_clean and read_clean:
+            rounds.append({"round": r, "action": "人味+追读均达标，提前结束"})
             break
         instructions = build_tone_instructions(best_text)
-        if not instructions:
+        # 追读结构修正（人味分之外的第二轨）
+        try:
+            from app.services.web_novel_gate import build_readability_instructions
+            read_instr = build_readability_instructions(best_text, outline or "")
+        except Exception:
+            read_instr = ""
+        if not instructions and not read_instr:
             rounds.append({"round": r, "action": "无可定向的违规指令，结束"})
             break
         user = (
             f"【原文】\n{best_text}\n\n"
-            f"【必须修复的 AI 痕迹（含违规示例）】\n{instructions}\n\n"
+            f"【必须修复的 AI 痕迹（含违规示例）】\n{instructions or '（无构式违规）'}\n\n"
+            f"{read_instr or ''}\n\n"
             f"【保护硬顶】\n"
-            f"- 只改怎么说，不改说什么\n"
+            f"- 只改怎么说，不改说什么；戏剧任务（目标/冲突/钩子）可以加强，不可删除情节\n"
             f"- 全文删改字符比例不得超过 {int(edit_cap * 100)}%\n"
             f"- 地名/人名/数字/时间/否定与程度副词必须原样保留\n"
             f"- 未命中问题的句子逐字保留\n\n"
             f"【要求】输出修复后的完整正文。除修复项外不做任何改动。")
         try:
-            rewritten = call_llm_sync(
-                model=cfg["model_name"], messages=[
+            rewritten = _call_llm_flexible(
+                cfg, [
                     {"role": "system", "content": _REWRITE_SYSTEM},
                     {"role": "user", "content": user},
                 ],
-                api_key=cfg.get("api_key", ""), base_url=cfg.get("base_url", ""),
-                provider_type=cfg.get("provider_type", "deepseek"),
                 temperature=0.4, max_tokens=cfg.get("max_tokens", 8000))
         except LLMError as e:
             rounds.append({"round": r, "action": f"重写调用失败：{e}"})
@@ -196,6 +222,13 @@ def converge_tone(text, cfg, max_rounds=_MAX_ROUNDS):
 
         new_report = analyze_ai_tone(rewritten)
         new_score = new_report.get("human_score")
+        # 双轨采纳：人味分不降 且（分升 或 好看度升）
+        try:
+            from app.services.web_novel_gate import analyze_web_novel
+            old_r = analyze_web_novel(best_text, outline or "").get("readability_score") or 0
+            new_r = analyze_web_novel(rewritten, outline or "").get("readability_score") or 0
+        except Exception:
+            old_r, new_r = 0, 0
         if _overshoot_check(best_report, new_report):
             rounds.append({
                 "round": r,
@@ -204,21 +237,41 @@ def converge_tone(text, cfg, max_rounds=_MAX_ROUNDS):
             })
             break
 
-        if new_score is not None and new_score > best_score:
-            rounds.append({"round": r, "action": "人味分提升，采纳",
-                           "score": new_score, "edit_ratio": edit_ratio})
+        score_up = new_score is not None and new_score > best_score
+        read_up = new_r > old_r
+        if new_score is not None and (score_up or (read_up and new_score >= best_score)):
+            rounds.append({"round": r, "action": "人味/好看度提升，采纳",
+                           "score": new_score, "readability": new_r,
+                           "edit_ratio": edit_ratio})
             best_text, best_score, best_report = rewritten, new_score, new_report
+            best_read = new_r
         else:
             # 回滚纪律：绝不保留更差版本
             rounds.append({"round": r, "action": "人味分未提升，回滚保留原稿",
-                           "score": new_score})
+                           "score": new_score, "readability": new_r})
             break
 
+    try:
+        from app.services.web_novel_gate import analyze_web_novel as _anw2
+        final_read = _anw2(best_text, outline or "").get("readability_score")
+    except Exception:
+        final_read = best_read
+    orig_read = None
+    try:
+        from app.services.web_novel_gate import analyze_web_novel as _anw3
+        orig_read = _anw3(text, outline or "").get("readability_score")
+    except Exception:
+        orig_read = None
+
     return {
-        "converged": best_score > original_score,
+        "converged": (best_score > original_score
+                      or (final_read is not None and orig_read is not None
+                          and final_read > orig_read)),
         "text": best_text,
         "original_score": original_score,
         "final_score": best_score,
+        "readability_score": final_read,
+        "original_readability": orig_read,
         "density": density,
         "edit_cap": edit_cap,
         "rounds": rounds,
@@ -237,13 +290,11 @@ def condense_text(text, cfg, target_chars=2500):
             f"信息与因果推进；压缩环境描写、心理独白与重复修饰。"
             "直接输出压缩后的完整正文。")
     try:
-        result = call_llm_sync(
-            model=cfg["model_name"], messages=[
+        result = _call_llm_flexible(
+            cfg, [
                 {"role": "system", "content": _CONDENSE_SYSTEM},
                 {"role": "user", "content": user},
             ],
-            api_key=cfg.get("api_key", ""), base_url=cfg.get("base_url", ""),
-            provider_type=cfg.get("provider_type", "deepseek"),
             temperature=0.4, max_tokens=max(cfg.get("max_tokens", 8000),
                                             target_chars * 2))
     except LLMError as e:

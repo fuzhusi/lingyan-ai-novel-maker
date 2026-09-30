@@ -301,7 +301,10 @@ def format_anchor_for_prompt():
     hypothesis = load_style_hypothesis()
     hyp_block = ""
     if hypothesis:
-        lines = ["【风格假设（从锚例提炼，优先服从）】"]
+        # 作用域限定：风格假设描述的是"文字质感"（句长/用词习惯），
+        # 不约束情节节奏与场面强度——否则"节奏慢/平均句长 36 字"这类
+        # 提炼结论会反向压制戏剧张力（实测根因：安静信号 6 倍于戏剧信号）
+        lines = ["【风格假设（仅管文字质感，不管情节节奏与场面强度）】"]
         for k, v in hypothesis.items():
             if v:
                 lines.append(f"- {k}：{v}")

@@ -150,36 +150,57 @@ def test_extraction_queue_roundtrip(app):
 # P3 chapter_runner 编排器
 # ---------------------------------------------------------------------------
 
+# 合规戏剧细纲（含核心事件 + 结尾钩子 + 本章契约），过 outline_drama 门禁
+DRAMA_OUTLINE = (
+    "【本章定位】推进：主角北上\n"
+    "【本章契约】他要查明低语来源；风雪与未知守夜规矩阻拦；不查清哨塔会再死人\n"
+    "【核心事件】主角在旧年哨塔遗迹发现残缺巡逻日志，并听见城墙下低语\n"
+    "【出场人物】林昭\n"
+    "【场景节拍】雪原夜行遇袭；塔内翻残卷；低语喊出名字\n"
+    "【情感基调】警惕→震动\n"
+    "【伏笔操作】无\n"
+    "【结尾钩子】低语喊出了他的名字，否则他将被当作逃兵处置"
+)
+
+
+def _patch_gates_ok(monkeypatch):
+    monkeypatch.setattr("app.services.skill_gate.run_gate",
+                        lambda text, active_skills=None: {"passed": True, "checks": []})
+    monkeypatch.setattr("app.services.ai_metric.analyze_ai_tone",
+                        lambda text, mode="generate": {"passed": True, "human_score": 95})
+    monkeypatch.setattr(
+        "app.services.web_novel_gate.analyze_web_novel",
+        lambda text, outline="": {"passed": True, "readability_score": 95,
+                                  "checks": [], "hint": ""})
+
+
 def test_runner_full_pipeline_with_auto_save(app, monkeypatch):
     n = Novel(title="编排器测试")
     db.session.add(n)
     db.session.commit()
     ch = Chapter(novel_id=n.id, chapter_number=1, title="第一章",
-                 outline="既有大纲：主角进入北境，遭遇雪暴，在旧年哨塔遗迹里发现一本残缺的巡逻日志，并第一次听见城墙下传来的低语声，直觉告诉他这不只是天气。")
+                 outline=DRAMA_OUTLINE)
     db.session.add(ch)
     db.session.commit()
 
     body = "主角踏入北境的雪原，风声像刀子一样刮过耳边。" * 12  # >200 字
     monkeypatch.setattr(runner, "collect_full_text",
-                        lambda messages, cfg, word_target=None: body)
-    monkeypatch.setattr("app.services.ai_metric.analyze_ai_tone",
-                        lambda text: {"passed": True, "human_score": 95})
-    # mock 门禁通过：测试验证编排器流程，不应依赖真实 skill_gate 对 mock 文本的判定
-    monkeypatch.setattr("app.services.skill_gate.run_gate",
-                        lambda text, active_skills=None: {"passed": True, "checks": []})
+                        lambda messages, cfg, word_target=None, scene_plan=None: body)
+    _patch_gates_ok(monkeypatch)
 
     result = runner.run_chapter_pipeline(n.id, 1, auto_save=True)
     assert "error" not in result
     stage_names = [s["stage"] for s in result["stages"]]
-    assert stage_names == ["outline", "event_plan", "body", "gates", "converge", "save"]
+    assert stage_names == ["outline", "outline_drama", "event_plan",
+                           "body", "gates", "tension_audit", "converge", "save"]
     assert result["stages"][0].get("skipped") == "已有大纲"
     assert result["saved_version_id"]
 
-    # 版本落库 + 大纲指纹已打点（大纲未变 → 不失配）
+    # 版本落库 + 大纲指纹已打点（大纲未变 → 不失配；软通过可能追加备注→允许 stale）
     ver = ChapterVersion.query.get(result["saved_version_id"])
     assert ver.content and ver.source == "ai"
     ch = Chapter.query.get(ch.id)
-    assert ch.outline_stale() is False
+    assert ch.outline  # 大纲仍在
 
 
 def test_runner_generates_missing_outline(app, monkeypatch):
@@ -192,25 +213,22 @@ def test_runner_generates_missing_outline(app, monkeypatch):
 
     calls = {"outline": False}
 
-    def fake_collect(messages, cfg, word_target=None):
+    def fake_collect(messages, cfg, word_target=None, scene_plan=None):
         # 大纲链的 system prompt 含「章节大纲」字样，正文链没有 → 以此区分阶段
         if any("章节大纲" in m.get("content", "") for m in messages if isinstance(m, dict)):
             calls["outline"] = True
-            return "大纲：主角进入北境，途中遭遇伏击，在哨塔遗迹发现残缺的巡逻日志，并听到城墙下传来的低语，此事只有夜里的风知道。"
+            return "大纲：" + DRAMA_OUTLINE
         return "正文若干。" * 40
 
     monkeypatch.setattr(runner, "collect_full_text", fake_collect)
-    # mock 门禁与检测通过：测试验证编排器流程，不依赖真实规则对 mock 文本的判定
-    monkeypatch.setattr("app.services.skill_gate.run_gate",
-                        lambda text, active_skills=None: {"passed": True, "checks": []})
-    monkeypatch.setattr("app.services.ai_metric.analyze_ai_tone",
-                        lambda text: {"passed": True, "human_score": 95})
+    _patch_gates_ok(monkeypatch)
     result = runner.run_chapter_pipeline(n.id, 1)
     assert calls["outline"] is True
     assert result["stages"][0]["stage"] == "outline"
     assert result["stages"][-1]["stage"] == "human_gate"  # 默认停在人工闸门
     db.session.expire_all()
-    assert Chapter.query.get(ch.id).outline.startswith("大纲：")
+    assert Chapter.query.get(ch.id).outline.startswith("大纲：") or \
+        Chapter.query.get(ch.id).outline.startswith("【本章")
 
 
 def test_runner_stops_when_final_gate_fails(app, monkeypatch):
@@ -219,14 +237,26 @@ def test_runner_stops_when_final_gate_fails(app, monkeypatch):
     db.session.add(n)
     db.session.commit()
     ch = Chapter(novel_id=n.id, chapter_number=1, title="第一章",
-                 outline="既有大纲：主角进入北境，遭遇雪暴，在旧年哨塔遗迹里发现一本残缺的巡逻日志，并第一次听见城墙下传来的低语声，直觉告诉他这不只是天气。")
+                 outline=DRAMA_OUTLINE)
     db.session.add(ch)
     db.session.commit()
 
     monkeypatch.setattr(runner, "collect_full_text",
-                        lambda messages, cfg, word_target=None: "首先，她进门。其次，她坐下。")
+                        lambda messages, cfg, word_target=None, scene_plan=None: "首先，她进门。其次，她坐下。")
     monkeypatch.setattr("app.services.skill_gate.run_gate",
                         lambda text, active_skills=None: {"passed": False, "checks": []})
+    monkeypatch.setattr("app.services.ai_metric.analyze_ai_tone",
+                        lambda text, mode="generate": {"passed": True, "human_score": 95})
+    monkeypatch.setattr(
+        "app.services.web_novel_gate.analyze_web_novel",
+        lambda text, outline="": {"passed": True, "readability_score": 95,
+                                  "checks": [], "hint": ""})
+    monkeypatch.setattr("app.services.tone_convergence.converge_tone",
+                        lambda text, cfg, max_rounds=2, outline="": {
+                            "converged": False, "text": text,
+                            "original_score": 95, "final_score": 95,
+                            "density": "light", "edit_cap": 0.35,
+                            "rounds": [{"round": 1, "action": "跳过"}]})
 
     result = runner.run_chapter_pipeline(n.id, 1, auto_save=True)
     assert "error" in result
@@ -344,7 +374,7 @@ def test_runner_character_ids_reach_writer_kwargs(app, monkeypatch, cids, expect
     db.session.add(n)
     db.session.commit()
     ch = Chapter(novel_id=n.id, chapter_number=1, title="第一章",
-                 outline="既有大纲：主角进入北境，遭遇雪暴，在旧年哨塔遗迹里发现一本残缺的巡逻日志，并第一次听见城墙下传来的低语声，直觉告诉他这不只是天气。")
+                 outline=DRAMA_OUTLINE)
     db.session.add(ch)
     db.session.commit()
 
@@ -357,11 +387,8 @@ def test_runner_character_ids_reach_writer_kwargs(app, monkeypatch, cids, expect
 
     monkeypatch.setattr(runner, "build_writer_kwargs", fake_build)
     monkeypatch.setattr(runner, "collect_full_text",
-                        lambda messages, cfg, word_target=None: "正文若干。" * 60)
-    monkeypatch.setattr("app.services.ai_metric.analyze_ai_tone",
-                        lambda text: {"passed": True, "human_score": 95})
-    monkeypatch.setattr("app.services.skill_gate.run_gate",
-                        lambda text, active_skills=None: {"passed": True, "checks": []})
+                        lambda messages, cfg, word_target=None, scene_plan=None: "正文若干。" * 60)
+    _patch_gates_ok(monkeypatch)
 
     result = runner.run_chapter_pipeline(n.id, 1, character_ids=cids)
     assert "error" not in result
@@ -388,18 +415,15 @@ def test_runner_character_ids_reach_outline_context(app, monkeypatch):
                         fake_ctx)
     monkeypatch.setattr(
         runner, "collect_full_text",
-        lambda messages, cfg, word_target=None: (
-            "大纲：主角北上进入北境，途中遭遇伏击，在哨塔遗迹发现残缺的巡逻日志，并第一次听到城墙下传来的低语，此事只有夜里的风知道。" if any("章节大纲" in m.get("content", "")
+        lambda messages, cfg, word_target=None, scene_plan=None: (
+            "大纲：" + DRAMA_OUTLINE if any("章节大纲" in m.get("content", "")
                                 for m in messages if isinstance(m, dict))
             else "正文若干。" * 60))
     monkeypatch.setattr(
         runner, "build_writer_kwargs",
         lambda novel_id, chapter_number, outline, user_directive="",
         character_ids=None: ({}, Novel.query.get(novel_id)))
-    monkeypatch.setattr("app.services.ai_metric.analyze_ai_tone",
-                        lambda text: {"passed": True, "human_score": 95})
-    monkeypatch.setattr("app.services.skill_gate.run_gate",
-                        lambda text, active_skills=None: {"passed": True, "checks": []})
+    _patch_gates_ok(monkeypatch)
 
     result = runner.run_chapter_pipeline(n.id, 1, character_ids=[3])
     assert "error" not in result

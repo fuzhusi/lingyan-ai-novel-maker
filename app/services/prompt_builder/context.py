@@ -163,7 +163,8 @@ def assemble_chapter_context(novel_id, chapter_number, db, character_ids=None):
     ).all()
     foreshadowing_data = [
         {"description": f.description, "planted_chapter": f.planted_chapter,
-         "status": f.status, "title": f.title}
+         "status": f.status, "title": f.title, "importance": f.importance,
+         "expected_chapter": (f.expected_resolve_chapter or f.resolve_chapter)}
         for f in foreshadowing_items
     ]
 
@@ -191,6 +192,19 @@ def assemble_chapter_context(novel_id, chapter_number, db, character_ids=None):
                     {"title": s.title, "summary": s.summary} for s in scenes
                 ]
 
+    # 下一章方向（借鉴 AI_NovelGenerator 的 next-chapter 块）：写手须知道
+    # 本章结尾给下一章留什么接口。只取前 200 字要点，不做全量剧透式注入。
+    next_chapter_brief = ""
+    next_ch = Chapter.query.filter_by(
+        novel_id=novel_id, chapter_number=chapter_number + 1).first()
+    if next_ch:
+        candidate = (next_ch.outline or "").strip()
+        if not candidate and next_ch.outline_node_id:
+            next_node = OutlineNode.query.get(next_ch.outline_node_id)
+            candidate = (next_node.summary or "").strip() if next_node else ""
+        if candidate:
+            next_chapter_brief = candidate[:200]
+
     return {
         "characters": characters_data,
         "world_settings": world_data,
@@ -199,12 +213,33 @@ def assemble_chapter_context(novel_id, chapter_number, db, character_ids=None):
         "prev_ending": prev_ending,          # 上章结尾原文
         "foreshadowing_items": foreshadowing_data,
         "outline_node_context": outline_node_context,
+        "next_chapter_brief": next_chapter_brief,  # 下一章方向要点（钩子对齐用）
         "genre": novel.genre if novel else "",
         "synopsis": novel.synopsis if novel else "",
         "world_intro": novel.world_intro if novel else "",
         "author_intent": (novel.author_intent or "") if novel else "",
         "current_focus": (novel.current_focus or "") if novel else "",
     }
+
+
+def get_excitement_recent(novel_id, n=5):
+    """近 N 章激动值曲线（审批时确定性算出的 StoryState.excitement_history）。
+
+    供大纲生成做"事前节奏规划"——此前该历史只写不读，是单向数据流。
+    返回 [{"chapter": int, "density": float}]（旧→新），无状态时 []。
+    """
+    import json as _json
+    from app.models import StoryState
+    try:
+        ss = StoryState.query.filter_by(novel_id=novel_id).first()
+        if not ss or not (ss.excitement_history or "").strip():
+            return []
+        history = _json.loads(ss.excitement_history)
+        return history[-n:] if isinstance(history, list) else []
+    except Exception:
+        logger.warning("get_excitement_recent(%s) 读取失败，返回空", novel_id,
+                       exc_info=True)
+        return []
 
 
 # ---------------------------------------------------------------------------

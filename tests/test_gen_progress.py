@@ -94,7 +94,7 @@ def test_generation_tokens_no_callback_still_works(monkeypatch):
 def test_stream_to_sse_emits_status_frames(monkeypatch):
     from app.routes import generate as gen_mod
 
-    def fake_generation_tokens(messages, cfg, word_target=None, on_event=None):
+    def fake_generation_tokens(messages, cfg, word_target=None, on_event=None, scene_plan=None):
         on_event({"stage": "round_start", "round": 1})
         on_event({"stage": "first_token", "round": 1, "ttft_s": 2.1,
                   "model": "m1", "provider": "deepseek"})
@@ -131,7 +131,7 @@ def test_stream_to_sse_emits_status_frames(monkeypatch):
 def test_stream_to_sse_error_still_carries_full_text(monkeypatch):
     from app.routes import generate as gen_mod
 
-    def boom(messages, cfg, word_target=None, on_event=None):
+    def boom(messages, cfg, word_target=None, on_event=None, scene_plan=None):
         on_event({"stage": "round_start", "round": 1})
         yield "部分"
         raise wc.LLMError("厂商 429")

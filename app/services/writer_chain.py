@@ -7,6 +7,7 @@
 """
 import json
 import logging
+import re
 import time
 
 from app import db
@@ -15,6 +16,10 @@ from app.config_utils import get_effective_config
 from app.services.llm import stream_llm_tokens, LLMError
 from app.services.prompt_builder import (
     assemble_chapter_context, apply_context_budget,
+)
+from app.services.tension_bus import (  # 张力总线：仅依赖 logging/re，无循环
+    parse_scene_beats, parse_outline_field, chapter_tension, beat_tensions,
+    tension_directive, temperature_for_level,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,9 +58,64 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
         "world_intro": ctx["world_intro"],
         "genre": ctx["genre"],
         "outline_node_context": ctx["outline_node_context"],
+        "next_chapter_brief": ctx.get("next_chapter_brief", ""),
         "author_intent": ctx["author_intent"],
         "current_focus": ctx["current_focus"],
     }
+
+    # 伏笔窗口过滤（writer 侧）：只保留「本章能惦记或该还账」的伏笔——
+    # 到期/逾期（expected ∈ [n-3, ∞) 的债务侧）或本章前后 3 章内到期；
+    # 远期排程（如第 1 章看到第 41 章才收的线）对写正文是纯噪音，
+    # 且与叙事计划块的 must_payoff 硬任务重复。无日期且非新埋的也让路。
+    # 大纲生成不受影响（规划需要全量伏笔地图）。
+    try:
+        windowed = []
+        for f in kw["foreshadowing_items"]:
+            expected = f.get("expected_chapter")
+            planted = f.get("planted_chapter")
+            if expected is None:
+                # 无排程日期：埋设点（planted）落在 [n-5, n+3] 才注入——
+                # 本章/临近要埋的必须知道，刚埋不久的别忘；远期埋设
+                # （拆书蓝图常见：planted 是未来章号）对写正文是噪音。
+                # 高重要度（importance≥4）的无日期伏笔兜底保留：
+                # 长线无排程伏笔恰是最易被踩穿的（code review P1）。
+                if (planted is None
+                        or (chapter_number - 5 <= planted <= chapter_number + 3)
+                        or (f.get("importance") or 0) >= 4):
+                    windowed.append(f)
+                continue
+            if expected <= chapter_number + 3:
+                # 到期（==n）、逾期（<n，债务）或临近（≤n+3）
+                windowed.append(f)
+        dropped = len(kw["foreshadowing_items"]) - len(windowed)
+        if dropped:
+            logger.info("伏笔窗口过滤：保留 %d/%d 条（远期排程 %d 条不注入正文）",
+                        len(windowed), len(kw["foreshadowing_items"]), dropped)
+        kw["foreshadowing_items"] = windowed
+    except Exception as exc:
+        logger.warning("writer_chain 伏笔窗口过滤降级: %s", exc)
+
+    # 出场角色默认按大纲【出场人物】过滤（确定性，零嵌入依赖）：
+    # 语义选角色的兜底是"全量注入"，实体嵌入未建时会退回全部档案
+    # （实测一书 7 份完整档案全进 prompt，本章只出场 3 人）。大纲名册
+    # 是作者/大纲链路钦点的出场安排，作为缺省过滤源比"全部"更贴近
+    # 本意；用户显式勾选（character_ids 非 None）时仍以勾选为准。
+    if character_ids is None:
+        try:
+            roster_text = parse_outline_field(outline, "出场人物")
+            if roster_text:
+                names = [n.strip() for n in re.split(r"[、,，/]", roster_text)
+                         if n.strip() and "龙套" not in n and "路人" not in n]
+                if names:
+                    matched = [c for c in kw["characters"]
+                               if any(n in (c.get("name") or "") or (c.get("name") or "") in n
+                                      for n in names)]
+                    if matched and len(matched) < len(kw["characters"]):
+                        logger.info("出场角色按大纲名册过滤：%d/%d 份档案注入",
+                                    len(matched), len(kw["characters"]))
+                        kw["characters"] = matched
+        except Exception as exc:
+            logger.warning("writer_chain 大纲名册过滤降级: %s", exc)
 
     # 出场角色硬约束（用户显式勾选时）：勾选语义不只是"注入谁的档案"，
     # 还要明确告诉模型"只许这些人登场"——否则未勾选角色会经由叙事计划
@@ -168,8 +228,13 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
     # 勾选是作者对本章人物的有意安排，不能被语义 top-K 静默裁掉。
     try:
         from app.services.semantic_service import select_relevant_entities
+        # 检索 query 用【场景节拍】而非大纲整段：节拍是"地点+人物+动作"的
+        # 实体密集短句，嵌入质量远高于叙事性长文（ANG 检索词生成思想的确定性版，
+        # 零额外 LLM 调用）；无节拍的旧格式大纲回退全文
+        m = re.search(r"【场景节拍】(.+?)(?=\n【|$)", outline or "", re.S)
+        query_text = (m.group(1).strip() if m else (outline or ""))
         selected = select_relevant_entities(
-            novel_id, outline or "", (ctx.get("prev_ending") or "")[-500:], top_k=5)
+            novel_id, query_text, (ctx.get("prev_ending") or "")[-500:], top_k=5)
         if selected["character_ids"] and character_ids is None:
             char_ids = set(selected["character_ids"])
             filtered_chars = [c for c in kw["characters"] if c.get("id") in char_ids]
@@ -296,6 +361,7 @@ def _round_tokens(messages, cfg, max_tokens, collected, on_event=None,
             max_tokens=max_tokens,
             frequency_penalty=cfg.get("frequency_penalty"),
             presence_penalty=cfg.get("presence_penalty"),
+            timeout=cfg.get("timeout", 300.0),
         ):
             if first_at is None:
                 first_at = time.time()
@@ -313,12 +379,175 @@ def _round_tokens(messages, cfg, max_tokens, collected, on_event=None,
                "elapsed_s": round(time.time() - started, 1)})
 
 
-def generation_tokens(messages, cfg, word_target=None, on_event=None):
-    """完整正文生成的原始 token 流（含字数不足续写轮）。
+# 拍数上限：超出则相邻合并（jarvis-write 场景卡纪律 3-5 场；实测大纲常把
+# 场景内部的分号也写成"拍"，8 拍 × 300 字会产生碎段感与"每段都像结尾"）
+_BEAT_MAX = 5
 
-    on_event: 可选回调，接收进度事件（见 _round_tokens）：
-        round_start{round} / first_token{round,ttft_s,model,provider} /
-        round_end{round,chars,elapsed_s} / continue_start{round,current_chars,floor}
+
+def _beat_context_block(kw):
+    """拆锅模式下每拍必带的硬约束与身份块（整章 user 块的最小存活集）。
+
+    整章路径这些块渲染在 user 消息里；拆锅若只带 system 会把它们全部丢掉
+    （code review P0）：登场白名单、信息边界/时序真相红线、must_payoff
+    排程、人物速写、创作罗盘必须在每一拍都在场——人物速写只保留
+    性格/说话风格，档案全文留给整章路径。
+    """
+    parts = []
+    try:
+        from app.services.prompt_builder.context import build_compass_block
+        compass = build_compass_block(kw.get("author_intent", ""),
+                                      kw.get("current_focus", ""))
+        if compass:
+            parts.append(compass)
+    except Exception as exc:
+        logger.warning("beat_context 罗盘降级: %s", exc)
+    if kw.get("cast_constraint"):
+        parts.append(kw["cast_constraint"])
+    chars = kw.get("characters") or []
+    if chars:
+        lines = [f"- {c.get('name', '')}：{(c.get('personality') or '')[:80]}"
+                 f"｜{(c.get('speaking_style') or '')[:60]}" for c in chars]
+        parts.append("【出场人物速写（性格｜说话风格）】\n" + "\n".join(lines))
+    if kw.get("narrative_plan"):
+        parts.append("【本章叙事计划（硬性任务）】\n" + kw["narrative_plan"])
+    if kw.get("boundary_context"):
+        parts.append("【信息边界与既定事实（一致性红线，必须遵守）】\n"
+                     + kw["boundary_context"])
+    if kw.get("tone_instructions"):
+        parts.append(kw["tone_instructions"][:400])
+    if kw.get("style_memo"):
+        parts.append("【近期文体备忘】\n" + kw["style_memo"])
+    return "\n\n".join(parts)
+
+
+def _merge_beats(beats, limit=_BEAT_MAX):
+    """拍数超限时相邻合并到 limit 拍（内容不丢，按顺序均匀分组）。"""
+    if len(beats) <= limit:
+        return beats
+    n = len(beats)
+    merged = []
+    idx = 0
+    for k in range(limit):
+        take = (n - idx) // (limit - k)          # 剩余拍均匀分配到剩余槽位
+        group = beats[idx:idx + take] or [beats[idx]]
+        merged.append("；".join(group))
+        idx += take
+    return merged
+
+
+def build_scene_plan(outline, kw=None, word_target=CHAPTER_WORD_TARGET,
+                     novel_id=None, chapter_number=None):
+    """从大纲【场景节拍】构建节拍级生成计划（None = 不拆锅，走整章路径）。
+
+    机制来源（开源调研 2026-09-28）：
+    - jarvis-write（藏山）「场景升格为生成单元」+「切分与写作分离」——灵砚的
+      节拍已在细纲阶段（独立 LLM 调用）写好，本函数只做拆分与排程，
+      不新增切分调用；少于 2 拍不拆（"换名字的整章一发"没有意义）。
+    - 张力总线：章档由大纲定位+伏笔压力确定性推导，逐拍摊成不平曲线。
+
+    每拍生成的 user 消息只带：事件清单 + 张力档 + 本拍 + 前拍结尾 + 章尾钩，
+    比整章 prompt 小一个量级——拆锅是"减提示词"方向的（单次注意力更集中）。
+    """
+    try:
+        beats = parse_scene_beats(outline)
+        if len(beats) < 2:
+            return None
+        beats = _merge_beats(beats)
+        level = chapter_tension(novel_id or 0, chapter_number or 0, outline)
+        # 章级戏剧契约随拍下发：定位（本篇立场）与基调（温度基准）原属整章
+        # 大纲字段，不随拍带走 writer 就只剩"事件清单"——写得出事，写不出调
+        positioning = parse_outline_field(outline, "本章定位")
+        tone = parse_outline_field(outline, "情感基调")
+        plan = {
+            "beats": beats,
+            "tension": level,
+            "beat_tensions": beat_tensions(level, beats),
+            "events": (kw or {}).get("chapter_events", ""),
+            "context": _beat_context_block(kw or {}),
+            "positioning": positioning,
+            "tone": tone,
+            "hook": parse_outline_field(outline, "结尾钩子"),
+            "word_target": int(word_target or CHAPTER_WORD_TARGET),
+        }
+        logger.info("节拍级生成计划：%d 拍，章张力档 %d，逐拍 %s",
+                    len(beats), level, plan["beat_tensions"])
+        return plan
+    except Exception as exc:
+        logger.warning("scene_plan 构建降级（回退整章生成）: %s", exc)
+        return None
+
+
+def _beat_user_message(plan, index, tail):
+    """单拍的紧凑 user 消息（小于整章 prompt 一个量级）。"""
+    beats = plan["beats"]
+    n = len(beats)
+    level = plan["beat_tensions"][index]
+    parts = []
+    if plan.get("context"):
+        parts.append(plan["context"])
+    if plan.get("events"):
+        parts.append(plan["events"])
+    # 章级契约压缩成两行，每拍在场（整章路径在 full outline 里，拆锅路径唯一入口）
+    contract = "；".join(filter(None, [
+        (f"【本章定位】{plan['positioning']}" if plan.get("positioning") else ""),
+        (f"【情感基调】{plan['tone']}" if plan.get("tone") else ""),
+    ]))
+    if contract:
+        parts.append(contract)
+    parts.append(f"【本章张力档 {plan['tension']}/5 · 本拍力度 {level}/5】"
+                 f"{tension_directive(level)}")
+    if index == 0 and (tail or "").strip():
+        # 首拍接上一章结尾，保章间衔接（tail 由调用方填 prev_ending）
+        parts.append(f"【上一章结尾】\n{tail[-600:]}")
+    elif tail:
+        parts.append(f"【前文结尾（本拍直接接续）】\n{tail[-600:]}")
+    parts.append(f"【本拍任务（第 {index + 1}/{n} 拍）】\n{beats[index]}")
+    if index == n - 1 and plan.get("hook"):
+        parts.append(f"【章尾钩（本拍收尾必须落在此）】\n{plan['hook']}")
+    share = max(300, plan["word_target"] // n)
+    parts.append(f"【字数】本拍约 {share} 字。只写本拍，不抢后面的拍。"
+                 "直接输出正文，不要说明。")
+    return "\n\n".join(parts)
+
+
+def _beat_accepted(beat_text, prev_tail):
+    """拍级验收（零 LLM 轻量版，对齐 jarvis-write accept_scene 的硬维度子集）。
+
+    只查两条硬性：产出过短 / 与前文大段重复。情绪与目标命中留在章级
+    门禁（ai_metric/web_novel_gate）统一判卷，避免双重判分。
+    口径定标（书 1 实测正文）：拍预算 ≥300 字，100 字下限是"塌缩拍"；
+    15 字 shingle / 40% 重叠率对齐拆书雷同检测的连续命中思路（低于
+    15 字的短串在中文里碰撞率过高，40% 以上即"整段复读"级别）。
+    Returns: (ok, reason)
+    """
+    if len(beat_text.strip()) < 100:
+        return False, "本拍产出过短（<100 字）"
+    if prev_tail:
+        shingles = [beat_text[i:i + 15] for i in range(0, max(len(beat_text) - 14, 1), 15)]
+        hits = sum(1 for s in shingles if s in prev_tail)
+        if shingles and hits / len(shingles) > 0.4:
+            return False, "本拍与前文大段重复"
+    return True, ""
+
+
+def generation_tokens(messages, cfg, word_target=None, on_event=None,
+                      scene_plan=None, beat_retry=False):
+    """完整正文生成的原始 token 流。
+
+    两种模式：
+    - scene_plan 为空：整章一次生成（原路径）；
+    - scene_plan 提供时：按大纲场景节拍逐拍生成——每拍一次调用、
+      独立紧凑 prompt、按拍张力档映射采样温度（高张力放开、低张力收紧），
+      拍间以已写正文结尾衔接；全部拍完成后仍走字数保障续写轮。
+
+    beat_retry: 拍级验收保险丝（编排器/非流式路径开启）——本拍产出过短
+    或与前文大段重复时，丢弃初稿重写一次该拍。流式（SSE）路径不开启：
+    已推送的 token 无法从流里收回，重试会造成用户可见的重复段。
+    验收只查硬性两条（长度/重复），情绪与目标留给章级门禁判卷。
+
+    on_event: 进度事件（见 _round_tokens）外加
+        beat_start{beat,of,tension} / beat_end{beat,chars} /
+        beat_retry{beat,reason}
     SSE 路由与编排器共用的单一实现；LLMError 原样抛出由调用方处置。
     """
     collected = []
@@ -332,8 +561,67 @@ def generation_tokens(messages, cfg, word_target=None, on_event=None):
             pass
 
     try:
-        yield from _round_tokens(messages, cfg, cfg.get("max_tokens", 4096),
-                                 collected, on_event=on_event, round_no=1)
+        if scene_plan:
+            beats = scene_plan["beats"]
+            tensions = scene_plan["beat_tensions"]
+            system_text = ""
+            for m in messages:
+                if m.get("role") == "system":
+                    system_text = m.get("content") or ""
+                    break
+            # 首拍衔接上一章结尾（调用方经 scene_plan["prev_ending"] 传入）
+            prev_tail = scene_plan.get("prev_ending", "")
+            for i, beat in enumerate(beats):
+                level = tensions[i]
+                _emit({"stage": "beat_start", "beat": i + 1, "of": len(beats),
+                       "tension": level})
+                if i > 0:
+                    yield "\n\n"
+                cfg_b = dict(cfg)
+                cfg_b["temperature"] = temperature_for_level(
+                    cfg.get("temperature", 0.8), level)
+                share = max(300, scene_plan.get("word_target", 0) // len(beats))
+                share_tokens = min(share * 2, cfg.get("max_tokens", 4096))
+                beat_user = _beat_user_message(scene_plan, i, prev_tail)
+                mark = len(collected)
+                reason = ""
+                for attempt in range(2 if beat_retry else 1):
+                    if attempt:
+                        _emit({"stage": "beat_retry", "beat": i + 1,
+                               "reason": reason})
+                        del collected[mark:]
+                        beat_msgs = [
+                            {"role": "system", "content": (
+                                system_text + "\n\n本拍初稿不合格（" + reason
+                                + "）。重写本拍：直接推进剧情，禁止复述前文。")},
+                            {"role": "user", "content": beat_user},
+                        ]
+                    else:
+                        beat_msgs = [
+                            {"role": "system", "content": system_text},
+                            {"role": "user", "content": beat_user},
+                        ]
+                    if beat_retry:
+                        buf = []
+                        for tok in _round_tokens(beat_msgs, cfg_b, share_tokens,
+                                                 collected, on_event=on_event,
+                                                 round_no=i + 1):
+                            buf.append(tok)
+                        ok, reason = _beat_accepted("".join(buf), prev_tail)
+                        if ok or attempt:
+                            yield from buf
+                            break
+                    else:
+                        yield from _round_tokens(beat_msgs, cfg_b, share_tokens,
+                                                 collected, on_event=on_event,
+                                                 round_no=i + 1)
+                        break
+                prev_tail = "".join(collected)[-600:]
+                _emit({"stage": "beat_end", "beat": i + 1,
+                       "chars": len("".join(collected))})
+        else:
+            yield from _round_tokens(messages, cfg, cfg.get("max_tokens", 4096),
+                                     collected, on_event=on_event, round_no=1)
         # 字数保障：仅章节生成传入 word_target 时启用
         if word_target:
             rounds = 0
@@ -347,15 +635,26 @@ def generation_tokens(messages, cfg, word_target=None, on_event=None):
                        "current_chars": len(full),
                        "floor": CHAPTER_WORD_FLOOR})
                 yield "\n\n"
+                # 续写轮戏剧纪律：禁止字数导向灌水；必须推进未完成的节拍/事件
+                # （调研根因：弱指令补写是「梗概化正文」来源之一）
+                last_tail = full[-2500:]
                 continue_messages = [
                     {"role": "system", "content": (
-                        "你正在续写一章小说。直接接续前文写下去，"
-                        "不要重复已有内容，不要总结前文，不要输出任何说明文字。"
+                        "你正在续写一章网文。硬纪律：\n"
+                        "1. 直接接续前文写下去，不重复、不总结、不输出说明文字。\n"
+                        "2. 必须推进本章尚未完成的戏剧任务（目标/冲突/结果变化），"
+                        "禁止用环境描写、文件操作、心理空转凑字数。\n"
+                        "3. 对白要有算盘与信息差；禁止作者旁白解释悬念。\n"
+                        "4. 若本章大纲含【场景节拍】/【结尾钩子】，续写须朝未完成的节拍与章尾钩推进。\n"
+                        "5. 允许短段与跳切，禁止匀速流水账。"
                     )},
                     {"role": "user", "content": (
-                        f"【本章已写内容（结尾部分）】\n{full[-3000:]}\n\n"
-                        f"【要求】从上文断点直接继续，自然推进本章大纲中的情节，"
-                        f"还需写约 {max(remaining, 500)} 字。"
+                        f"【本章已写内容（结尾部分）】\n{last_tail}\n\n"
+                        + (f"【本章章尾钩（续写须落在此）】\n{scene_plan['hook']}\n\n"
+                           if scene_plan and scene_plan.get("hook") else "")
+                        + f"【要求】从上文断点继续，推进冲突或兑现本拍结果，"
+                        f"朝章尾钩靠近。还需约 {max(remaining, 400)} 字有效剧情，"
+                        f"写不出来就停在有意义的场面结果上，不要注水。"
                     )},
                 ]
                 yield from _round_tokens(continue_messages, cfg,
@@ -368,9 +667,14 @@ def generation_tokens(messages, cfg, word_target=None, on_event=None):
         raise LLMError(f"LLM 调用失败: {e}") from e
 
 
-def collect_full_text(messages, cfg, word_target=None):
-    """非流式消费生成流，返回完整正文（runner 用）。LLMError 向上抛。"""
+def collect_full_text(messages, cfg, word_target=None, scene_plan=None,
+                      beat_retry=True):
+    """非流式消费生成流，返回完整正文（runner 用）。LLMError 向上抛。
+
+    beat_retry 默认 True：编排器路径无流式回退顾虑，拍级验收保险丝常开。
+    """
     parts = []
-    for token in generation_tokens(messages, cfg, word_target=word_target):
+    for token in generation_tokens(messages, cfg, word_target=word_target,
+                                   scene_plan=scene_plan, beat_retry=beat_retry):
         parts.append(token)
     return "".join(parts)

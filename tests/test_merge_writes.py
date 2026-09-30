@@ -27,7 +27,7 @@ def test_converge_adopts_improvement(app, monkeypatch):
     # 原稿三连句，重写只替换第一句（高保留，过删改/收缩/实词三道硬顶）
     original_unit = "值得注意的是。风不是风而是人。雨落在屋顶上。"
     rewritten_unit = "要说的是。风不是风而是人。雨落在屋顶上。"
-    monkeypatch.setattr(tc, "call_llm_sync", lambda **kw: rewritten_unit * 30)
+    monkeypatch.setattr(tc, "call_llm_auto", lambda **kw: rewritten_unit * 30)
 
     result = tc.converge_tone(original_unit * 30, {"model_name": "m"})
     assert result["converged"] is True
@@ -42,7 +42,7 @@ def test_converge_rolls_back_on_no_improvement(app, monkeypatch):
                         lambda t: {"passed": False, "human_score": 70})
     monkeypatch.setattr(tc, "build_tone_instructions", lambda t: "- 禁翻案腔")
     # 产物仍是带违规的文本 → 分数不升
-    monkeypatch.setattr(tc, "call_llm_sync",
+    monkeypatch.setattr(tc, "call_llm_auto",
                         lambda **kw: "不是风而是人的坏稿子。" * 30)
 
     original = "不是风而是人的坏稿子。" * 30
@@ -59,7 +59,7 @@ def test_converge_survives_llm_failure(app, monkeypatch):
     monkeypatch.setattr(tc, "analyze_ai_tone",
                         lambda t: {"passed": False, "human_score": 70})
     monkeypatch.setattr(tc, "build_tone_instructions", lambda t: "- 修复项")
-    monkeypatch.setattr(tc, "call_llm_sync", boom)
+    monkeypatch.setattr(tc, "call_llm_auto", boom)
 
     original = "普通原稿。" * 50
     result = tc.converge_tone(original, {"model_name": "m"})
@@ -81,7 +81,7 @@ def test_condense_threshold_and_success(app, monkeypatch):
 
     long_text = "细节描写很多很冗长的句子。" * 400  # 5200 字
     # 压缩稿须通过实词保留率检查（≥0.70）：保留原句、只删重复次数（5200→3900）
-    monkeypatch.setattr(tc, "call_llm_sync",
+    monkeypatch.setattr(tc, "call_llm_auto",
                         lambda **kw: "细节描写很多很冗长的句子。" * 300)  # 3900 字
     result = tc.condense_text(long_text, {"model_name": "m"}, target_chars=2500)
     assert result["ok"] is True
@@ -92,7 +92,7 @@ def test_condense_threshold_and_success(app, monkeypatch):
 def test_condense_rejects_bad_product(app, monkeypatch):
     long_text = "冗长正文。" * 500
     # 产物没变短 → 保留原稿
-    monkeypatch.setattr(tc, "call_llm_sync", lambda **kw: "冗长正文。" * 500)
+    monkeypatch.setattr(tc, "call_llm_auto", lambda **kw: "冗长正文。" * 500)
     result = tc.condense_text(long_text, {"model_name": "m"})
     assert result["ok"] is False
     assert result["text"] == long_text

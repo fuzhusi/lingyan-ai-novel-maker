@@ -74,6 +74,15 @@ def create_app():
             parts.append(f"退场第{plan['exit_chapter']}章（{plan.get('exit_mode') or '收线'}）")
         return " · ".join(parts)
 
+    # 模板过滤器：剥掉章节标题自带的「第N章」前缀——模板渲染时都会自行
+    # 拼章节号，AI 生成/拆书落库的标题常自带前缀，拼出「第 1 章：第1章 …」
+
+    @app.template_filter("strip_chapter_no")
+    def _strip_chapter_no(value):
+        import re as _re
+        cleaned = _re.sub(r"^\s*第\s*\d+\s*章[\s：:．.、\-—－]*", "", value or "").strip()
+        return cleaned or (value or "")
+
     # 请求结束后清空 provider 缓存
     from app.config_utils import _reset_provider_cache
     app.teardown_appcontext(lambda exc: _reset_provider_cache())
