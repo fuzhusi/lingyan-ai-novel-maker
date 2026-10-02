@@ -100,26 +100,48 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
     except Exception as exc:
         logger.warning("writer_chain 伏笔窗口过滤降级: %s", exc)
 
-    # 出场角色默认按大纲【出场人物】过滤（确定性，零嵌入依赖）：
+    # 知识激活（调研 v2 第 1 步，policy 最小集）：off 剔除 / always 常驻 /
+    # keywords 命中近两章正文注入 / auto 走既有名册+语义链路。
+    # 默认全 auto = 精确复刻升级前行为（兼容红线）。
+    from app.services import knowledge_activation as ka
+    recent_text = ka.gather_recent_text(novel_id, chapter_number)
+    c_buckets = ka.split_modes(
+        kw["characters"], lambda c: ka.parse_policy(c.get("injection_policy")))
+    kw["characters"] = [c for c in kw["characters"]
+                        if c not in c_buckets["off"]]
+    report.ok("policy_activation",
+              f"角色 auto{len(c_buckets['auto'])}/always{len(c_buckets['always'])}"
+              f"/kw{len(c_buckets['keywords'])}/off{len(c_buckets['off'])}")
+    w_buckets = ka.split_modes(
+        kw["world_settings"], lambda w: ka.parse_policy(w.get("injection_policy")))
+    kw["world_settings"] = [w for w in kw["world_settings"]
+                            if w not in w_buckets["off"]]
+
+    # 名册过滤只作用于 auto 子集（确定性，零嵌入依赖）：
     # 语义选角色的兜底是"全量注入"，实体嵌入未建时会退回全部档案
     # （实测一书 7 份完整档案全进 prompt，本章只出场 3 人）。大纲名册
     # 是作者/大纲链路钦点的出场安排，作为缺省过滤源比"全部"更贴近
     # 本意；用户显式勾选（character_ids 非 None）时仍以勾选为准。
+    # always/keywords 条目不受名册约束（显式策略优先于启发式）。
     if character_ids is None:
         try:
             roster_text = parse_outline_field(outline, "出场人物")
             if roster_text:
                 names = [n.strip() for n in re.split(r"[、,，/]", roster_text)
                          if n.strip() and "龙套" not in n and "路人" not in n]
+                auto_ids = {c["id"] for c in c_buckets["auto"]}
+                auto_in = [c for c in kw["characters"] if c["id"] in auto_ids]
                 if names:
-                    matched = [c for c in kw["characters"]
-                               if any(n in (c.get("name") or "") or (c.get("name") or "") in n
-                                      for n in names)]
-                    if matched and len(matched) < len(kw["characters"]):
-                        logger.info("出场角色按大纲名册过滤：%d/%d 份档案注入",
-                                    len(matched), len(kw["characters"]))
-                        report.ok("roster_filter", f"{len(matched)}/{len(kw['characters'])} 卡")
-                        kw["characters"] = matched
+                    auto_matched = [c for c in auto_in
+                                    if any(n in (c.get("name") or "") or (c.get("name") or "") in n
+                                           for n in names)]
+                    if auto_matched and len(auto_matched) < len(auto_in):
+                        logger.info("出场角色按大纲名册过滤：%d/%d 份 auto 档案注入",
+                                    len(auto_matched), len(auto_in))
+                        report.ok("roster_filter", f"{len(auto_matched)}/{len(auto_in)} 卡")
+                        kept = auto_matched + [c for c in kw["characters"]
+                                               if c["id"] not in auto_ids]
+                        kw["characters"] = ka.dedupe_by_id(kept)
         except Exception as exc:
             logger.warning("writer_chain 大纲名册过滤降级: %s", exc)
 
@@ -233,11 +255,10 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
     except Exception as exc:
         report.degrade("reference_passages", exc)
 
-    # 语义选角色/设定(实体嵌入):用本章大纲+前文尾部检索相关实体,
-    # 替代"全量注入→压缩"——只注入语义相关的 top-K 角色/世界观。
-    # 保底：语义结果为空或过滤后为空时回退全量（不让检索失败变成零上下文）。
-    # 用户显式勾选了出场角色（character_ids 非 None）时跳过角色侧剪枝——
-    # 勾选是作者对本章人物的有意安排，不能被语义 top-K 静默裁掉。
+    # 语义选角色/设定(实体嵌入)：用本章大纲+前文尾部检索相关实体，
+    # 只剪枝 **auto 桶** —— always/keywords 条目是作者显式策略，语义 top-K
+    # 不能静默裁掉。保底：语义为空/过滤后为空时回退全量（不让检索失败
+    # 变成零上下文）。用户显式勾选出场角色时跳过角色侧剪枝。
     try:
         from app.services.semantic_service import select_relevant_entities
         # 检索 query 用【场景节拍】而非大纲整段：节拍是"地点+人物+动作"的
@@ -248,19 +269,44 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
         selected = select_relevant_entities(
             novel_id, query_text, (ctx.get("prev_ending") or "")[-500:], top_k=5)
         if selected["character_ids"] and character_ids is None:
-            char_ids = set(selected["character_ids"])
-            filtered_chars = [c for c in kw["characters"] if c.get("id") in char_ids]
-            if filtered_chars:
-                kw["characters"] = filtered_chars
+            sem_ids = set(selected["character_ids"])
+            auto_ids = {c["id"] for c in c_buckets["auto"]}
+            kept_auto = [c for c in kw["characters"]
+                         if c["id"] in auto_ids and c.get("id") in sem_ids]
+            if kept_auto:
+                kept = kept_auto + [c for c in kw["characters"]
+                                    if c["id"] not in auto_ids]
+                kw["characters"] = ka.dedupe_by_id(kept)
         if selected["world_ids"]:
-            world_ids = set(selected["world_ids"])
-            filtered_world = [w for w in kw["world_settings"] if w.get("id") in world_ids]
-            if filtered_world:
-                kw["world_settings"] = filtered_world
+            w_buckets = ka.split_modes(
+                kw["world_settings"],
+                lambda w: ka.parse_policy(w.get("injection_policy")))
+            w_auto_ids = {w["id"] for w in w_buckets["auto"]}
+            sem_w = set(selected["world_ids"])
+            kept_w_auto = [w for w in kw["world_settings"]
+                           if w["id"] in w_auto_ids and w.get("id") in sem_w]
+            if kept_w_auto:
+                kept_w = kept_w_auto + [w for w in kw["world_settings"]
+                                        if w["id"] not in w_auto_ids]
+                kw["world_settings"] = ka.dedupe_by_id(kept_w)
+            else:
+                # auto 全被剪光 → 回退全量（防零上下文）
+                kw["world_settings"] = ka.dedupe_by_id(
+                    kw["world_settings"] + w_buckets["auto"])
         report.ok("semantic_select",
                   f"角色{len(selected['character_ids'])}/设定{len(selected['world_ids'])}")
     except Exception as exc:
         report.degrade("semantic_select", exc)
+
+    # world 的 always 常驻 + keywords 兜底合并（语义块异常时也生效）
+    w_buckets2 = ka.split_modes(
+        kw["world_settings"], lambda w: ka.parse_policy(w.get("injection_policy")))
+    extras = w_buckets2["always"] + [
+        w for w in w_buckets2["keywords"]
+        if ka.keywords_hit(ka.parse_policy(w.get("injection_policy")),
+                           w.get("title"), recent_text)]
+    if extras:
+        kw["world_settings"] = ka.dedupe_by_id(kw["world_settings"] + extras)
 
     # 信息边界 + 时序真相（一致性红线）：独立字段而非拼进 memory_context，
     boundary_parts = []

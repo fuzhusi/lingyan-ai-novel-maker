@@ -26,6 +26,7 @@ from app.models import (
 
 
 logger = logging.getLogger(__name__)
+from app.services.knowledge_activation import default_policy_for as _default_kb_policy
 from app.services.llm import call_llm_sync, stream_llm_tokens, LLMError
 from app.config_utils import get_model_config
 
@@ -1082,6 +1083,9 @@ def _materialize_items(task, novel_id):
                 motivation=_s(data.get("motivation", "")),
                 arc_direction=_s(data.get("arc_direction", "")),
                 status_json=json.dumps({"plan": plan}, ensure_ascii=False) if plan else "{}",
+                # 拆书条目默认 keywords 模式（调研 v2）：标题命中近两章正文才注入，
+                # 防对标书全量设定挤占预算（auto 会全量兜底）
+                injection_policy=_default_kb_policy(_s(data.get("name")).strip() or item.title),
             )
             db.session.add(char)
             db.session.flush()
@@ -1094,6 +1098,8 @@ def _materialize_items(task, novel_id):
                 category=_s(data.get("category")).strip() or "规则",
                 title=_s(data.get("title")).strip() or item.title or "设定",
                 content=_s(data.get("content", "")),
+                # 同上：对标书设定默认 keywords 触发
+                injection_policy=_default_kb_policy(_s(data.get("title")).strip() or item.title),
             )
             db.session.add(ws)
             db.session.flush()

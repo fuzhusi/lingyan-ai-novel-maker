@@ -13,6 +13,9 @@ class Character(db.Model):
     background = db.Column(db.Text, default="")
     motivation = db.Column(db.Text, default="")
     arc_direction = db.Column(db.Text, default="")
+    # 注入策略（调研 v2 第 1 步最小集）：auto 复刻现状 / always 常驻 /
+    # keywords 命中近两章正文注入 / off 不注入
+    injection_policy = db.Column(db.Text, default="{}")
     status_json = db.Column(db.Text, default="{}")
     created_at = db.Column(db.String(20), default=now)
     updated_at = db.Column(db.String(20), default=now, onupdate=now)
@@ -27,6 +30,8 @@ class WorldSetting(db.Model):
     category = db.Column(db.String(100), default="")
     title = db.Column(db.String(200), nullable=False)
     content = db.Column(db.Text, default="")
+    # 注入策略（调研 v2 第 1 步最小集）：auto/always/keywords/off
+    injection_policy = db.Column(db.Text, default="{}")
     created_at = db.Column(db.String(20), default=now)
     updated_at = db.Column(db.String(20), default=now, onupdate=now)
 

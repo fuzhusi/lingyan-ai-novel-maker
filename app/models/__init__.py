@@ -219,6 +219,9 @@ MIGRATIONS = [
             "ALTER TABLE chapters ADD COLUMN reflexion_notes TEXT DEFAULT ''",
             # 对手网（Truby）：关系攻击弱点
             "ALTER TABLE character_relations ADD COLUMN attack_weakness TEXT DEFAULT ''",
+            # 知识注入策略最小集（调研 v2 第 1 步）
+            "ALTER TABLE characters ADD COLUMN injection_policy TEXT DEFAULT '{}'",
+            "ALTER TABLE world_settings ADD COLUMN injection_policy TEXT DEFAULT '{}'",
         ]
 
 

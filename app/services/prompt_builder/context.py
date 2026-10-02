@@ -107,13 +107,15 @@ def assemble_chapter_context(novel_id, chapter_number, db, character_ids=None):
             "background": c.background, "motivation": c.motivation,
             "arc_direction": c.arc_direction, "status_json": c.status_json,
             "arc_state": _parse_arc_state(c.status_json),
+            "injection_policy": c.injection_policy,
         }
         for c in characters
     ]
 
     world_settings = WorldSetting.query.filter_by(novel_id=novel_id).all()
     world_data = [
-        {"id": ws.id, "category": ws.category, "title": ws.title, "content": ws.content}
+        {"id": ws.id, "category": ws.category, "title": ws.title, "content": ws.content,
+         "injection_policy": ws.injection_policy}
         for ws in world_settings
     ]
 

@@ -52,7 +52,8 @@ def test_apply_arc_updates_legacy_string_and_missing_card(client):
     })
     assert updated == ["苏晚"]
     arc = json.loads(
-        Character.query.filter_by(name="苏晚").first().status_json)["arc_state"]
+        Character.query.filter_by(novel_id=n.id, name="苏晚")
+        .first().status_json)["arc_state"]
     assert "队长" in arc["change_stage"]
 
 

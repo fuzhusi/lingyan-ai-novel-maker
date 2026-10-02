@@ -236,6 +236,17 @@ def cmd_novel(args):
             else:
                 print("（未指定要更新的字段）")
 
+        elif args.action == "embeddings-build":
+            # 构建实体嵌入（调研 v2 第 1 步前置）：semantic/keywords 语义激活
+            # 依赖 entity_embeddings，蓝图采纳之外的书需手动构建
+            novel = db.session.get(Novel, args.id)
+            if not novel:
+                print(f"✗ 小说 {args.id} 不存在")
+                return
+            from app.services.semantic_service import embed_novel_entities
+            n = embed_novel_entities(args.id, force=False)
+            print(f"✓ 已为《{novel.title}》构建/更新 {n} 个实体嵌入")
+
         elif args.action == "export":
             # 导出长篇（复用 Web 导出逻辑，同一代码路径）
             novel = db.session.get(Novel, args.id)
@@ -3221,7 +3232,7 @@ def main():
     # ========== 小说 ==========
     p_novel = subparsers.add_parser("novel", help="小说管理")
     p_novel.add_argument("action", choices=["list", "create", "delete", "info", "update",
-                                            "export", "delete-all"])
+                                            "export", "delete-all", "embeddings-build"])
     p_novel.add_argument("--id", type=int, help="小说 ID")
     p_novel.add_argument("--title", help="小说标题")
     p_novel.add_argument("--genre", help="小说类型")
