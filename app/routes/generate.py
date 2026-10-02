@@ -21,7 +21,7 @@ def _sse_event(data: dict) -> str:
 
 
 def _stream_to_sse(messages, cfg, word_target=None, phase="write",
-                   scene_plan=None):
+                   scene_plan=None, injection_report=None):
     """Shared streaming helper — yields SSE event strings.
 
     word_target: 传入时启用字数保障——流结束后正文不足字数底线
@@ -48,6 +48,13 @@ def _stream_to_sse(messages, cfg, word_target=None, phase="write",
             "model": cfg.get("model_name", ""),
             "provider": cfg.get("provider_type", ""),
         }})
+        if injection_report and injection_report.get("dims"):
+            yield _sse_event({"status": {
+                "stage": "injection_report",
+                "dims": injection_report["dims"],
+                "total_chars": injection_report.get("total_chars", 0),
+                "degraded": injection_report.get("degraded", []),
+            }})
         for token in generation_tokens(messages, cfg, word_target=word_target,
                                        on_event=on_event, scene_plan=scene_plan):
             while pending:
@@ -113,6 +120,7 @@ def generate_stream():
                                     user_directive=user_directive,
                                     character_ids=character_ids)
 
+    injection_report = kw.pop("injection_report", None)
     messages = build_writer_prompt(
         novel_title=novel_title,
         chapter_title=chapter_title,
@@ -131,7 +139,8 @@ def generate_stream():
         scene_plan["prev_ending"] = kw.get("prev_ending", "")
     return Response(stream_with_context(
         _stream_to_sse(messages, cfg, word_target=CHAPTER_WORD_TARGET,
-                       phase="write", scene_plan=scene_plan)),
+                       phase="write", scene_plan=scene_plan,
+                       injection_report=injection_report)),
         mimetype="text/event-stream")
 
 

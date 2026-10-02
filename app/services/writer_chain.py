@@ -42,6 +42,10 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
 
     novel = Novel.query.get(novel_id)
 
+    # 注入观测层（调研 v2 第 0 步）：17 处管道逐一登记，静默失效变可见
+    from app.services.injection_report import InjectionReport
+    report = InjectionReport()
+
     # 出场角色勾选（前端角色库勾选区）：逗号分隔的角色 id
     # None/缺省 = 全部角色（兼容旧流程与 MCP）；显式空串 = 不注入任何角色档案
     kw = {}
@@ -91,6 +95,7 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
         if dropped:
             logger.info("伏笔窗口过滤：保留 %d/%d 条（远期排程 %d 条不注入正文）",
                         len(windowed), len(kw["foreshadowing_items"]), dropped)
+        report.ok("foreshadow_window", f"{len(windowed)}/{len(windowed) + dropped} 条")
         kw["foreshadowing_items"] = windowed
     except Exception as exc:
         logger.warning("writer_chain 伏笔窗口过滤降级: %s", exc)
@@ -113,6 +118,7 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
                     if matched and len(matched) < len(kw["characters"]):
                         logger.info("出场角色按大纲名册过滤：%d/%d 份档案注入",
                                     len(matched), len(kw["characters"]))
+                        report.ok("roster_filter", f"{len(matched)}/{len(kw['characters'])} 卡")
                         kw["characters"] = matched
         except Exception as exc:
             logger.warning("writer_chain 大纲名册过滤降级: %s", exc)
@@ -155,15 +161,17 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
         from app.services.causal_chain import get_chain_context, format_chain_for_prompt
         chains = get_chain_context(novel_id, chapter_number)
         kw["causal_chain"] = format_chain_for_prompt(chains)
+        report.ok("causal_chain")
     except Exception as exc:
-        logger.warning("writer_chain 上下文注入降级: %s", exc)
+        report.degrade("causal_chain", exc)
 
     # Vector memory context
     try:
         from app.services.vector_memory import build_context_for_chapter
         kw["memory_context"] = build_context_for_chapter(novel_id, chapter_number, outline)
+        report.ok("memory_context")
     except Exception as exc:
-        logger.warning("writer_chain 上下文注入降级: %s", exc)
+        report.degrade("memory_context", exc)
 
     # 叙事计划块(拆书蓝图计划值):must_payoff 伏笔/禁埋令/本章登场退场角色。
     # 小块(~几百字),不参与预算压缩——排程任务是硬约束。
@@ -175,8 +183,9 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
             allowed = [c.get("name") for c in ctx["characters"] if c.get("name")]
         kw["narrative_plan"] = build_plan_block(novel_id, chapter_number,
                                                 allowed_names=allowed)
+        report.ok("narrative_plan")
     except Exception as exc:
-        logger.warning("writer_chain 计划块注入降级: %s", exc)
+        report.degrade("narrative_plan", exc)
 
     # 本章事件清单（StoryWriter planning 层）：已有则注入，没有则从大纲现提
     try:
@@ -218,8 +227,11 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
                          for h in hits if h["score"] > 0.3]
             if ref_lines:
                 kw["reference_passages"] = "\n".join(ref_lines)
+                report.ok("reference_passages", f"top{len(ref_lines)}")
+            else:
+                report.skip("reference_passages", "检索无高相关片段")
     except Exception as exc:
-        logger.warning("writer_chain 语义检索降级: %s", exc)
+        report.degrade("reference_passages", exc)
 
     # 语义选角色/设定(实体嵌入):用本章大纲+前文尾部检索相关实体,
     # 替代"全量注入→压缩"——只注入语义相关的 top-K 角色/世界观。
@@ -245,8 +257,10 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
             filtered_world = [w for w in kw["world_settings"] if w.get("id") in world_ids]
             if filtered_world:
                 kw["world_settings"] = filtered_world
+        report.ok("semantic_select",
+                  f"角色{len(selected['character_ids'])}/设定{len(selected['world_ids'])}")
     except Exception as exc:
-        logger.warning("writer_chain 语义选角色降级(回退全量): %s", exc)
+        report.degrade("semantic_select", exc)
 
     # 信息边界 + 时序真相（一致性红线）：独立字段而非拼进 memory_context，
     boundary_parts = []
@@ -266,14 +280,16 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
         logger.warning("writer_chain 上下文注入降级: %s", exc)
     if boundary_parts:
         kw["boundary_context"] = "\n\n".join(boundary_parts)
+        report.ok("boundary_context")
+    else:
+        report.skip("boundary_context", "暂无信息边界记录")
 
     # 上下文预算渐进压缩：必须在文风锚例注入之前执行（锚例豁免预算）
     try:
         shrink_log = apply_context_budget(kw)
-        if shrink_log:
-            logger.info("context budget shrink: %s", shrink_log)
+        report.ok("context_budget", shrink_log or "未超预算")
     except Exception as exc:
-        logger.warning("writer_chain 上下文注入降级: %s", exc)
+        report.degrade("context_budget", exc)
 
     # Style fingerprint（注入顺序在预算压缩之后：风格上下文豁免预算）
     try:
@@ -289,8 +305,10 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
         if anchor_ctx:
             existing = kw.get("memory_context", "")
             kw["memory_context"] = (existing + "\n\n" + anchor_ctx).strip()
+        report.ok("style_anchor" if anchor_ctx else "style_fingerprint",
+                  f"锚例{len(anchor_ctx)}字" if anchor_ctx else "指纹无锚例")
     except Exception as exc:
-        logger.warning("writer_chain 上下文注入降级: %s", exc)
+        report.degrade("style_fingerprint", exc)
 
     # 行文指纹修正指令：基于近期章节正文的 AI 痕迹检测（降 AI 率闭环）
     try:
@@ -309,8 +327,13 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
             tone_inst = build_tone_instructions(sample_text[-15000:])
             if tone_inst:
                 kw["tone_instructions"] = tone_inst
+                report.ok("tone_instructions")
+            else:
+                report.skip("tone_instructions", "近章无违规指纹")
+        else:
+            report.skip("tone_instructions", "近章文本不足500字")
     except Exception as exc:
-        logger.warning("writer_chain 上下文注入降级: %s", exc)
+        report.degrade("tone_instructions", exc)
 
     # P4 风格备忘录（B3）：审批时逐章累积的文体要点，注入最近 3 条
     try:
@@ -319,17 +342,24 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
                   if isinstance(m, dict) and m.get("note")]
         if recent:
             kw["style_memo"] = "\n".join(f"- {m}" for m in recent)
+            report.ok("style_memo", f"{len(recent)} 条")
+        else:
+            report.skip("style_memo", "备忘录为空")
     except Exception as exc:
-        logger.warning("writer_chain 上下文注入降级: %s", exc)
+        report.degrade("style_memo", exc)
 
     # P4 创作偏好档案：结构化的文风/禁忌/受众长期约束
     try:
         pref = Setting.query.get("creator_preferences")
         if pref and (pref.value or "").strip():
             kw["creator_preferences"] = pref.value.strip()
+            report.ok("creator_preferences")
+        else:
+            report.skip("creator_preferences", "未设置")
     except Exception as exc:
-        logger.warning("writer_chain 上下文注入降级: %s", exc)
+        report.degrade("creator_preferences", exc)
 
+    kw["injection_report"] = report.finalize(kw)
     return kw, novel
 
 

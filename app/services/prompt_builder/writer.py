@@ -53,7 +53,7 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
                         style_memo="", creator_preferences="", narrative_plan="",
                         reference_passages="", cast_constraint="", chapter_events="",
                         reader_known="", reflexion_lessons="", chapter_number=None,
-                        next_chapter_brief=""):
+                        next_chapter_brief="", injection_report=None):
     system_prompt = _load_system_prompt(db, "writer", (
         "你是一位专业的畅销网文作家，具备丰富的网文学创作经验，擅长使用细腻的描写和生动的对话来刻画人物和推动情节发展。"
         "根据提供的创作指引，写出高质量的小说章节内容。严格遵守世界观设定和人物设定，"
@@ -182,10 +182,6 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
                 sum_lines.append(f"第{s.get('chapter_number', '?')}章：{s.get('summary', '')}")
             else:
                 sum_lines.append(str(s))
-        blocks.append(_section("近章前情提要（最近几章的详细摘要）", "\n".join(sum_lines)))
-    if earlier_summaries:
-        blocks.append(_section("更早章节概要（粗粒度记忆）", earlier_summaries))
-
     if foreshadowing_items:
         fs_lines = []
         for f in foreshadowing_items:
@@ -222,6 +218,18 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
     # 信息边界 + 时序真相：一致性红线，独立段落且不在上下文预算压缩范围
     if boundary_context:
         blocks.append(_section("信息边界与既定事实（一致性红线，必须遵守）", boundary_context))
+
+    # 近因效应（lost-in-the-middle 对策）：近章细节贴尾部，远章概要留前部
+    if summaries:
+        sum_lines = []
+        for s_ in summaries:
+            if isinstance(s_, dict):
+                sum_lines.append(f"第{s_.get('chapter_number', '?')}章：{s_.get('summary', '')}")
+            else:
+                sum_lines.append(str(s_))
+        blocks.append(_section("近章前情提要（最近几章的详细摘要，直接衔接本章）", "\n".join(sum_lines)))
+    if earlier_summaries:
+        blocks.append(_section("更早章节概要（粗粒度记忆）", earlier_summaries))
 
     if chapter_title:
         blocks.append(_section("章节标题", chapter_title))
@@ -273,6 +281,22 @@ def build_writer_prompt(novel_title="", chapter_title="", outline="", user_direc
         "字数要求",
         "本章正文目标约 2500 字（不得低于 2000 字）。"
         "请充分展开场景、对话与心理描写，宁可细节丰盈，不可草草收束。"))
+    # 尾部复述区（todo.md 机制）：关键承诺在临近生成处再出现一次，
+    # 对抗长上下文中部遗忘；≤200 字符，纯复述不加新信息
+    recap_bits = []
+    if author_intent:
+        recap_bits.append("全书承诺：" + author_intent[:60])
+    if current_focus:
+        recap_bits.append("阶段重心：" + current_focus[:40])
+    if outline:
+        from app.services.tension_bus import parse_outline_field
+        hook = parse_outline_field(outline, "结尾钩子")
+        if hook:
+            recap_bits.append("章尾务必落在钩子：" + hook[:60])
+    if recap_bits:
+        blocks.append(_section("尾部复述（最后确认，其余指令继续有效）",
+                               "；".join(recap_bits)))
+
     blocks.append("\n请直接输出本章的小说正文内容。")
 
     return [

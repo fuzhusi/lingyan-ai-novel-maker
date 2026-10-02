@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}知识库 — {{ novel.title }}{% endblock %}
+
+{% block nav %}{% include '_book_nav.html' %}{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="kbtabs">
+        <a href="?tab=characters" class="kbtabs-item {{ 'active' if active_tab == 'characters' else '' }}">&#128100; 人物库</a>
+        <a href="?tab=world" class="kbtabs-item {{ 'active' if active_tab == 'world' else '' }}">&#127758; 世界观</a>
+        <a href="?tab=foreshadowing" class="kbtabs-item {{ 'active' if active_tab == 'foreshadowing' else '' }}">&#128220; 伏笔</a>
+    </div>
+
+    {% if active_tab == 'characters' %}
+    {% include '_kb_characters.html' %}
+    {% elif active_tab == 'world' %}
+    {% include '_kb_world.html' %}
+    {% else %}
+    {% include '_kb_foreshadowing.html' %}
+    {% endif %}
+</div>
+{% endblock %}

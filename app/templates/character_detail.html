@@ -2,11 +2,9 @@
 {% block title %}{{ character.name }} — {{ novel.title }}{% endblock %}
 
 {% block nav %}
-<a href="/novel/{{ novel.id }}/">&larr; 章节列表</a>
+<a href="/novel/{{ novel.id }}/knowledge?tab=characters">&larr; 知识库</a>
 <span class="sep">|</span>
-<a href="/novel/{{ novel.id }}/characters">人物管理</a>
-<span class="sep">|</span>
-<span>{{ character.name }}</span>
+<a href="/novel/{{ novel.id }}/outline">大纲</a>
 {% endblock %}
 
 {% block content %}

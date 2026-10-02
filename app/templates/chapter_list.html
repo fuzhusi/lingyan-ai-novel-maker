@@ -4,13 +4,9 @@
 {% block nav %}
 <a href="/">&larr; 首页</a>
 <span class="sep">|</span>
-<a href="/novel/{{ novel.id }}/characters">人物</a>
-<span class="sep">|</span>
-<a href="/novel/{{ novel.id }}/world-settings">世界观</a>
+<a href="/novel/{{ novel.id }}/knowledge?tab=characters">知识库</a>
 <span class="sep">|</span>
 <a href="/novel/{{ novel.id }}/outline">大纲</a>
-<span class="sep">|</span>
-<a href="/novel/{{ novel.id }}/foreshadowing">伏笔</a>
 <span class="sep">|</span>
 <a href="/novel/{{ novel.id }}/dashboard/">数据面板</a>
 {% endblock %}

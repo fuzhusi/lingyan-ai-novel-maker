@@ -2367,3 +2367,17 @@ a.btn:not(.btn-danger):not(.btn-secondary) {
 @media (min-width: 769px) {
     .t-more-toggle { display: none !important; }
 }
+
+/* ------------------------------------------------------------------ */
+/* 知识库容器页 Tab（2026-09-30）：人物库/世界观/伏笔统一入口 */
+.kbtabs { display: flex; gap: 0.4rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.kbtabs-item {
+    padding: 0.4rem 0.9rem; border-radius: 6px; text-decoration: none;
+    color: var(--text); border: 1px solid var(--border);
+    font-size: 0.92rem; transition: background 0.15s ease, color 0.15s ease;
+}
+.kbtabs-item:hover { color: var(--text-bright); border-color: var(--accent-dim); }
+.kbtabs-item.active {
+    background: var(--accent-ghost); color: var(--accent-light);
+    border-color: var(--accent-dim); font-weight: 600;
+}

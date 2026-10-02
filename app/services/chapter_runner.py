@@ -125,6 +125,14 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
                                     user_directive=user_directive,
                                     character_ids=character_ids)
     cfg_w = get_effective_config(novel, agent_type="writer")
+    # 注入观测层报告（纯观测，不进 prompt；进 stages 与版本 model_params_json）
+    injection_report = kw.pop("injection_report", None) or {}
+    if injection_report.get("dims"):
+        stages.append({"stage": "injection_report",
+                       "dims": injection_report["dims"],
+                       "sizes": injection_report.get("sizes", {}),
+                       "total_chars": injection_report.get("total_chars", 0),
+                       "degraded": injection_report.get("degraded", [])})
     messages = build_writer_prompt(
         novel_title=novel.title, chapter_title=chapter.title,
         outline=outline_for_write, user_directive=user_directive, db=db,
@@ -344,7 +352,10 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
             version = create_version_record(novel_id, chapter_number, text,
                                             source="ai",
                                             prompt_used=json.dumps(
-                                                messages, ensure_ascii=False))
+                                                messages, ensure_ascii=False),
+                                            model_params_json=json.dumps(
+                                                {"injection_report": injection_report},
+                                                ensure_ascii=False))
             result["saved_version_id"] = version.id
             stages.append({"stage": "save", "ok": True,
                            "version_id": version.id})

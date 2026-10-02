@@ -14,7 +14,7 @@ _LEGACY_MIN_CHARS = 100
 _EVENT_MARK = re.compile(r"【核心事件】|【本章事件】")
 _HOOK_MARK = re.compile(r"【结尾钩子】|【章尾钩子】")
 _CONTRACT_MARK = re.compile(
-    r"【本章契约】|【契约】|他要什么|谁拦|不做成会失去|本章目标"
+    r"【本章契约】|【契约】|他要什么|谁拦|不做成会失去|本章目标|对手回合"
 )
 _BEAT_MARK = re.compile(r"【场景节拍】")
 # 兜底钩子语义：须是事件/代价，不能出现裸「退/明天」
@@ -119,7 +119,7 @@ def write_ready_outline(outline):
     has = report["has"]
     if report["ok"] and not has.get("contract"):
         notes.append(
-            "【本章契约·系统补注】正文必须体现：他要什么（可量化）／谁拦他／"
+            "【本章契约·系统补注】正文必须体现：他要什么（可量化）／谁拦他（对手回合：攻什么弱点）／"
             "不做成会失去什么。写进场面，禁止说明文。")
     if report["ok"] and not has.get("hook"):
         notes.append(

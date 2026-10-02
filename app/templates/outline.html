@@ -1,17 +1,7 @@
 {% extends "base.html" %}
 {% block title %}大纲树 — {{ novel.title }}{% endblock %}
 
-{% block nav %}
-<a href="/novel/{{ novel.id }}/">&larr; 章节列表</a>
-<span class="sep">|</span>
-<a href="/novel/{{ novel.id }}/characters">人物</a>
-<span class="sep">|</span>
-<a href="/novel/{{ novel.id }}/world-settings">世界观</a>
-<span class="sep">|</span>
-<a href="/novel/{{ novel.id }}/foreshadowing">伏笔</a>
-<span class="sep">|</span>
-<span>大纲</span>
-{% endblock %}
+{% block nav %}{% include '_book_nav.html' %}{% endblock %}
 
 {% block content %}
 <div class="container">

@@ -18,7 +18,7 @@ def outline_page(novel_id):
     for ch in chapters:
         if ch.outline_node_id:
             node_chapter_map[ch.outline_node_id] = ch
-    return render_template("outline.html", novel=novel, nodes=nodes,
+    return render_template("outline.html", novel=novel, active_nav="outline", nodes=nodes,
                            node_chapter_map=node_chapter_map, chapters=chapters)
 
 

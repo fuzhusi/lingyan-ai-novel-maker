@@ -1,0 +1,14 @@
+{# 书内导航：知识库/大纲统一入口（active_nav: 'knowledge'|'outline'|''） #}
+<a href="/novel/{{ novel.id }}/">&larr; 章节列表</a>
+<span class="sep">|</span>
+{% if active_nav == 'knowledge' %}
+<span>知识库</span>
+{% else %}
+<a href="/novel/{{ novel.id }}/knowledge?tab=characters">知识库</a>
+{% endif %}
+<span class="sep">|</span>
+{% if active_nav == 'outline' %}
+<span>大纲</span>
+{% else %}
+<a href="/novel/{{ novel.id }}/outline">大纲</a>
+{% endif %}

@@ -37,7 +37,8 @@ def test_apply_arc_updates_structured_and_history(client):
     assert status["arc_history"][0]["chapter"] == 25
     # 二次回写：值未变则不再追加 history
     apply_arc_updates(n.id, 26, {"陈屿": {"want_now": "让湘西之行按约发生"}})
-    status2 = json.loads(Character.query.filter_by(name="陈屿").first().status_json)
+    status2 = json.loads(
+        Character.query.filter_by(novel_id=n.id, name="陈屿").first().status_json)
     assert len(status2["arc_history"]) == 1
 
 

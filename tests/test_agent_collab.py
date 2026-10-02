@@ -193,7 +193,7 @@ def test_runner_full_pipeline_with_auto_save(app, monkeypatch):
     assert "error" not in result
     stage_names = [s["stage"] for s in result["stages"]]
     assert stage_names == ["outline", "outline_drama", "event_plan",
-                           "body", "gates", "tension_audit", "converge", "save"]
+                           "injection_report", "body", "gates", "tension_audit", "converge", "save"]
     assert result["stages"][0].get("skipped") == "已有大纲"
     assert result["saved_version_id"]
 
