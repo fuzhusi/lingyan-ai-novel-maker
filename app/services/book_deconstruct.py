@@ -26,9 +26,9 @@ from app.models import (
 
 
 logger = logging.getLogger(__name__)
-from app.services.knowledge_activation import default_policy_for as _default_kb_policy
 from app.services.llm import call_llm_sync, stream_llm_tokens, LLMError
 from app.config_utils import get_model_config
+from app.services.knowledge_activation import default_policy_for as _default_kb_policy
 
 # 超长阈值：超过走三层漏斗，以内走快路（原文单次拆解）
 SUMMARY_THRESHOLD = 20000

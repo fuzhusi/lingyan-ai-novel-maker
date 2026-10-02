@@ -49,10 +49,10 @@ def gather_recent_text(novel_id, before_chapter, tail=4000):
                 .filter_by(novel_id=novel_id)
                 .filter(Chapter.chapter_number < before_chapter)
                 .order_by(Chapter.chapter_number.desc())
-                .limit(2).all())
+                .limit(5).all())   # 多取兜底：紧邻章可能只有大纲无正文
     parts = []
     for ch in chapters:
-        if ch.versions:
+        if ch.versions and len(parts) < 2:   # 实际带正文的最近两章
             text = ch.versions[-1].content or ""
             parts.append(text[-tail:])
     return "\n".join(parts)
@@ -85,6 +85,11 @@ def dedupe_by_id(items):
 
 
 def default_policy_for(title):
-    """拆书落库条目的默认策略：keywords + 标题触发（防全 auto 退化成全量注入）。"""
+    """拆书落库条目的默认策略：keywords + 标题触发（防全 auto 退化成全量注入）。
+
+    标题不足 2 字时退回 auto（keywords_hit 过滤单字触发词，keywords 会永不命中）。
+    """
+    if len((title or "").strip()) < 2:
+        return json.dumps({"mode": "auto"}, ensure_ascii=False)
     return json.dumps({"mode": "keywords", "keys": [(title or "").strip()]},
                       ensure_ascii=False)

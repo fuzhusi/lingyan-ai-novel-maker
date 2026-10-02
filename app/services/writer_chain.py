@@ -107,15 +107,21 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
     recent_text = ka.gather_recent_text(novel_id, chapter_number)
     c_buckets = ka.split_modes(
         kw["characters"], lambda c: ka.parse_policy(c.get("injection_policy")))
-    kw["characters"] = [c for c in kw["characters"]
-                        if c not in c_buckets["off"]]
+    w_buckets = ka.split_modes(
+        kw["world_settings"], lambda w: ka.parse_policy(w.get("injection_policy")))
+    # off 剔除：缺省路径生效；用户显式勾选路径完全以勾选为准（评审 P1：
+    # off+勾选同存时静默丢弃会让 cast_constraint 自相矛盾）
+    # keywords 条目移出主列表，名册/语义剪枝后按命中结果合并回来
+    if character_ids is None:
+        kw["characters"] = [c for c in kw["characters"]
+                            if c not in c_buckets["off"]
+                            and c not in c_buckets["keywords"]]
+    kw["world_settings"] = [w for w in kw["world_settings"]
+                            if w not in w_buckets["off"]
+                            and w not in w_buckets["keywords"]]
     report.ok("policy_activation",
               f"角色 auto{len(c_buckets['auto'])}/always{len(c_buckets['always'])}"
               f"/kw{len(c_buckets['keywords'])}/off{len(c_buckets['off'])}")
-    w_buckets = ka.split_modes(
-        kw["world_settings"], lambda w: ka.parse_policy(w.get("injection_policy")))
-    kw["world_settings"] = [w for w in kw["world_settings"]
-                            if w not in w_buckets["off"]]
 
     # 名册过滤只作用于 auto 子集（确定性，零嵌入依赖）：
     # 语义选角色的兜底是"全量注入"，实体嵌入未建时会退回全部档案
@@ -123,6 +129,8 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
     # 是作者/大纲链路钦点的出场安排，作为缺省过滤源比"全部"更贴近
     # 本意；用户显式勾选（character_ids 非 None）时仍以勾选为准。
     # always/keywords 条目不受名册约束（显式策略优先于启发式）。
+    # 名册命中者记录在案：后续语义剪枝对其豁免（钦点 > 嵌入相似度）。
+    roster_kept_ids = set()
     if character_ids is None:
         try:
             roster_text = parse_outline_field(outline, "出场人物")
@@ -139,6 +147,7 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
                         logger.info("出场角色按大纲名册过滤：%d/%d 份 auto 档案注入",
                                     len(auto_matched), len(auto_in))
                         report.ok("roster_filter", f"{len(auto_matched)}/{len(auto_in)} 卡")
+                        roster_kept_ids = {c["id"] for c in auto_matched}
                         kept = auto_matched + [c for c in kw["characters"]
                                                if c["id"] not in auto_ids]
                         kw["characters"] = ka.dedupe_by_id(kept)
@@ -271,16 +280,17 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
         if selected["character_ids"] and character_ids is None:
             sem_ids = set(selected["character_ids"])
             auto_ids = {c["id"] for c in c_buckets["auto"]}
+            # 名册命中者豁免语义剪枝（钦点 > 嵌入相似度）：
+            # 实测教训——嵌入建成首日男主被剪出 top-K，作者钦点必须稳赢
             kept_auto = [c for c in kw["characters"]
-                         if c["id"] in auto_ids and c.get("id") in sem_ids]
+                         if c["id"] in auto_ids
+                         and (c.get("id") in sem_ids
+                              or c.get("id") in roster_kept_ids)]
             if kept_auto:
                 kept = kept_auto + [c for c in kw["characters"]
                                     if c["id"] not in auto_ids]
                 kw["characters"] = ka.dedupe_by_id(kept)
         if selected["world_ids"]:
-            w_buckets = ka.split_modes(
-                kw["world_settings"],
-                lambda w: ka.parse_policy(w.get("injection_policy")))
             w_auto_ids = {w["id"] for w in w_buckets["auto"]}
             sem_w = set(selected["world_ids"])
             kept_w_auto = [w for w in kw["world_settings"]
@@ -289,24 +299,24 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
                 kept_w = kept_w_auto + [w for w in kw["world_settings"]
                                         if w["id"] not in w_auto_ids]
                 kw["world_settings"] = ka.dedupe_by_id(kept_w)
-            else:
-                # auto 全被剪光 → 回退全量（防零上下文）
-                kw["world_settings"] = ka.dedupe_by_id(
-                    kw["world_settings"] + w_buckets["auto"])
+            # else：auto 未被剪（条目本就少或语义无命中）→ 维持原状即"回退全量"
         report.ok("semantic_select",
                   f"角色{len(selected['character_ids'])}/设定{len(selected['world_ids'])}")
     except Exception as exc:
         report.degrade("semantic_select", exc)
 
-    # world 的 always 常驻 + keywords 兜底合并（语义块异常时也生效）
-    w_buckets2 = ka.split_modes(
-        kw["world_settings"], lambda w: ka.parse_policy(w.get("injection_policy")))
-    extras = w_buckets2["always"] + [
-        w for w in w_buckets2["keywords"]
-        if ka.keywords_hit(ka.parse_policy(w.get("injection_policy")),
-                           w.get("title"), recent_text)]
-    if extras:
-        kw["world_settings"] = ka.dedupe_by_id(kw["world_settings"] + extras)
+    # keywords 兜底合并：命中近两章正文的条目在名册/语义剪枝后并回
+    # （评审 P0 修复：此前角色侧 keywords 恒等 always，命中判定不生效）
+    c_hits = [c for c in c_buckets["keywords"]
+              if ka.keywords_hit(ka.parse_policy(c.get("injection_policy")),
+                                 c.get("name"), recent_text)]
+    if c_hits and character_ids is None:
+        kw["characters"] = ka.dedupe_by_id(kw["characters"] + c_hits)
+    w_extras = [w for w in w_buckets["keywords"]
+                if ka.keywords_hit(ka.parse_policy(w.get("injection_policy")),
+                                   w.get("title"), recent_text)]
+    if w_extras:
+        kw["world_settings"] = ka.dedupe_by_id(kw["world_settings"] + w_extras)
 
     # 信息边界 + 时序真相（一致性红线）：独立字段而非拼进 memory_context，
     boundary_parts = []

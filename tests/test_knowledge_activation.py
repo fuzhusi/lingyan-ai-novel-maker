@@ -138,3 +138,47 @@ def test_policy_world_always_and_off(client):
     titles = [w["title"] for w in kw["world_settings"]]
     assert "端公规矩" in titles
     assert "废弃设定" not in titles
+
+
+# ---------------------------------------------------------------------------
+# 评审修复回归（code review + 验收团队发现）
+# ---------------------------------------------------------------------------
+
+def test_policy_keywords_miss_excluded(client):
+    """P0 回归：角色 keywords 未命中近章正文 → 不注入（原实现恒等 always）。"""
+    n = _mk_kb(client, {"陈屿": "{}",
+                        "未触发者": '{"mode": "keywords", "keys": ["不存在的锚词"]}'})
+    kw, _ = build_writer_kwargs(n.id, 2, OUTLINE)
+    names = [c["name"] for c in kw["characters"]]
+    assert "陈屿" in names
+    assert "未触发者" not in names
+
+
+def test_explicit_check_overrides_off(client):
+    """用户显式勾选优先于持久 off 策略（避免 cast_constraint 自相矛盾）。"""
+    n = _mk_kb(client, {"陈屿": '{"mode": "off"}'})
+    off_char = Character.query.filter_by(novel_id=n.id, name="陈屿").first()
+    kw, _ = build_writer_kwargs(n.id, 2, OUTLINE, character_ids=[off_char.id])
+    names = [c["name"] for c in kw["characters"]]
+    assert "陈屿" in names   # 勾选赢：off 不剔除显式勾选
+    # 且 cast_constraint 宣告其可登场（不出现无档案矛盾）
+    assert "只允许以下角色登场" in kw.get("cast_constraint", "")
+
+
+def test_default_policy_single_char_title_falls_back_auto():
+    """单字标题回退 auto（keywords_hit 过滤单字，keywords 会永不命中）。"""
+    p = parse_policy(default_policy_for("妖"))
+    assert p["mode"] == "auto"
+    p2 = parse_policy(default_policy_for("玄学佬"))
+    assert p2["mode"] == "keywords"
+
+
+def test_gather_recent_text_tolerates_outline_only_chapter(client):
+    """紧邻章只有大纲无正文：窗口跳过它取再前一章的正文。"""
+    n = _mk_book(client)
+    _mk_chapter_with_text(n.id, 1, "第一章正文含锚点词黑桃。")
+    db.session.add(Chapter(novel_id=n.id, chapter_number=2,
+                           outline="只有大纲没有正文"))
+    db.session.commit()
+    text = gather_recent_text(n.id, 3)
+    assert "黑桃" in text
