@@ -2,6 +2,7 @@
     <div class="card">
         <h2>添加世界观条目</h2>
         <form method="POST" action="/novel/{{ novel.id }}/world-settings/create" class="form-stack">
+<input type="hidden" name="next" value="{{ request.full_path }}">
             <div class="form-inline-row">
                 <div class="form-row" style="flex:1">
                     <label>分类</label>
@@ -37,13 +38,14 @@
         <div class="card kb-card" data-category="{{ ws.category }}">
             <div style="display:flex;justify-content:space-between;align-items:flex-start">
                 <div style="flex:1">
-                    <div class="kb-cat">{{ ws.category }}</div>
+                    <div class="kb-cat">{{ ws.category }}{% set pl = ws.injection_policy | policy_label %}{% if pl %} <span class="policy-badge">{{ pl }}</span>{% endif %}</div>
                     <h2>{{ ws.title }}</h2>
                     <div class="kb-field" style="white-space:pre-wrap">{{ ws.content }}</div>
                 </div>
                 <div style="display:flex;gap:0.3rem;flex-shrink:0;margin-left:1rem">
                     <button class="btn-sm" onclick="document.getElementById('edit-ws-{{ ws.id }}').style.display='block'">编辑</button>
                     <form method="POST" action="/novel/{{ novel.id }}/world-settings/{{ ws.id }}/delete"
+<input type="hidden" name="next" value="{{ request.full_path }}">
                           onsubmit='return confirm("确定删除 " + {{ ws.title|tojson }} + "？")'>
                         <button type="submit" class="btn-sm btn-danger">删除</button>
                     </form>
@@ -51,11 +53,13 @@
             </div>
             <div id="edit-ws-{{ ws.id }}" style="display:none;margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--border)">
                 <form method="POST" action="/novel/{{ novel.id }}/world-settings/{{ ws.id }}/edit" class="form-stack">
+<input type="hidden" name="next" value="{{ request.full_path }}">
                     <div class="form-inline-row">
                         <input type="text" name="category" value="{{ ws.category }}" placeholder="分类" style="flex:1">
                         <input type="text" name="title" value="{{ ws.title }}" required style="flex:2">
                     </div>
                     <textarea name="content" rows="5">{{ ws.content }}</textarea>
+                    <textarea name="injection_policy" rows="1" placeholder='注入策略JSON，留空=auto' style="font-size:0.85rem">{{ ws.injection_policy if ws.injection_policy not in (None, '', '{}') else '' }}</textarea>
                     <button type="submit">保存修改</button>
                 </form>
             </div>

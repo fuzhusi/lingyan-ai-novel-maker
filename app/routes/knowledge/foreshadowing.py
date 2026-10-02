@@ -1,5 +1,13 @@
 """伏笔管理路由：CRUD + 超时检测 + 状态推进。"""
 from flask import render_template, request, redirect, url_for, jsonify
+
+
+def _redirect_back(novel_id, fallback_endpoint):
+    """容器页/旧页双入口兼容：表单带 next 时回容器对应 Tab，否则回旧页。"""
+    nxt = (request.form.get("next") or "").strip()
+    if nxt.startswith("/novel/%d/" % novel_id):
+        return redirect(nxt)
+    return redirect(url_for(fallback_endpoint, novel_id=novel_id))
 from app.models import db, Novel, Foreshadowing, Chapter
 from app.routes.knowledge import knowledge_bp
 
@@ -43,7 +51,7 @@ def create_foreshadowing(novel_id):
     )
     db.session.add(item)
     db.session.commit()
-    return redirect(url_for("knowledge.foreshadowing_page", novel_id=novel_id))
+    return _redirect_back(novel_id, "knowledge.foreshadowing_page")
 
 
 @knowledge_bp.route("/foreshadowing/<int:fs_id>/edit", methods=["POST"])
@@ -61,7 +69,7 @@ def edit_foreshadowing(novel_id, fs_id):
         if val is not None:
             setattr(fs, field, val if val > 0 else None)
     db.session.commit()
-    return redirect(url_for("knowledge.foreshadowing_page", novel_id=novel_id))
+    return _redirect_back(novel_id, "knowledge.foreshadowing_page")
 
 
 @knowledge_bp.route("/foreshadowing/<int:fs_id>/delete", methods=["POST"])
@@ -70,7 +78,7 @@ def delete_foreshadowing(novel_id, fs_id):
     fs = Foreshadowing.query.filter_by(id=fs_id, novel_id=novel_id).first_or_404()
     db.session.delete(fs)
     db.session.commit()
-    return redirect(url_for("knowledge.foreshadowing_page", novel_id=novel_id))
+    return _redirect_back(novel_id, "knowledge.foreshadowing_page")
 
 
 # ---------------------------------------------------------------------------

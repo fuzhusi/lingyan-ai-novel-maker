@@ -2,6 +2,7 @@
     <div class="card">
         <h2>添加伏笔</h2>
         <form method="POST" action="/novel/{{ novel.id }}/foreshadowing/create" class="form-stack">
+<input type="hidden" name="next" value="{{ request.full_path }}">
             <div class="form-row">
                 <label>描述 <span class="required">*</span></label>
                 <textarea name="description" rows="3" required
@@ -43,12 +44,16 @@
                 </div>
                 <div style="display:flex;gap:0.3rem;flex-shrink:0;margin-left:1rem;flex-wrap:wrap;justify-content:flex-end">
                     <form method="POST" action="/novel/{{ novel.id }}/foreshadowing/{{ f.id }}/edit" style="display:inline">
+<input type="hidden" name="next" value="{{ request.full_path }}">
+<input type="hidden" name="next" value="{{ request.full_path }}">
                         <input type="hidden" name="description" value="{{ f.description }}">
                         <input type="hidden" name="status" value="resolved">
                         <button type="submit" class="btn-sm" style="background:var(--success)">标记已回收</button>
                     </form>
                     <button class="btn-sm" onclick="document.getElementById('edit-fs-{{ f.id }}').style.display='block'">编辑</button>
                     <form method="POST" action="/novel/{{ novel.id }}/foreshadowing/{{ f.id }}/delete"
+<input type="hidden" name="next" value="{{ request.full_path }}">
+<input type="hidden" name="next" value="{{ request.full_path }}">
                           onsubmit="return confirm('确定删除此伏笔？')" style="display:inline">
                         <button type="submit" class="btn-sm btn-danger">删除</button>
                     </form>
@@ -56,6 +61,7 @@
             </div>
             <div id="edit-fs-{{ f.id }}" style="display:none;margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--border)">
                 <form method="POST" action="/novel/{{ novel.id }}/foreshadowing/{{ f.id }}/edit" class="form-stack">
+<input type="hidden" name="next" value="{{ request.full_path }}">
                     <textarea name="description" rows="3">{{ f.description }}</textarea>
                     <div class="form-inline-row">
                         <input type="number" name="planted_chapter" value="{{ f.planted_chapter or '' }}" placeholder="埋入章节" style="flex:1">

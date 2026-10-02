@@ -1,6 +1,6 @@
 # 灵砚 (LingYan) — AI 小说创作系统
 
-> 双盲审驱动的中文长篇 / 短篇小说创作工作台：写作、评审、一致性保障一站式完成。
+> 四编辑盲审面板驱动的中文长篇 / 短篇小说创作工作台：写作、评审、一致性保障一站式完成。
 > 借鉴开源社区（OpenWrite / jarvis-write / NovelForge / lieflat-less-ai-tone 等）的成熟机制，去其糟粕取其精华，沉淀为本项目的确定性工程能力。
 
 Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI / Anthropic Claude / Google Gemini / Kimi / 智谱 / Ollama 等 13 家厂商预设（Claude 走原生协议，其余 OpenAI 兼容），按 Agent 类型配置不同模型。
@@ -41,9 +41,9 @@ Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI /
 - **@skill-id 按需启用**：特别指示里写 `@chapter_hook` 临时附加技能（仅本次生效，不改全局）；只摘除已注册技能 id，未知 @词原样保留，邮箱不误判
 
 **评审**
-- **统一评审**：一键完成 Critic 结构化评分 + 阎浮×白骨双盲审并行；报告合并为统一意见清单
-- **双盲审两角色**：阎浮（市场毒舌）× 白骨（文学刻薄）零上下文盲审——不给大纲设定，每条批评必须引用原文，只给「追读/弃稿」二值判决
-- **意见勾选改写**：Critic 分项与两位编辑的意见统一降维成同一 Schema，评审面板勾选后「重写」逐条落实，不再漏损
+- **统一评审**：一键完成 Critic 结构化评分 + **四编辑盲审面板**并行（阎浮×白骨×快嘴×骨架师）；报告合并为统一意见清单
+- **盲审四编辑**：阎浮（市场毒舌）× 白骨（文学刻薄）× 快嘴（追更读者：爽点兑现/毒点清单）× 骨架师（结构编辑：价值翻转/冲突升级/承诺账目）零上下文盲审——每条批评必须引用原文，只给「追读/弃稿」二值判决
+- **意见勾选改写**：Critic 分项与四位编辑的意见统一降维成同一 Schema，评审面板勾选后「重写」逐条落实，不再漏损
 - **盲审工作台**：全局 `/blind/` 页对任意短篇 / 章节 / 自由文本开审，结果独立存档可回看；「盲审 → 重写 → 再盲审」循环打磨
 
 **定稿**
@@ -76,7 +76,7 @@ Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI /
 
 - 三阶段可编辑策划（角色 → 大纲 → 主题）+ 逐节点多轮创作
 - 断点续写、单节点重写、按评审意见逐节点二次生成
-- 评审卡直出两位编辑判决，存档后可在盲审工作台勾选意见循环打磨
+- 评审卡直出四位编辑判决，存档后可在盲审工作台勾选意见循环打磨
 - 一致性保障：手动编辑与节点拼接冲突时自动保护
 
 ### 📂 知识库
@@ -99,6 +99,17 @@ Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI /
 - ⌨️ **CLI（28 命令组）**：与 Web 同源复用，见下节
 - 📱 移动端响应式布局
 
+### 🧭 知识激活与评估（v2 质量体系）
+
+- **注入观测层**：每次生成的全部知识注入维度（激活/降级/跳过/字符数）实时可见——SSE 进度帧与章节版本记录均可回查，静默失效永久闭环
+- **张力总线 + 节拍级拆锅**：细纲场景节拍逐拍生成，章张力档（1-5）确定性推导、逐拍不平曲线，力度档联动采样温度
+- **断章四法 / 爽点间距账本 / 信息密度 / 钩子递进**：确定性门禁新四件（安静基调自动降档，不误伤治愈系文风）
+- **角色状态回写**：审批时自动把角色变化（想要什么/怕什么/关系现值）写回人物卡，越写越陈旧的问题闭环；人物详情页可查回写轨迹
+- **伏笔账本**：提及即记账（last_mentioned 活化）、状态单步自动流转、收线时校验前置展示（Sanderson 第一定律）
+- **知识注入 policy**：角色卡/世界观条目可选 always（常驻）/ keywords（命中近两章正文）/ off；拆书落库条目默认 keywords 防对标书设定挤占预算
+- **best-of-N**：`chapter pipeline --variants 2` 生成两稿按门禁分选优
+- **可预测率**：`tone predict` N 次独立采样预测下一章走向，两两重合度越高越平淡（advisory 诊断）
+
 ### 🌙 界面主题：朱金 · 玄漆 ——「夜幕下摊开的稿纸」
 
 - **双层设计**：夜幕区保留玄漆暖黑底 + 朱砂/泥金主色（毛笔题字 + 朱印落款）；阅读面（卡片/列表/表单/输出区）转宣纸底 + 墨字
@@ -119,7 +130,7 @@ Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI /
 | 小说列表 | `/novel/` | 长篇列表 + 创作罗盘卡 + 导出 |
 | 写作页 | `/novel/<id>/chapter/<n>/write` | 核心：生成 / 门禁 / 全面评审 / 双盲审 / 批准 / AI味收敛 / 一致性核查 |
 | 章节列表 | `/novel/<id>/` | 章节网格 + 大纲失配徽标 |
-| 知识库 | `/novel/<id>/characters` `/world` `/outline` `/foreshadowing` | 角色 / 世界观 / 大纲树 / 伏笔 |
+| 知识库 | `/novel/<id>/knowledge?tab=` | 人物库 / 世界观 / 伏笔 三 Tab 统一入口（大纲为独立结构工作台；旧页面 URL 保留） |
 | 双盲审工作台 | `/blind/` | 任意文本 / 短篇 / 章节开审，结果存档回看 |
 | 拆书复刻 | `/plagiarize/` 及子页 | 对标书上传 → 六维拆解 → 待确认条目逐条采纳 → 复刻长篇/短篇 |
 | 资源库 | `/resources/` | 对标书原文独立存储，语义检索 API 供写作包按需拉取相关片段 |
@@ -138,7 +149,7 @@ Flask + Jinja2 后端，无需登录的单机应用，支持 DeepSeek / OpenAI /
 3. 搭知识库           角色（可模板/AI生成）→ 世界观 → 大纲树（卷/章/场）→ 伏笔
 4. 生成正文           「AI 生成本章」→ SSE 流式 → 门禁束自动检测 AI 痕迹
 5. 打磨               人味分不达标 → AI味收敛；超字数 → 压缩超标；改大纲 → 失配标记提示
-6. 评审               「全面评审」= Critic 结构化评分 + 阎浮×白骨双盲审并行
+6. 评审               「全面评审」= Critic 结构化评分 + 四编辑盲审面板并行
 7. 修订               勾选评审意见 → 重写 → 复评（至多一轮，分数不升回滚）
 8. 定稿               批准 → 摘要 / 结构化记忆 / 故事状态推进 / 风格备忘录累积
 9. 一致性保障          审批时事实入队（queue 采纳）→ 后续章节一致性链三查
@@ -247,13 +258,13 @@ lingyan/
 ├── app/
 │   ├── __init__.py                   # Flask app 工厂，注册 26 个蓝图
 │   ├── config.py / config_utils.py   # 配置加载与解析
-│   ├── models/                       # 28 个 SQLAlchemy 模型（按领域拆分）
+│   ├── models/                       # 30 个 SQLAlchemy 模型（按领域拆分）
 │   ├── routes/                       # 21 个路由蓝图（novel/chapter/generate/review/blind/resources/...）
-│   ├── services/                     # 29 个业务模块（writer_chain/chapter_runner/book_deconstruct/narrative_plan/similarity_check/...）
-│   ├── templates/                    # 23 个 Jinja2 模板
+│   ├── services/                     # 48 个业务模块（含 prompt_builder/constraint_bank 子包）（writer_chain/chapter_runner/book_deconstruct/narrative_plan/similarity_check/...）
+│   ├── templates/                    # 29 个 Jinja2 模板（含知识库容器与 partial）
 │   └── static/                       # 主题 CSS + 月夜氛围 JS
 ├── docs/                             # 架构/设计/路线/方法论文档（见文末索引）
-└── tests/                            # 330+ 用例（独立临时库，不碰开发数据）
+└── tests/                            # 410+ 用例（独立临时库，不碰开发数据）
 ```
 
 ---
@@ -283,11 +294,12 @@ CLI 与 Web 复用同一套服务层，行为一致（不是各写一套）。28
 | `chapter` | 章节 CRUD + 版本 + 大纲失配 + **一键本章/收敛/压缩/一致性核查** + `outline-template`（大纲固定格式模板） | `python cli.py chapter pipeline --novel 1 --number 5 --save` |
 | `deconstruct` | **拆书复刻**（create/run/items/adopt/generate-long/short） | `python cli.py deconstruct generate-long --id 1 --title "新书" --run` |
 | `compass` | 创作罗盘 | `python cli.py compass set --novel 1 --intent "复仇外壳写救赎"` |
-| `tone` | AI 痕迹检测 / 收敛 / 困惑度雷达 | `python cli.py tone radar --novel 1 --number 5` |
-| `consistency` | 一致性链核查（`--adjudicate` 交 AI 裁决） | `python cli.py chapter consistency --novel 1 --number 5` |
+| `tone` | AI 痕迹检测 / 收敛 / 困惑度雷达 / 可预测率 | `python cli.py tone predict --novel 1 --number 5` |
+| `tone predict-scan` | 全书可预测率回测（分位数定标阈值） | `python cli.py tone predict-scan --novel 1` |
+| `chapter consistency` | 一致性链核查（`--adjudicate` 交 AI 裁决） | `python cli.py chapter consistency --novel 1 --number 5` |
 | `queue` | 抽取待确认队列（采纳/丢弃） | `python cli.py queue list --novel 1` |
 | `preferences` | 创作偏好档案 | `python cli.py preferences set --style "冷峻克制"` |
-| `blind` | 双盲审（run/latest/rewrite） | `python cli.py blind run --novel 1 --number 5` |
+| `blind` | 四编辑盲审面板（run/latest/rewrite），连续 3 章弃稿自动出整改清单 | `python cli.py blind run --novel 1 --number 5` |
 | `skill` / `constraint` | 写作技巧 / 去AI味约束词库 | `python cli.py constraint show --agent writer` |
 | `llm` | 厂商/模型/Per-Agent 配置 | `python cli.py llm provider-add --preset deepseek` |
 | `sys` | 系统信息 / **安全备份与恢复**（SQLite 备份 API） / 重置 | `python cli.py sys backup` / `sys restore --output xx.db -y` |
@@ -388,7 +400,7 @@ uv run python run.py          # 打开 http://127.0.0.1:5000（免登录）
 
 ```bash
 uv sync --group dev
-uv run pytest            # tests/ 目录（330+ 例），独立临时数据库，不碰开发数据
+uv run pytest            # tests/ 目录（410+ 例），独立临时数据库，不碰开发数据
 ```
 
 测试覆盖：路由级接线（罗盘/意见/审批）、困惑度雷达对齐算法、收敛回滚环、一致性三查、编排器全阶段、抽取队列、写作包注入等。

@@ -52,7 +52,9 @@ def gather_recent_text(novel_id, before_chapter, tail=4000):
                 .limit(5).all())   # 多取兜底：紧邻章可能只有大纲无正文
     parts = []
     for ch in chapters:
-        if ch.versions and len(parts) < 2:   # 实际带正文的最近两章
+        if len(parts) >= 2:
+            break                     # 窗已满：不再触发后续章的 versions 懒加载
+        if ch.versions:
             text = ch.versions[-1].content or ""
             parts.append(text[-tail:])
     return "\n".join(parts)
@@ -93,3 +95,9 @@ def default_policy_for(title):
         return json.dumps({"mode": "auto"}, ensure_ascii=False)
     return json.dumps({"mode": "keywords", "keys": [(title or "").strip()]},
                       ensure_ascii=False)
+
+
+def normalize_policy_json(raw):
+    """UI 提交的 policy JSON 归一化：非法回退 auto，返回规范化 JSON 串。"""
+    p = parse_policy(raw)
+    return json.dumps(p, ensure_ascii=False)

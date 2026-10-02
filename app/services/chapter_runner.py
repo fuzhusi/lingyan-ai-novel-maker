@@ -176,14 +176,25 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
     # ---- Stage 3b: best-of-N（调研 v2 P2-C3，默认 1 = 单稿原路径）----
     # N 稿同配置独立生成，各自过确定性门禁，按人味分+可读分确定性选优。
     # 选优打分而非盲审重排（盲审成本×N，关键章由作者手动跑面板复核）。
+    variants = max(1, min(int(variants or 1), 4))   # 上限 4：成本护栏
     if variants > 1:
         try:
             candidates = [{"text": text, "human": human_score or 0,
                            "read": read_score or 0,
                            "passed": gate_passed and tone_passed and read_passed}]
             for vi in range(1, variants):
-                v_text = collect_full_text(messages, cfg_w, word_target=word_target,
-                                           scene_plan=scene_plan).strip()
+                # 温度阶梯：第 i 稿 +0.05*i（上限 1.0）——增加稿间差异，
+                # 否则同配置采样噪声不足以产生真正的选优空间
+                cfg_v = dict(cfg_w)
+                cfg_v["temperature"] = min(
+                    1.0, cfg_w.get("temperature", 0.8) + 0.05 * vi)
+                try:
+                    v_text = collect_full_text(messages, cfg_v,
+                                               word_target=word_target,
+                                               scene_plan=scene_plan).strip()
+                except Exception as exc:
+                    logger.warning("变体 %d 生成失败（跳过）: %s", vi + 1, exc)
+                    continue
                 if not v_text:
                     continue
                 v_gate = run_gate(v_text)

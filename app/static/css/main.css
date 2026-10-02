@@ -2381,3 +2381,11 @@ a.btn:not(.btn-danger):not(.btn-secondary) {
     background: var(--accent-ghost); color: var(--accent-light);
     border-color: var(--accent-dim); font-weight: 600;
 }
+
+/* policy 徽标（知识库条目注入策略非 auto 时显示） */
+.policy-badge {
+    display: inline-block; margin-left: 0.4rem; padding: 0.05rem 0.4rem;
+    border-radius: 3px; font-size: 0.72rem;
+    background: var(--accent-ghost); color: var(--accent-light);
+    border: 1px solid var(--accent-dim);
+}

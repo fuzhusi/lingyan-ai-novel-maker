@@ -74,6 +74,16 @@ def create_app():
             parts.append(f"退场第{plan['exit_chapter']}章（{plan.get('exit_mode') or '收线'}）")
         return " · ".join(parts)
 
+    # 模板过滤器：injection_policy → 徽标短文案（auto 返回空不显示）
+    @app.template_filter("policy_label")
+    def _policy_label(raw):
+        from app.services.knowledge_activation import parse_policy
+        p = parse_policy(raw)
+        if p["mode"] == "auto":
+            return ""
+        keys = ("（" + "、".join(p["keys"][:2]) + "）") if p["keys"] else ""
+        return p["mode"] + keys
+
     # 模板过滤器：剥掉章节标题自带的「第N章」前缀——模板渲染时都会自行
     # 拼章节号，AI 生成/拆书落库的标题常自带前缀，拼出「第 1 章：第1章 …」
 

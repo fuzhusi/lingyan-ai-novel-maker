@@ -2961,6 +2961,44 @@ def cmd_tone(args):
                 for ln in sample:
                     print(f"  · {ln}")
             print(f"\n耗时 {rep['elapsed']}s（诊断值仅供参考，阈值待样本积累定标）")
+        elif args.action == "predict-scan":
+            # 全书回测（决策团队方案 A）：逐章一致性落盘，分位数定标阈值
+            import json as _json
+            import statistics as _stat
+            from app.models import Chapter as _Chapter
+            from app.services.predictability import predict_consistency
+            chapters = (_Chapter.query
+                        .filter(_Chapter.novel_id == args.novel,
+                                _Chapter.chapter_number >= 2)
+                        .order_by(_Chapter.chapter_number).all())
+            if not chapters:
+                print("✗ 该书没有第 2 章起的章节")
+                return
+            points = []
+            for c in chapters:
+                rep = predict_consistency(args.novel, c.chapter_number + 1,
+                                          samples=3)
+                if rep.get("error"):
+                    print(f"  第{c.chapter_number + 1}章跳过: {rep['error']}")
+                    continue
+                points.append({"chapter": c.chapter_number + 1,
+                               "consistency": rep["consistency"]})
+                print(f"  第{c.chapter_number + 1}章: {rep['consistency']}")
+            if len(points) < 5:
+                print(f"✗ 有效样本仅 {len(points)} 个，不足以定标（需 ≥5）")
+                return
+            vals = sorted(p["consistency"] for p in points)
+            p50 = _stat.median(vals)
+            p75 = vals[int(len(vals) * 0.75)]
+            out = os.path.join("data", "calibration",
+                               f"predictability_points_novel{args.novel}.jsonl")
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            with open(out, "w", encoding="utf-8") as f:
+                for p_ in points:
+                    f.write(_json.dumps(p_, ensure_ascii=False) + "\n")
+            print(f"\n回测完成 {len(points)} 章 → {out}")
+            print(f"建议定标：高可预测线 P75={p75:.3f}，平淡分界 P50={p50:.3f}"
+                  "（当前常量 0.6/0.35，替换需人工确认）")
 
 
 def cmd_pipeline(args):
@@ -3424,7 +3462,7 @@ def main():
     p_blind.add_argument("--number", type=int, help="章节号")
     p_blind.add_argument("--version", type=int, help="章节版本 ID（缺省取最新版）")
     p_blind.add_argument("--file", help="自由文本文件路径（UTF-8，仅 run）")
-    p_blind.add_argument("--only", choices=["yafu", "baigu"], action="append",
+    p_blind.add_argument("--only", choices=["yafu", "baigu", "zhui", "guge"], action="append",
                          help="rewrite 只采纳指定编辑意见（可重复）")
     p_blind.add_argument("--out", help="rewrite 第二稿输出文件（缺省 blind_rewrite_*.md）")
 
@@ -3511,7 +3549,7 @@ def main():
     p_prefs.add_argument("--audience", help="目标读者")
 
     p_tone = subparsers.add_parser("tone", help="去AI味检测/收敛（A2 + 困惑度雷达）")
-    p_tone.add_argument("action", choices=["check", "converge", "radar", "predict"], help="操作类型")
+    p_tone.add_argument("action", choices=["check", "converge", "radar", "predict", "predict-scan"], help="操作类型")
     p_tone.add_argument("--samples", type=int, default=3, help="predict 用：独立采样次数（默认 3）")
     p_tone.add_argument("--novel", type=int, required=True, help="小说 ID")
     p_tone.add_argument("--number", type=int, required=True, help="章节号")

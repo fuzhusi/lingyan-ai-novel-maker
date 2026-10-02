@@ -1,6 +1,15 @@
 """角色管理路由：模板、CRUD、AI 生成。"""
 import json as _json
 from flask import render_template, request, redirect, url_for, jsonify
+
+
+def _redirect_back(novel_id, fallback_endpoint):
+    """容器页/旧页双入口兼容：表单带 next 时回容器对应 Tab，否则回旧页。"""
+    nxt = (request.form.get("next") or "").strip()
+    if nxt.startswith("/novel/%d/" % novel_id):
+        return redirect(nxt)
+    return redirect(url_for(fallback_endpoint, novel_id=novel_id))
+from app.services.knowledge_activation import normalize_policy_json as _normalize_policy
 from app.models import (db, Novel, Character, Chapter, ChapterVersion)
 from app.routes.knowledge import knowledge_bp
 
@@ -97,10 +106,11 @@ def create_character_from_template(novel_id):
         background=data.get("background", ""),
         motivation=data.get("motivation", ""),
         arc_direction=data.get("arc_direction", ""),
+        injection_policy=_normalize_policy(data.get("injection_policy", "")),
     )
     db.session.add(char)
     db.session.commit()
-    return redirect(url_for("knowledge.characters_page", novel_id=novel_id))
+    return _redirect_back(novel_id, "knowledge.characters_page")
 
 
 @knowledge_bp.route("/characters/ai-generate", methods=["POST"])
@@ -198,19 +208,20 @@ def create_character(novel_id):
     )
     db.session.add(char)
     db.session.commit()
-    return redirect(url_for("knowledge.characters_page", novel_id=novel_id))
+    return _redirect_back(novel_id, "knowledge.characters_page")
 
 
 @knowledge_bp.route("/characters/<int:char_id>/edit", methods=["POST"])
 def edit_character(novel_id, char_id):
     char = Character.query.get_or_404(char_id)
     for field in ["name", "personality", "speaking_style", "appearance",
-                  "background", "motivation", "arc_direction", "status_json"]:
+                  "background", "motivation", "arc_direction", "status_json",
+                  "injection_policy"]:
         val = request.form.get(field, "")
         if val:
             setattr(char, field, val)
     db.session.commit()
-    return redirect(url_for("knowledge.characters_page", novel_id=novel_id))
+    return _redirect_back(novel_id, "knowledge.characters_page")
 
 
 @knowledge_bp.route("/characters/<int:char_id>/delete", methods=["POST"])
@@ -226,7 +237,7 @@ def delete_character(novel_id, char_id):
     ).delete(synchronize_session=False)
     db.session.delete(char)
     db.session.commit()
-    return redirect(url_for("knowledge.characters_page", novel_id=novel_id))
+    return _redirect_back(novel_id, "knowledge.characters_page")
 
 
 @knowledge_bp.route("/characters/<int:char_id>/detail")

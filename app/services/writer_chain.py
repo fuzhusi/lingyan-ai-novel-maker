@@ -109,6 +109,13 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
         kw["characters"], lambda c: ka.parse_policy(c.get("injection_policy")))
     w_buckets = ka.split_modes(
         kw["world_settings"], lambda w: ka.parse_policy(w.get("injection_policy")))
+    # 无近文（第 1 章/全新书）时 keywords 永不命中——回退按 auto 处理，
+    # 否则拆书条目在第 1 章会整体消失
+    if not recent_text:
+        c_buckets["auto"] += c_buckets["keywords"]
+        w_buckets["auto"] += w_buckets["keywords"]
+        c_buckets["keywords"] = []
+        w_buckets["keywords"] = []
     # off 剔除：缺省路径生效；用户显式勾选路径完全以勾选为准（评审 P1：
     # off+勾选同存时静默丢弃会让 cast_constraint 自相矛盾）
     # keywords 条目移出主列表，名册/语义剪枝后按命中结果合并回来
