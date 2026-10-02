@@ -15,7 +15,7 @@ def foreshadowing_page(novel_id):
         {"nid": novel_id}
     ).fetchall()
     chapter_nums = [r[0] for r in chapters]
-    return render_template("foreshadowing.html", novel=novel, items=items, chapter_nums=chapter_nums)
+    return render_template("foreshadowing.html", novel=novel, active_nav="foreshadowing", items=items, chapter_nums=chapter_nums)
 
 
 @knowledge_bp.route("/foreshadowing/create", methods=["POST"])

@@ -66,3 +66,12 @@
     <p class="empty">暂无世界观设定</p>
     {% endif %}
 </div>
+<script>
+function filterCat(cat) {
+    document.querySelectorAll('.kb-filter').forEach(a => a.classList.remove('active'));
+    document.querySelector(`.kb-filter[href="#${cat}"]`)?.classList.add('active');
+    document.querySelectorAll('.kb-card').forEach(card => {
+        card.style.display = (cat === 'all' || card.dataset.category === cat) ? '' : 'none';
+    });
+}
+</script>

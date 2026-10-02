@@ -13,7 +13,6 @@ from app.routes.knowledge import foreshadowing  # noqa: F401, E402
 @knowledge_bp.route("/knowledge")
 def knowledge_page(novel_id):
     """知识库容器页：人物库/世界观/伏笔三 Tab（大纲保持独立工作台入口）。"""
-    from app import db
     from app.models import Novel, Character, WorldSetting, Foreshadowing
 
     novel = Novel.query.get_or_404(novel_id)
@@ -40,9 +39,5 @@ def knowledge_page(novel_id):
                             .order_by(Foreshadowing.status,
                                       Foreshadowing.created_at.desc())
                             .all())
-        rows = db.session.execute(
-            db.text("SELECT chapter_number FROM chapters "
-                    "WHERE novel_id = :nid ORDER BY chapter_number"),
-            {"nid": novel_id}).fetchall()
-        context["chapter_nums"] = [r[0] for r in rows]
+
     return render_template("knowledge.html", **context)

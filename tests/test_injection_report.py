@@ -121,3 +121,60 @@ def test_sse_emits_injection_report_frame(client, monkeypatch):
     inj = [f["status"] for f in frames if "status" in f
            and f["status"].get("stage") == "injection_report"]
     assert inj and inj[0]["total_chars"] == 123
+
+
+def test_runner_stages_and_version_record_carry_report(client, monkeypatch):
+    """编排器路径：injection_report 进 stages，auto_save 写入 model_params_json。"""
+    from app.routes.knowledge import characters as _  # noqa: F401  确保路由已导入
+    from app.services import chapter_runner as runner
+
+    n = Novel(title="编排观测", genre="都市", synopsis="s", world_intro="w")
+    db.session.add(n)
+    db.session.commit()
+    from app.models import Chapter
+    db.session.add(Chapter(novel_id=n.id, chapter_number=1,
+                           outline="【本章定位】推进：首章建立人物与异常。\n"
+                                   "【核心事件】1.开局事件；2.转折事件。\n"
+                                   "【结尾钩子】门外传来敲门声。"))
+    db.session.add(Character(novel_id=n.id, name="陈屿", personality="沉默寡言"))
+    db.session.commit()
+
+    body = "陈屿推开宿舍门，床上居然躺着个陌生人。" * 30   # >200 字
+    monkeypatch.setattr(runner, "collect_full_text",
+                        lambda messages, cfg, word_target=None,
+                        scene_plan=None: body)
+    monkeypatch.setattr("app.services.skill_gate.run_gate",
+                        lambda text, active_skills=None: {"passed": True, "checks": []})
+    monkeypatch.setattr("app.services.ai_metric.analyze_ai_tone",
+                        lambda text, mode="generate": {"passed": True, "human_score": 95})
+    monkeypatch.setattr(
+        "app.services.web_novel_gate.analyze_web_novel",
+        lambda text, outline="", event_count=None, is_first_chapter=False,
+        protagonist_names=None: {"passed": True, "readability_score": 95,
+                                 "checks": [], "hint": ""})
+
+    result = runner.run_chapter_pipeline(n.id, 1, auto_save=True)
+    assert "error" not in result
+    stage = next(s for s in result["stages"] if s["stage"] == "injection_report")
+    assert stage["dims"] and stage["total_chars"] > 0
+    assert "characters" in stage["sizes"]
+
+    from app.models import ChapterVersion
+    ver = ChapterVersion.query.get(result["saved_version_id"])
+    import json as _json
+    saved = _json.loads(ver.model_params_json or "{}")
+    assert saved["injection_report"]["dims"], "版本记录必须携带注入报告"
+
+
+def test_injection_report_skip_status_explicit(client):
+    """skip 状态显式断言：未配置的维度记 skipped 而非静默缺席。"""
+    n = Novel(title="跳过测试", genre="都市")
+    db.session.add(n)
+    db.session.commit()
+    kw, _ = build_writer_kwargs(n.id, 1, "【本章定位】推进。")
+    report = kw["injection_report"]
+    dims = {d["dim"]: d["status"] for d in report["dims"]}
+    for dim in ("creator_preferences", "tone_instructions"):
+        assert dim in dims, f"{dim} 必须显式登记（ok/skip/degrade 之一）"
+        assert dims[dim] in ("ok", "skipped", "degraded")
+    assert report["degraded_count"] == 0

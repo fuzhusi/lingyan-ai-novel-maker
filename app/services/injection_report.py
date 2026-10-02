@@ -50,6 +50,8 @@ class InjectionReport:
                 sizes[key] = len(val)
             else:
                 try:
+                    # 口径说明：JSON 序列化长度含键名与括号，比 prompt 渲染体积
+                    # 偏高；与 apply_context_budget._size() 同口径，横向可比
                     sizes[key] = len(json.dumps(val, ensure_ascii=False))
                 except (TypeError, ValueError):
                     sizes[key] = -1

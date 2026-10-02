@@ -11,7 +11,7 @@ def world_settings_page(novel_id):
         WorldSetting.category, WorldSetting.title
     ).all()
     categories = sorted(set(ws.category for ws in settings if ws.category))
-    return render_template("world_settings.html", novel=novel, settings=settings, categories=categories)
+    return render_template("world_settings.html", novel=novel, active_nav="world", settings=settings, categories=categories)
 
 
 @knowledge_bp.route("/world-settings/create", methods=["POST"])

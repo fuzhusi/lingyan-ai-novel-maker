@@ -305,7 +305,7 @@ def build_writer_kwargs(novel_id, chapter_number, outline,
         if anchor_ctx:
             existing = kw.get("memory_context", "")
             kw["memory_context"] = (existing + "\n\n" + anchor_ctx).strip()
-        report.ok("style_anchor" if anchor_ctx else "style_fingerprint",
+        report.ok("style_fingerprint",
                   f"锚例{len(anchor_ctx)}字" if anchor_ctx else "指纹无锚例")
     except Exception as exc:
         report.degrade("style_fingerprint", exc)

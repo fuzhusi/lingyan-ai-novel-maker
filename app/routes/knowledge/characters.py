@@ -180,7 +180,7 @@ def ai_generate_character(novel_id):
 def characters_page(novel_id):
     novel = Novel.query.get_or_404(novel_id)
     characters = Character.query.filter_by(novel_id=novel_id).order_by(Character.name).all()
-    return render_template("characters.html", novel=novel, characters=characters)
+    return render_template("characters.html", novel=novel, active_nav="characters", characters=characters)
 
 
 @knowledge_bp.route("/characters/create", methods=["POST"])
