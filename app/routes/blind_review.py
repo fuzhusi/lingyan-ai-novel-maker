@@ -113,7 +113,7 @@ def blind_run():
     except LLMError as e:
         return jsonify({"error": f"AI 调用失败：{e}"}), 502
 
-    save_blind_review(
+    saved = save_blind_review(
         kind, result, word_count=len(text),
         story_id=meta.get("story_id"), version_id=meta.get("version_id"),
         title=title,
@@ -122,6 +122,7 @@ def blind_run():
         "ok": True,
         "kind": kind, "title": title, "word_count": len(text),
         "elapsed": result["elapsed"], "editors": result["editors"],
+        "threshold": (saved or {}).get("threshold"),
     })
 
 

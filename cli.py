@@ -490,7 +490,8 @@ def cmd_chapter(args):
             result = run_chapter_pipeline(args.novel, args.number,
                                           user_directive=args.directive or "",
                                           auto_save=bool(getattr(args, "save", None)),
-                                          character_ids=cids)
+                                          character_ids=cids,
+                                          variants=max(1, int(getattr(args, "variants", 1) or 1)))
             failed = "error" in result
             # 阶段与分数无论成败都打印：门禁失败时这些诊断正是要看的
             for s in result.get("stages", []):
@@ -1815,14 +1816,22 @@ def cmd_blind(args):
             except LLMError as e:
                 print(f"✗ AI 调用失败：{e}")
                 return
-            row_id = save_blind_review(kind, result, word_count,
-                                       story_id=meta.get("story_id"),
-                                       version_id=meta.get("version_id"),
-                                       title=title or "")
+            saved = save_blind_review(kind, result, word_count,
+                                      story_id=meta.get("story_id"),
+                                      version_id=meta.get("version_id"),
+                                      title=title or "")
+            row_id = (saved or {}).get("id")
             archived = "已存档，Web 盲审工作台可回看" if row_id else "⚠ 存档失败，仅本次展示"
             hits = sum(1 for e_ in result["editors"] if e_.get("verdict") == "追读")
-            print(f"\n【双盲审完成】{title} · {word_count} 字 · 耗时 {result['elapsed']}s")
+            print(f"\n【盲审面板完成】{title} · {word_count} 字 · "
+                  f"{len(result['editors'])} 位编辑 · 耗时 {result['elapsed']}s")
             print(f"判决汇总：追读 {hits}/{len(result['editors'])} · 结果{archived}")
+            thr = (saved or {}).get("threshold")
+            if thr:
+                print(f"\n⚠ 连续 {len(thr['chapters'])} 章被弃稿"
+                      f"（第 {'、'.join(map(str, thr['chapters']))} 章）——整改清单：")
+                for item in thr["rectification"]:
+                    print(f"  · {item}")
             _blind_print(result["editors"])
             return
 
@@ -2935,6 +2944,23 @@ def cmd_tone(args):
             print("困惑度雷达：逐字复述→逐句 ppl，定位选词过于可预测的句子…")
             report = analyze_perplexity(text, cfg)
             print(format_radar_report(report))
+        elif args.action == "predict":
+            # 可预测率（调研 v2 P2-C4，100-Endings 低成本变体）：N 次独立预测
+            # 下一章走向，两两重合度越高=越可预测=平淡风险信号（advisory 诊断）
+            from app.services.predictability import predict_consistency
+            print(f"可预测率测试：预测第{args.number + 1}章走向，独立采样 "
+                  f"{getattr(args, 'samples', 3) or 3} 次…")
+            rep = predict_consistency(args.novel, args.number,
+                                      samples=args.samples or 3)
+            if rep.get("error"):
+                print(f"✗ {rep['error']}")
+                return
+            print(f"一致性 {rep['consistency']}（0-1，越高越可预测）——{rep['verdict']}")
+            for i, sample in enumerate(rep["samples"], 1):
+                print(f"\n— 采样 {i} —")
+                for ln in sample:
+                    print(f"  · {ln}")
+            print(f"\n耗时 {rep['elapsed']}s（诊断值仅供参考，阈值待样本积累定标）")
 
 
 def cmd_pipeline(args):
@@ -3264,6 +3290,7 @@ def main():
     p_chapter.add_argument("--length", type=int, help="预览长度")
     p_chapter.add_argument("--character-ids", dest="character_ids", help="本章出场角色 ID（逗号分隔，pipeline 用）；缺省=全部角色，传空串=不注入角色档案")
     p_chapter.add_argument("--dry-run", action="store_true", help="pipeline 时仅检查流程，不调用 LLM")
+    p_chapter.add_argument("--variants", type=int, default=1, help="pipeline 生成 N 稿按门禁分选优（best-of-N，默认 1）")
     p_chapter.add_argument("-y", "--yes", action="store_true", help="跳过删除确认")
 
     # ========== 角色 ==========
@@ -3483,7 +3510,8 @@ def main():
     p_prefs.add_argument("--audience", help="目标读者")
 
     p_tone = subparsers.add_parser("tone", help="去AI味检测/收敛（A2 + 困惑度雷达）")
-    p_tone.add_argument("action", choices=["check", "converge", "radar"], help="操作类型")
+    p_tone.add_argument("action", choices=["check", "converge", "radar", "predict"], help="操作类型")
+    p_tone.add_argument("--samples", type=int, default=3, help="predict 用：独立采样次数（默认 3）")
     p_tone.add_argument("--novel", type=int, required=True, help="小说 ID")
     p_tone.add_argument("--number", type=int, required=True, help="章节号")
     p_tone.add_argument("--save", action="store_true", help="收敛时直接保存为新版本")

@@ -161,7 +161,7 @@
         return editors.map(e => `
             <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:0.9rem">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
-                    <strong style="color:${e.key === 'yafu' ? 'var(--accent)' : 'var(--gold)'}">${escapeHtml(e.name)}</strong>
+                    <strong style="color:${(e.color || (e.key === 'yafu' ? 'var(--accent)' : 'var(--gold)'))}">${escapeHtml(e.name)}</strong>
                     ${verdictChip(e.verdict)}
                 </div>
                 <pre style="white-space:pre-wrap;font-size:0.85rem;line-height:1.7;color:var(--text-bright);margin:0">${escapeHtml(e.review || '')}</pre>

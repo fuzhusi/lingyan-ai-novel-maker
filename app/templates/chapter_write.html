@@ -398,7 +398,7 @@
         // 双盲审文本报告（两编辑并排）
         let blindHtml = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0.6rem;margin-bottom:0.8rem">';
         for (const e of (report.blind_reviews || [])) {
-            const color = e.key === 'yafu' ? 'var(--accent)' : 'var(--gold)';
+            const color = (e.color || (e.key === 'yafu' ? 'var(--accent)' : 'var(--gold)'));
             let chip = '<span style="color:var(--text-faint);font-size:0.75rem">未判决</span>';
             if (e.verdict === '追读') chip = '<span style="background:var(--success);color:var(--bg);padding:0.05rem 0.45rem;border-radius:4px;font-size:0.72rem;font-weight:700">追读</span>';
             if (e.verdict === '弃稿') chip = '<span style="background:var(--danger);color:var(--bg);padding:0.05rem 0.45rem;border-radius:4px;font-size:0.72rem;font-weight:700">弃稿</span>';
@@ -1423,7 +1423,7 @@
 
     function renderBlindEditors(editors) {
         return (editors || []).map(e => {
-            const color = e.key === 'yafu' ? 'var(--accent)' : 'var(--gold)';
+            const color = (e.color || (e.key === 'yafu' ? 'var(--accent)' : 'var(--gold)'));
             let chip = '<span style="color:var(--text-faint);font-size:0.75rem">未判决</span>';
             if (e.verdict === '追读') chip = '<span style="background:var(--success);color:var(--bg);padding:0.05rem 0.45rem;border-radius:4px;font-size:0.75rem;font-weight:700">追读</span>';
             if (e.verdict === '弃稿') chip = '<span style="background:var(--danger);color:var(--bg);padding:0.05rem 0.45rem;border-radius:4px;font-size:0.75rem;font-weight:700">弃稿</span>';

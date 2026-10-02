@@ -253,7 +253,7 @@ class TestUnifiedReviewStream:
 
         with patch.object(br, "call_llm_auto", side_effect=fake_llm):
             result = br.run_dual_review("正文内容……")
-        assert len(calls) == 2  # 两位编辑 = 两次独立请求
+        assert len(calls) == 4  # 四人格面板 = 四次独立请求
         keys = [e["key"] for e in result["editors"]]
-        assert len(set(keys)) == 2  # 两位不同编辑（阎浮/白骨）
+        assert len(set(keys)) == 4  # 阎浮/白骨/快嘴/骨架师
         assert all(e["verdict"] == "追读" for e in result["editors"])

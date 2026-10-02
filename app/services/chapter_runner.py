@@ -26,7 +26,7 @@ _MIN_OUTLINE_CHARS = 50
 def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
                          auto_save=False, converge=True,
                          word_target=CHAPTER_WORD_TARGET,
-                         character_ids=None):
+                         character_ids=None, variants=1):
     """一键本章流水线。
 
     character_ids: 本章出场角色 id 列表；None=全部角色（缺省），[]=不注入角色档案。
@@ -172,6 +172,59 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
     gate_passed = bool(gate.get("passed"))
     tone_passed = bool(tone.get("passed"))
     read_passed = bool(readability.get("passed"))
+
+    # ---- Stage 3b: best-of-N（调研 v2 P2-C3，默认 1 = 单稿原路径）----
+    # N 稿同配置独立生成，各自过确定性门禁，按人味分+可读分确定性选优。
+    # 选优打分而非盲审重排（盲审成本×N，关键章由作者手动跑面板复核）。
+    if variants > 1:
+        try:
+            candidates = [{"text": text, "human": human_score or 0,
+                           "read": read_score or 0,
+                           "passed": gate_passed and tone_passed and read_passed}]
+            for vi in range(1, variants):
+                v_text = collect_full_text(messages, cfg_w, word_target=word_target,
+                                           scene_plan=scene_plan).strip()
+                if not v_text:
+                    continue
+                v_gate = run_gate(v_text)
+                v_tone = analyze_ai_tone(v_text)
+                v_read = analyze_web_novel(
+                    v_text, outline=outline_for_write or "",
+                    event_count=len(events),
+                    is_first_chapter=(chapter_number == 1),
+                    protagonist_names=protagonist_names)
+                candidates.append({
+                    "text": v_text,
+                    "human": v_tone.get("human_score") or 0,
+                    "read": v_read.get("readability_score") or 0,
+                    "passed": (bool(v_gate.get("passed"))
+                               and bool(v_tone.get("passed"))
+                               and bool(v_read.get("passed"))),
+                })
+            passing = [c for c in candidates if c["passed"]] or candidates
+            best = max(passing, key=lambda c: (c["human"] or 0) + (c["read"] or 0))
+            stages.append({"stage": "variants", "ok": True,
+                           "count": len(candidates),
+                           "candidates": [{k: v for k, v in c.items() if k != "text"}
+                                          for c in candidates]})
+            if best["text"] != text:
+                text = best["text"]
+                # 门禁分对最终稿重算（后续收敛/审计对最终稿进行）
+                gate = run_gate(text)
+                tone = analyze_ai_tone(text)
+                readability = analyze_web_novel(
+                    text, outline=outline_for_write or "",
+                    event_count=len(events),
+                    is_first_chapter=(chapter_number == 1),
+                    protagonist_names=protagonist_names)
+                human_score = tone.get("human_score")
+                read_score = readability.get("readability_score")
+                gate_passed = bool(gate.get("passed"))
+                tone_passed = bool(tone.get("passed"))
+                read_passed = bool(readability.get("passed"))
+        except Exception as e:
+            stages.append({"stage": "variants", "ok": False, "error": str(e)[:200]})
+
     stages.append({"stage": "gates", "ok": gate_passed and tone_passed and read_passed,
                    "gate_passed": gate.get("passed"),
                    "human_score": human_score,

@@ -85,7 +85,43 @@ EDITOR_B = {
     ),
 }
 
-EDITORS = [EDITOR_A, EDITOR_B]
+EDITOR_C = {
+    "key": "zhui",
+    "name": "追更读者 · 快嘴",
+    "color": "var(--success)",
+    "system": (
+        "你是番茄/起点免费榜的日均十万字重度读者，外号「快嘴」——你的弃书速度"
+        "全场最快，三个月里弃了两百多本书，每一本你都记得为什么弃。\n"
+        "你只关心三件事：这一章我爽到了没有（期待有没有被兑现）；我累不累"
+        "（有没有大段看不懂、记不住的设定灌水）；章末我有没有非点下一章不可"
+        "的理由。\n"
+        "你的毒点清单：主角降智、圣母送人头、压抑超过两章还不释放、断章断在"
+        "毫无悬念的地方、人物说话像开会。\n"
+        "你不懂文学理论，别用术语；用读者的原话骂——「这段我直接划走了」"
+        "「这主角蠢得我想卸载」。\n"
+        + _COMMON_RULES + _OUTPUT_CONTRACT
+    ),
+}
+
+EDITOR_D = {
+    "key": "guge",
+    "name": "骨架师 · 结构编辑",
+    "color": "var(--danger)",
+    "system": (
+        "你是出版社的结构编辑，外号「骨架师」——你不读句子先读骨架：把人物和"
+        "事件全部抽掉，看剩下的结构还立不立得住。\n"
+        "你只关心四件事：场景有没有价值翻转（开头结尾的状态必须不同）；冲突"
+        "是否在升级而非原地重复（打过一场的架不许再打一场同级别的）；承诺与"
+        "兑现的账目（埋了没响、响了没埋都是账务事故）；每章结尾的决断——人物"
+        "这一章做没做出不可撤回的选择。\n"
+        "你的致命伤格式：先画这一章的骨架图（谁想要什么→谁拦→结果状态变化），"
+        "再指出断在哪一节。\n"
+        "你不评价文笔好坏——那是白骨的活。你只管骨头。"
+        + _COMMON_RULES + _OUTPUT_CONTRACT
+    ),
+}
+
+EDITORS = [EDITOR_A, EDITOR_B, EDITOR_C, EDITOR_D]
 
 
 def build_editor_messages(editor_system, content):
@@ -97,7 +133,7 @@ def build_editor_messages(editor_system, content):
     ]
 
 
-def run_dual_review(content, novel=None):
+def run_dual_review(content, novel=None, editor_keys=None):
     """并行跑两位编辑，返回 {editors: [...], elapsed: 秒}。
 
     每个线程各自挂 app context（配置解析需要查询数据库）。
@@ -124,12 +160,15 @@ def run_dual_review(content, novel=None):
             )
             review = (text or "").strip()
             return {"key": editor["key"], "name": editor["name"],
+                    "color": editor.get("color", ""),
                     "verdict": extract_verdict(review),
                     "review": review}
 
     started = time.time()
-    with ThreadPoolExecutor(max_workers=len(EDITORS)) as pool:
-        results = list(pool.map(_run_one, EDITORS))
+    editors = (EDITORS if not editor_keys
+               else [e for e in EDITORS if e["key"] in editor_keys])
+    with ThreadPoolExecutor(max_workers=len(editors)) as pool:
+        results = list(pool.map(_run_one, editors))
     return {"editors": results, "elapsed": round(time.time() - started, 1)}
 
 
@@ -231,9 +270,60 @@ def run_rewrite(content, reviews, writer_agent="short_story"):
 # 持久化 —— 独立 BlindReview 表，不建迁移（init_db create_all 自动建表）
 # ---------------------------------------------------------------------------
 
+def threshold_check(kind, version_id):
+    """阈值线（autonovel 模式）：连续 3 章任一编辑弃稿 → 整改清单。
+
+    仅长篇章节维度（kind="chapter" 且 version_id 可回溯章节）。
+    返回 None（未触发/不可判定）或
+    {"chapters": [章号...], "rectification": ["第N章：只准改一处内容", ...]}。
+    """
+    if kind != "chapter" or not version_id:
+        return None
+    from app.models import db, BlindReview, ChapterVersion
+    ver = db.session.get(ChapterVersion, version_id)
+    if ver is None or ver.chapter is None:
+        return None
+    novel_id = ver.chapter.novel_id
+    cur = ver.chapter.chapter_number
+
+    rows = (BlindReview.query.filter_by(kind="chapter")
+            .order_by(BlindReview.id.desc()).limit(120).all())
+    per_chapter = {}
+    for r in rows:
+        if not r.version_id:
+            continue
+        v = db.session.get(ChapterVersion, r.version_id)
+        if v is None or v.chapter is None or v.chapter.novel_id != novel_id:
+            continue
+        cn = v.chapter.chapter_number
+        if cn > cur:
+            continue
+        per_chapter.setdefault(cn, r)
+    recent_nums = sorted((cn for cn in per_chapter if cn <= cur), reverse=True)[:3]
+    if len(recent_nums) < 3 or recent_nums != list(
+            range(cur, cur - 3, -1)):
+        return None   # 不足三章或章号不连续（断更/跳章不误报）
+    low, rectification = [], []
+    for cn in recent_nums:
+        r = per_chapter[cn]
+        editors = json.loads(r.editors_json or "[]")
+        renegades = [e for e in editors if e.get("verdict") == "弃稿"]
+        if not renegades:
+            continue
+        low.append(cn)
+        m = re.search(r"【只准改一处】(.+?)(?=\n【|\Z)",
+                      (renegades[0].get("review") or ""), re.S)
+        if m:
+            rectification.append(f"第{cn}章：" +
+                                 " ".join(m.group(1).split())[:150])
+    if len(low) < 3:
+        return None
+    return {"chapters": recent_nums, "rectification": rectification}
+
+
 def save_blind_review(kind, result, word_count, story_id=None,
                       version_id=None, title=""):
-    """盲审结果落库。返回 BlindReview 行 id；失败只告警不抛出。"""
+    """盲审结果落库。返回 {"id", "threshold"}；失败返回 {"id": None}。"""
     from app.models import db, BlindReview
     try:
         row = BlindReview(
@@ -247,7 +337,23 @@ def save_blind_review(kind, result, word_count, story_id=None,
         )
         db.session.add(row)
         db.session.commit()
-        return row.id
+        thr = threshold_check(kind, version_id)
+        if thr:
+            # 阈值触发进跨章 Reflexion：下一章主动按整改清单避坑
+            try:
+                from app.models import ChapterVersion
+                from app.services.reflexion import add_reflexion_note
+                ver = db.session.get(ChapterVersion, version_id)
+                novel_id = ver.chapter.novel_id if ver and ver.chapter else None
+                if novel_id:
+                    add_reflexion_note(
+                        novel_id, ver.chapter.chapter_number,
+                        "连续三章被弃稿，整改清单："
+                        + "；".join(thr["rectification"]),
+                        source="blind_threshold")
+            except Exception:
+                logger.warning("阈值整改清单写 Reflexion 失败", exc_info=True)
+        return {"id": row.id, "threshold": thr}
     except Exception:
         logger.exception("blind_review: 保存盲审结果失败 (kind=%s)", kind)
         db.session.rollback()
