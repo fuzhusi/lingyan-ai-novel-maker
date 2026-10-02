@@ -354,15 +354,15 @@ uv run python run.py          # 打开 http://127.0.0.1:5000（免登录）
 | `LINGYAN_DEBUG` | `0` | 调试模式（仅显式 =1 开启） |
 | `LINGYAN_INSECURE_SSL` | `0` | =1 时跳过 LLM 接口证书校验（仅公网自签域需要） |
 | `MAX_UPLOAD_MB` | `50` | 上传文件大小上限 |
-| `DATABASE_PATH` | `data.db` | 数据库文件路径（支持覆盖，测试/多实例用） |
+| `DATABASE_PATH` | `data/data.db` | 数据库文件路径（支持覆盖，测试/多实例用；旧根目录 data.db 首次启动自动迁移） |
 | `LINGYAN_ALLOWED_HOSTS` | （空） | 额外放行的 Host 域名（反代域名部署用；localhost/IP 直连默认放行，其他域名 403） |
 
 ---
 
 ## 💾 数据与备份
 
-- 全部数据（小说/章节/记忆/配置/厂商）都在 `data.db` 单文件里，直接拷贝即备份
-- 数据库已启用 **WAL 模式**（读写并发友好）；注意 WAL 下运行中裸拷贝 `data.db` 会缺 `-wal` 附属文件导致快照不完整
+- 全部数据（小说/章节/记忆/配置/厂商）都在 `data/data.db` 单文件里（2026-10 起统一收纳进 data/ 目录），直接拷贝即备份
+- 数据库已启用 **WAL 模式**（读写并发友好）；注意 WAL 下运行中裸拷贝 `data/data.db` 会缺 `-wal` 附属文件导致快照不完整
 - CLI 提供安全备份与恢复：`python cli.py sys backup`（走 SQLite 备份 API，WAL/并发下也是完整快照，优于裸文件拷贝）；`python cli.py sys restore --output 备份文件.db -y` 原地覆盖恢复（无需停服，服务重启后生效）。注意备份文件内含 LLM 厂商 API key，勿分享/入库
 - 运行日志写入 `logs/lingyan.log`（轮转保留 3 份）；未捕获异常统一记录堆栈，前端得到友好错误页
 - 开发库与测试库隔离：测试自动用 `.tmp-test/test.db`，`pytest` 永远不碰你的写作数据
@@ -442,7 +442,7 @@ A：设置 → 模型配置 → 添加厂商（13 家预设）→ 填 key → �
 A：不会。CLI 复用 Web 同一套服务层（`app/services/`），不是各写一套；Web/MCP/CLI 三入口共用审批、抽取、门禁等核心逻辑。
 
 **Q：数据会丢吗？**
-A：开发库是 `data.db`，测试永远不碰它；建议每天 `python cli.py sys backup`。数据库可重建（自动建表 + 迁移），但写作数据不可再生——备份习惯要养。
+A：开发库是 `data/data.db`，测试永远不碰它；建议每天 `python cli.py sys backup`。数据库可重建（自动建表 + 迁移），但写作数据不可再生——备份习惯要养。
 
 ---
 

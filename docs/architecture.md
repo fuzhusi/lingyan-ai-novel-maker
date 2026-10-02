@@ -29,7 +29,7 @@
 | 语言 | Python 3.14 | — |
 | Web 框架 | Flask | app factory 模式 |
 | ORM | Flask-SQLAlchemy | — |
-| 数据库 | SQLite | `data.db` 单文件 + FTS5 |
+| 数据库 | SQLite | `data/data.db` 单文件 + FTS5 |
 | AI 接口 | DeepSeek V4 API | OpenAI 兼容协议 |
 | HTTP 客户端 | httpx | SSL 容错，SSE streaming |
 | 前端 | Jinja2 + 原生 JS | 响应式 CSS |
@@ -48,7 +48,7 @@ Ai novel system/
 ├── cli.py                          # CLI 工具 (27 命令组，免登录)
 ├── mcp_server.py                   # MCP Server (27 工具)
 ├── .env                            # API 配置
-├── data.db                         # SQLite 数据库
+├── data/                           # 数据目录（data.db + 备份）
 │
 └── app/
     ├── __init__.py                 # Flask app 工厂 (25 blueprints)
@@ -335,7 +335,7 @@ DEEPSEEK_API_KEY=sk-xxx
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 MODEL_NAME=deepseek-v4-pro
 SECRET_KEY=dev-secret-key
-DATABASE_PATH=data.db
+DATABASE_PATH=data/data.db
 ```
 
 ---
@@ -448,4 +448,4 @@ python mcp_server.py
 - **数据库迁移：** 自动 `ALTER TABLE` 在 `init_db()` 中
 - **错误处理：** 所有 AI 调用有 try-except，返回 JSON 错误
 - **单用户免登录：** 认证已禁用，`g.user` 恒为默认管理员
-- **重置：** `python cli.py sys reset` 或手动删除 `data.db`
+- **重置：** `python cli.py sys reset` 或手动删除 `data/data.db`

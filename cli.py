@@ -2995,7 +2995,7 @@ def _resolve_db_path():
     uri = app.config.get("SQLALCHEMY_DATABASE_URI", "")
     if uri.startswith("sqlite:///"):
         return uri.replace("sqlite:///", "", 1)
-    return "data.db"
+    return os.path.join("data", "data.db")
 
 
 def cmd_sys(args):
@@ -3028,7 +3028,8 @@ def cmd_sys(args):
                 print(f"✗ 数据库不存在: {db_path}")
                 return
             if not args.output:
-                args.output = f"data_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+                args.output = os.path.join("data", f"data_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
+                os.makedirs("data", exist_ok=True)
             if os.path.exists(args.output):
                 print(f"✗ 目标文件已存在，拒绝覆盖: {args.output}")
                 return
@@ -3114,7 +3115,7 @@ def cmd_sys(args):
             PlagiarizeTask.query.delete()
             db.session.commit()
             print("✓ 业务数据已清空（保留配置）")
-            print("  提示: 如需彻底重置含配置，请删除 data.db 后重启")
+            print("  提示: 如需彻底重置含配置，请删除 data/data.db 后重启")
 
 
 # ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **语言：** Python 3.14
 - **包管理：** uv (pyproject.toml + uv.lock)
 - **虚拟环境：** `.venv/` (uv 自动管理)
-- **数据库：** SQLite (`data.db`)
+- **数据库：** SQLite (`data/data.db`)
 - **AI 接口：** LangChain + OpenAI 兼容协议（支持 DeepSeek / OpenAI / Ollama / 自定义厂商）
 
 激活虚拟环境：
@@ -416,7 +416,7 @@ python cli.py sys sample-data         # 加载示例小说（对齐 Web 一键�
 
 - `.env` - API Key、Base URL、模型名称
 - `pyproject.toml` - 项目配置和依赖 (uv)
-- `data.db` - SQLite 数据库 (自动创建)
+- `data/data.db` - SQLite 数据库 (自动创建)
 - `docs/README.md` - 文档索引（导航到所有文档）
 - `docs/architecture.md` - 架构详细文档
 - `docs/technical-design.md` - 技术设计文档（含数据库 DDL、API 接口）
