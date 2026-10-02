@@ -79,9 +79,11 @@
     <!-- 第二稿 -->
     <div id="rewrite-panel" class="sidebar-card" style="display:none;margin-bottom:1rem">
         <h3>返还 Writer · 生成第二稿</h3>
-        <div style="display:flex;gap:1rem;font-size:0.84rem;margin-bottom:0.5rem">
-            <label><input type="checkbox" id="inc-yafu" checked> 采纳 阎浮 的意见</label>
-            <label><input type="checkbox" id="inc-baigu" checked> 采纳 白骨 的意见</label>
+        <div style="display:flex;gap:1rem;font-size:0.84rem;margin-bottom:0.5rem;flex-wrap:wrap">
+            <label><input type="checkbox" class="inc-editor" value="yafu" checked> 采纳 阎浮 的意见</label>
+            <label><input type="checkbox" class="inc-editor" value="baigu" checked> 采纳 白骨 的意见</label>
+            <label><input type="checkbox" class="inc-editor" value="zhui" checked> 采纳 快嘴 的意见</label>
+            <label><input type="checkbox" class="inc-editor" value="guge" checked> 采纳 骨架师 的意见</label>
         </div>
         <button id="btn-rewrite" class="btn-primary btn-sm" style="width:100%">按采纳的审评生成第二稿</button>
         <div id="rewrite-status" style="font-size:0.82rem;color:var(--text-dim);margin-top:0.4rem"></div>
@@ -196,7 +198,8 @@
 
     $('btn-rewrite').onclick = async function() {
         if (!lastRun) return;
-        const include = ['yafu', 'baigu'].filter(k => $('inc-' + k)?.checked);
+        const include = Array.from(document.querySelectorAll('.inc-editor'))
+            .filter(cb => cb.checked).map(cb => cb.value);
         if (!include.length) { $('rewrite-status').textContent = '至少采纳一位编辑的意见'; return; }
         $('btn-rewrite').disabled = true;
         $('rewrite-status').textContent = 'Writer 正在按审评意见写第二稿……';

@@ -12,6 +12,8 @@ from app.models.novel import outline_hash_of
 
 logger = logging.getLogger(__name__)
 
+from app.services.llm import call_llm_sync, LLMError
+
 _EVENT_SYSTEM = (
     "你是小说章节的事件规划编辑。从给定大纲提炼本章必须推进的 2-4 个事件。"
     "每个事件写清：目标（谁要什么、可量化）、冲突（谁/什么拦他）、"
@@ -26,7 +28,6 @@ def extract_events_from_outline(outline, cfg, max_events=4):
     outline = (outline or "").strip()
     if len(outline) < 40 or not cfg:
         return []
-    from app.services.llm import call_llm_sync, LLMError
     try:
         raw = call_llm_sync(
             model=cfg["model_name"],

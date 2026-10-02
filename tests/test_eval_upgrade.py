@@ -221,3 +221,65 @@ def test_best_of_n_selects_higher_score(client, monkeypatch):
     assert stage["count"] == 2
     assert stage["candidates"][1]["human"] == 95      # 强稿分数被识别
     assert result["text"].startswith("强稿")           # 选优采纳强稿
+
+
+# ---------------------------------------------------------------------------
+# 评审盲区补齐
+# ---------------------------------------------------------------------------
+
+def test_threshold_check_gap_chapters_no_false_positive(client):
+    """断更/跳章（评 1、2、5 章，缺 3/4）→ 不触发（章号必须连续）。"""
+    n = Novel(title="断更测试", genre="都市")
+    db.session.add(n)
+    db.session.commit()
+    for num, verdict in [(1, "弃稿"), (2, "弃稿"), (5, "弃稿")]:
+        _mk_chapter_with_review(client, n.id, num, verdict)
+    ver5 = (ChapterVersion.query.join(Chapter)
+            .filter(Chapter.novel_id == n.id, Chapter.chapter_number == 5)
+            .first())
+    assert threshold_check("chapter", ver5.id) is None
+    BlindReview.query.filter(BlindReview.kind == "chapter").delete()
+    db.session.commit()
+
+
+def test_best_of_n_all_fail_falls_back_to_best_score(client, monkeypatch):
+    """两稿都未过门禁：仍按分数在候选中回退选优（不返回空正文）。"""
+    n = Novel(title="全败选优", genre="都市", synopsis="s", world_intro="w")
+    db.session.add(n)
+    db.session.commit()
+    db.session.add(Chapter(novel_id=n.id, chapter_number=1,
+                           outline="【本章定位】推进：开局建立人物与异常，全败回退回归。\n"
+                                   "【本章契约】他要什么：查明短信来源；谁拦他：无线索；"
+                                   "不做成会失去什么：主动权。\n"
+                                   "【核心事件】1.开局事件；2.转折事件。\n"
+                                   "【场景节拍】1.宿舍收到短信；2.操场对峙。\n"
+                                   "【结尾钩子】短信署名是个从未见过的名字。"))
+    db.session.commit()
+    texts = iter(["平庸稿。" * 60, "更差稿。" * 60])
+
+    def fake_collect(messages, cfg, word_target=None, scene_plan=None):
+        return next(texts)
+
+    monkeypatch.setattr(runner, "collect_full_text", fake_collect)
+    monkeypatch.setattr("app.services.skill_gate.run_gate",
+                        lambda text, active_skills=None: {"passed": False, "checks": []})
+    human = {"平庸": 70, "更差": 40}
+    monkeypatch.setattr(
+        "app.services.ai_metric.analyze_ai_tone",
+        lambda text, mode="generate": {"passed": False,
+                                       "human_score": human.get(text[:2], 40)})
+    monkeypatch.setattr(
+        "app.services.web_novel_gate.analyze_web_novel",
+        lambda text, outline="", event_count=None, is_first_chapter=False,
+        protagonist_names=None: {"passed": False, "readability_score": 50,
+                                 "checks": [], "hint": ""})
+    monkeypatch.setattr("app.services.tone_convergence.converge_tone",
+                        lambda text, cfg, max_rounds=2, outline="": {
+                            "converged": False, "text": text, "rounds": [],
+                            "final_score": 40, "original_score": 40})
+
+    result = runner.run_chapter_pipeline(n.id, 1, auto_save=False, converge=False,
+                                         variants=2)
+    stage = next(s for s in result["stages"] if s["stage"] == "variants")
+    assert stage["count"] == 2
+    assert result["text"].startswith("平庸稿")   # 全败时仍选分高者，不返回空

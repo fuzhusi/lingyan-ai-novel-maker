@@ -290,6 +290,7 @@ def _merge_report(critic_result, blind_result):
         "critic_comment": critic_comment,
         "blind_reviews": [
             {"key": e.get("key"), "name": e.get("name"),
+             "color": e.get("color", ""),
              "verdict": e.get("verdict"), "review": e.get("review")}
             for e in blind_editors
         ],

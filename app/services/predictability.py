@@ -80,11 +80,14 @@ def predict_consistency(novel_id, chapter_number, samples=3):
         return _parse_lines(text)
 
     started = time.time()
-    try:
-        with ThreadPoolExecutor(max_workers=samples) as pool:
-            results = list(pool.map(one_run, range(samples)))
-    except LLMError as e:
-        return {"error": f"预测调用失败: {e}"}
+    results = []
+    with ThreadPoolExecutor(max_workers=samples) as pool:
+        futures = [pool.submit(one_run, i) for i in range(samples)]
+        for fut in futures:
+            try:
+                results.append(fut.result())
+            except LLMError as e:
+                logger.warning("预测采样失败（跳过该样本）: %s", e)
     results = [r for r in results if r]
     if len(results) < 2:
         return {"error": "有效预测样本不足"}

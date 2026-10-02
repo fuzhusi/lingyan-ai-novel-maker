@@ -167,6 +167,9 @@ def run_dual_review(content, novel=None, editor_keys=None):
     started = time.time()
     editors = (EDITORS if not editor_keys
                else [e for e in EDITORS if e["key"] in editor_keys])
+    if not editors:
+        # 全未知/空子集：早退返回空面板（防 max_workers=0 ValueError）
+        return {"editors": [], "elapsed": 0.0}
     with ThreadPoolExecutor(max_workers=len(editors)) as pool:
         results = list(pool.map(_run_one, editors))
     return {"editors": results, "elapsed": round(time.time() - started, 1)}
@@ -279,25 +282,26 @@ def threshold_check(kind, version_id):
     """
     if kind != "chapter" or not version_id:
         return None
-    from app.models import db, BlindReview, ChapterVersion
+    from app.models import db, BlindReview, ChapterVersion, Chapter
     ver = db.session.get(ChapterVersion, version_id)
     if ver is None or ver.chapter is None:
         return None
     novel_id = ver.chapter.novel_id
     cur = ver.chapter.chapter_number
 
-    rows = (BlindReview.query.filter_by(kind="chapter")
-            .order_by(BlindReview.id.desc()).limit(120).all())
+    rows = (BlindReview.query
+            .filter_by(kind="chapter")
+            .join(ChapterVersion, BlindReview.version_id == ChapterVersion.id)
+            .join(Chapter, ChapterVersion.chapter_id == Chapter.id)
+            .filter(Chapter.novel_id == novel_id, Chapter.chapter_number <= cur)
+            .order_by(BlindReview.id.desc())
+            .limit(60).all())
     per_chapter = {}
     for r in rows:
-        if not r.version_id:
-            continue
         v = db.session.get(ChapterVersion, r.version_id)
-        if v is None or v.chapter is None or v.chapter.novel_id != novel_id:
+        if v is None or v.chapter is None:
             continue
         cn = v.chapter.chapter_number
-        if cn > cur:
-            continue
         per_chapter.setdefault(cn, r)
     recent_nums = sorted((cn for cn in per_chapter if cn <= cur), reverse=True)[:3]
     if len(recent_nums) < 3 or recent_nums != list(
@@ -346,11 +350,11 @@ def save_blind_review(kind, result, word_count, story_id=None,
                 ver = db.session.get(ChapterVersion, version_id)
                 novel_id = ver.chapter.novel_id if ver and ver.chapter else None
                 if novel_id:
-                    add_reflexion_note(
-                        novel_id, ver.chapter.chapter_number,
-                        "连续三章被弃稿，整改清单："
-                        + "；".join(thr["rectification"]),
-                        source="blind_threshold")
+                    # _LESSON_MAX_CHARS=120 会截长清单——按章拆条逐条写
+                    for item in thr["rectification"]:
+                        add_reflexion_note(novel_id, ver.chapter.chapter_number,
+                                           item[:120],
+                                           source="blind_threshold")
             except Exception:
                 logger.warning("阈值整改清单写 Reflexion 失败", exc_info=True)
         return {"id": row.id, "threshold": thr}
