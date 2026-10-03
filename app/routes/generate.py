@@ -188,6 +188,7 @@ def outline_stream():
             "characters": ctx["characters"],
             "summaries": ctx["summaries"],
             "foreshadowing_items": ctx["foreshadowing_items"],
+            "prev_ending": ctx.get("prev_ending", ""),
             "author_intent": ctx["author_intent"],
             "current_focus": ctx["current_focus"],
             "world_settings": ctx["world_settings"],

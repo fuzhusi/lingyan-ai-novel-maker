@@ -2902,6 +2902,21 @@ def cmd_tone(args):
     with app.app_context():
         from app.services.ai_metric import analyze_ai_tone
         from app.config_utils import get_effective_config
+        # 全书扫描类子命令：不需要 --number，提前分发（下方的 ch 检查跳过）
+        if getattr(args, "action", "") == "continuity":
+            from app.services.continuity_scan import scan_novel
+            rep = scan_novel(args.novel,
+                             samples_limit=getattr(args, "samples", 0) or 0)
+            if rep["pairs"] == 0:
+                print("无待测配对（全部已扫描或无正文）")
+                return
+            print("\n===== 连续性扫描 =====")
+            print(f"配对 {rep['pairs']} · 结尾类型 {rep['ending_types']}")
+            print(f"承接 {rep['catches']} · 连续性均值 {rep['continuity_avg']}")
+            if rep.get("alert"):
+                print(f"⚠ {rep['alert']}")
+            print(f"明细见 data/calibration/continuity_novel{args.novel}.jsonl")
+            return
         ch = Chapter.query.filter_by(novel_id=args.novel, chapter_number=args.number).first()
         if not ch:
             print(f"✗ 第{args.number}章不存在")
@@ -2999,6 +3014,20 @@ def cmd_tone(args):
             print(f"\n回测完成 {len(points)} 章 → {out}")
             print(f"建议定标：高可预测线 P75={p75:.3f}，平淡分界 P50={p50:.3f}"
                   "（当前常量 0.6/0.35，替换需人工确认）")
+        elif args.action == "continuity":
+            # 跨章连续性扫描（调研 v2，观测工具）：钩子接住率/张力连续性
+            from app.services.continuity_scan import scan_novel
+            rep = scan_novel(args.novel,
+                             samples_limit=getattr(args, "samples", 0) or 0)
+            if rep["pairs"] == 0:
+                print("无待测配对（全部已扫描或无正文）")
+                return
+            print("\n===== 连续性扫描 =====")
+            print(f"配对 {rep['pairs']} · 结尾类型 {rep['ending_types']}")
+            print(f"承接 {rep['catches']} · 连续性均值 {rep['continuity_avg']}")
+            if rep.get("alert"):
+                print(f"⚠ {rep['alert']}")
+            print(f"明细见 data/calibration/continuity_novel{args.novel}.jsonl")
 
 
 def cmd_pipeline(args):
@@ -3549,10 +3578,10 @@ def main():
     p_prefs.add_argument("--audience", help="目标读者")
 
     p_tone = subparsers.add_parser("tone", help="去AI味检测/收敛（A2 + 困惑度雷达）")
-    p_tone.add_argument("action", choices=["check", "converge", "radar", "predict", "predict-scan"], help="操作类型")
+    p_tone.add_argument("action", choices=["check", "converge", "radar", "predict", "predict-scan", "continuity"], help="操作类型")
     p_tone.add_argument("--samples", type=int, default=3, help="predict 用：独立采样次数（默认 3）")
     p_tone.add_argument("--novel", type=int, required=True, help="小说 ID")
-    p_tone.add_argument("--number", type=int, required=True, help="章节号")
+    p_tone.add_argument("--number", type=int, help="章节号（continuity/predict-scan 可省略）")
     p_tone.add_argument("--save", action="store_true", help="收敛时直接保存为新版本")
     p_tone.add_argument("--out", help="输出正文到文件")
 

@@ -73,6 +73,7 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
             current_focus=novel.current_focus or "",
             world_settings=ctx["world_settings"],
             excitement_recent=get_excitement_recent(novel_id),
+            prev_ending=ctx.get("prev_ending", ""),
         )
         outline_text = collect_full_text(messages, cfg_o).strip()
         if not outline_text:

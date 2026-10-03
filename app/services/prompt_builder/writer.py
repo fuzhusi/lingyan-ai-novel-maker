@@ -309,7 +309,7 @@ def build_outline_prompt(novel_title="", genre="", synopsis="", world_intro="",
                          chapter_title="", chapter_number=1, characters=None,
                          summaries=None, foreshadowing_items=None, db=None,
                          author_intent="", current_focus="", world_settings=None,
-                         excitement_recent=None):
+                         excitement_recent=None, prev_ending=""):
     system_prompt = _load_system_prompt(db, "outline", (
         "你是一位资深小说大纲策划师。你输出的每一份章节大纲都必须严格遵守下方的"
         "【章节大纲固定格式】：它是后续自动勾选出场角色、按节拍铺写正文的施工依据，"
@@ -365,6 +365,18 @@ def build_outline_prompt(novel_title="", genre="", synopsis="", world_intro="",
     compass = build_compass_block(author_intent, current_focus, verb="大纲必须服务于此")
     if compass:
         blocks.append(compass)
+
+    # 情绪债回响（连续性测量 2026-10-03：改道率 35%，断点在大纲层）：
+    # 上章结尾若是情绪收（人物有未说出口的话/未决状态），下章大纲必须给它
+    # 一次回响——禁止直接跳新事件。只在情绪收结尾时注入（条件触发，非常驻）。
+    prev_tail = (prev_ending or "").strip()
+    if prev_tail and chapter_number and chapter_number > 1:
+        blocks.append(_section(
+            "上一章结尾（情绪债回响，大纲必须承接）",
+            prev_tail[-400:]
+            + "\n\n【回响规则】上一章结尾留下的人物情绪与未决状态（未说出口的话、"
+              "被搁置的对抗、刚发生的事件），必须在本大纲的【核心事件】或【场景节拍】"
+              "首拍中得到一次回响（哪怕一句）——禁止当作没发生直接开新事件。"))
 
     if world_intro:
         blocks.append(_section("世界观设定", world_intro))
