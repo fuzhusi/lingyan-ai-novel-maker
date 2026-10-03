@@ -44,17 +44,15 @@
                 </div>
                 <div style="display:flex;gap:0.3rem;flex-shrink:0;margin-left:1rem;flex-wrap:wrap;justify-content:flex-end">
                     <form method="POST" action="/novel/{{ novel.id }}/foreshadowing/{{ f.id }}/edit" style="display:inline">
-<input type="hidden" name="next" value="{{ request.full_path }}">
-<input type="hidden" name="next" value="{{ request.full_path }}">
+                        <input type="hidden" name="next" value="{{ request.full_path }}">
                         <input type="hidden" name="description" value="{{ f.description }}">
                         <input type="hidden" name="status" value="resolved">
                         <button type="submit" class="btn-sm" style="background:var(--success)">标记已回收</button>
                     </form>
                     <button class="btn-sm" onclick="document.getElementById('edit-fs-{{ f.id }}').style.display='block'">编辑</button>
                     <form method="POST" action="/novel/{{ novel.id }}/foreshadowing/{{ f.id }}/delete"
-<input type="hidden" name="next" value="{{ request.full_path }}">
-<input type="hidden" name="next" value="{{ request.full_path }}">
                           onsubmit="return confirm('确定删除此伏笔？')" style="display:inline">
+                        <input type="hidden" name="next" value="{{ request.full_path }}">
                         <button type="submit" class="btn-sm btn-danger">删除</button>
                     </form>
                 </div>
@@ -94,12 +92,14 @@
                 </div>
                 <div style="display:flex;gap:0.3rem;flex-shrink:0;margin-left:1rem;flex-wrap:wrap;justify-content:flex-end">
                     <form method="POST" action="/novel/{{ novel.id }}/foreshadowing/{{ f.id }}/edit" style="display:inline">
+                        <input type="hidden" name="next" value="{{ request.full_path }}">
                         <input type="hidden" name="description" value="{{ f.description }}">
                         <input type="hidden" name="status" value="open">
                         <button type="submit" class="btn-sm" style="background:var(--accent-dim)">重新打开</button>
                     </form>
                     <form method="POST" action="/novel/{{ novel.id }}/foreshadowing/{{ f.id }}/delete"
                           onsubmit="return confirm('确定删除此伏笔？')" style="display:inline">
+                        <input type="hidden" name="next" value="{{ request.full_path }}">
                         <button type="submit" class="btn-sm btn-danger">删除</button>
                     </form>
                 </div>

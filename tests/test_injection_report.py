@@ -178,3 +178,21 @@ def test_injection_report_skip_status_explicit(client):
         assert dim in dims, f"{dim} 必须显式登记（ok/skip/degrade 之一）"
         assert dims[dim] in ("ok", "skipped", "degraded")
     assert report["degraded_count"] == 0
+
+
+def test_knowledge_forms_wellformed(client):
+    """回归：next 隐藏域必须落在 form 标签闭合之后——
+    曾经插入到未闭合标签中间，把 onsubmit/confirm 挤成页面可见文本
+    （tojson 的 unicode 转义随之原样泄漏到确认框）。"""
+    n = Novel(title="表单结构", genre="都市")
+    db.session.add(n)
+    db.session.commit()
+    db.session.add(Character(novel_id=n.id, name="明尘", personality="p"))
+    db.session.add(WorldSetting(novel_id=n.id, category="规则", title="规矩", content="c"))
+    db.session.add(Foreshadowing(novel_id=n.id, title="怀表", description="d"))
+    db.session.commit()
+    broken_sig = '"\n<input type="hidden" name="next"'
+    for tab in ("characters", "world", "foreshadowing"):
+        body = client.get(f"/novel/{n.id}/knowledge?tab={tab}").get_data(as_text=True)
+        assert broken_sig not in body, f"{tab} 存在断裂的 form 标签"
+        assert body.count('name="next"') >= 1
