@@ -85,20 +85,42 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
         stages.append({"stage": "outline", "ok": True, "skipped": "已有大纲"})
 
     # 细纲硬门禁（戏剧字段，兼容旧格式软通过）：无戏不进正文
-    from app.services.outline_drama import write_ready_outline, outline_gate_error
+    from app.services.outline_drama import (
+        write_ready_outline, outline_gate_error, upgrade_freeform_outline)
     outline_ready = (chapter.outline or "").strip()
     ready = write_ready_outline(outline_ready)
+    if not ready["ok"]:
+        # 自动升级路径：旧格式自由文本大纲 → 一次 LLM 调用改写成 7 字段。
+        # 改写成功且过门禁则继续流水线（大纲回写落库）；失败回落 400 提示。
+        try:
+            cfg_u = get_effective_config(novel, agent_type="outline")
+            cfg_u["genre"] = novel.genre
+            upgraded = upgrade_freeform_outline(outline_ready, cfg_u)
+        except Exception as e:
+            logger.warning("大纲自动升级异常: %s", e)
+            upgraded = None
+        if upgraded:
+            ready = write_ready_outline(upgraded)
+            if ready["ok"]:
+                chapter.outline = upgraded
+                try:
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+                outline_ready = upgraded
+                stages.append({"stage": "outline_upgrade", "ok": True,
+                               "chars": len(upgraded)})
+        if not ready["ok"]:
+            stages.append({"stage": "outline_gate", "ok": False,
+                           "blocking": ready["blocking"]})
+            return {
+                "error": outline_gate_error(outline_ready),
+                "stages": stages,
+                "drama": ready,
+            }
     stages.append({"stage": "outline_drama", "ok": ready["ok"],
                    "soft_pass": ready.get("soft_pass"),
                    "has": ready["has"], "warnings": ready["warnings"]})
-    if not ready["ok"]:
-        stages.append({"stage": "outline_gate", "ok": False,
-                       "blocking": ready["blocking"]})
-        return {
-            "error": outline_gate_error(outline_ready),
-            "stages": stages,
-            "drama": ready,
-        }
     # 软通过：把缺失字段转成戏剧备注，并入大纲注入写作包
     outline_for_write = ready.get("effective_outline") or outline_ready
     if ready.get("drama_notes"):
@@ -128,7 +150,7 @@ def run_chapter_pipeline(novel_id, chapter_number, user_directive="",
     # 注入观测层报告（纯观测，不进 prompt；进 stages 与版本 model_params_json）
     injection_report = kw.pop("injection_report", None) or {}
     if injection_report.get("dims"):
-        stages.append({"stage": "injection_report",
+        stages.append({"stage": "injection_report", "ok": True,
                        "dims": injection_report["dims"],
                        "sizes": injection_report.get("sizes", {}),
                        "total_chars": injection_report.get("total_chars", 0),

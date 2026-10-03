@@ -5,7 +5,10 @@
 - 软通过：旧格式实质大纲（有叙事/节拍/部分字段）→ 允许进正文，
   但生成时注入缺失的戏剧备注（契约/章尾钩硬要求），warnings 保留给前端
 """
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 _MIN_OUTLINE_CHARS = 50
 # 旧格式实质大纲：更长 + 含叙事动词即可软通过
@@ -134,3 +137,42 @@ def write_ready_outline(outline):
         "effective_outline": effective,
         "drama_notes": drama_notes,
     }
+
+
+def upgrade_freeform_outline(outline, cfg):
+    """把旧格式自由文本大纲改写成 7 字段固定格式（LLM，一次调用）。
+
+    适用场景：上一章生成的「下一章方向」自由文本被细纲门禁拦下时，
+    给一条自动升级路径而不是让用户手写结构（用户实测 HTTP 400 断点）。
+    失败/超时返回 None，调用方回落到原有 400 提示。
+    """
+    import re as _re
+    text = (outline or "").strip()
+    if len(text) < 40:
+        return None
+    from app.services.llm import call_llm_sync, LLMError
+    system = (
+        "你是小说大纲策划师。把给定的自由文本章节大纲改写成严格的 7 字段固定格式。"
+        "只输出改写后的大纲，不要任何说明。字段名原样保留、一个不能少：\n"
+        "【本章定位】【核心事件】【出场人物】【场景节拍】【情感基调】【伏笔操作】【结尾钩子】\n"
+        "改写规则：忠于原文的事件与人物，不新增情节；【场景节拍】按原文叙事顺序拆 2-4 拍、"
+        "每拍一句话；【结尾钩子】必须是外部事件且带代价；【出场人物】列出文中出现的具名角色；"
+        "原文没有伏笔操作写「无」。")
+    try:
+        raw = call_llm_sync(
+            model=cfg["model_name"],
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": f"【自由文本大纲】\n{text}\n\n"
+                                                  f"【小说类型】{cfg.get('genre') or ''}"}],
+            api_key=cfg.get("api_key", ""), base_url=cfg.get("base_url", ""),
+            provider_type=cfg.get("provider_type", "deepseek"),
+            temperature=0.4, max_tokens=1600)
+    except (LLMError, Exception) as exc:
+        logger.warning("自由文本大纲改写失败: %s", exc)
+        return None
+    raw = _re.sub(r"^```(?:json|text)?\s*|\s*```$", "", (raw or "").strip())
+    # 改写结果必须过得了门禁（至少识别出事件与钩子），否则视为失败
+    if raw and _re.search(r"【核心事件】", raw) and _re.search(r"【结尾钩子】", raw):
+        return raw
+    logger.warning("自由文本大纲改写产物缺关键字段，放弃采用")
+    return None

@@ -11,7 +11,7 @@ from app.services.writer_chain import (
 )
 from app.services.llm import LLMError
 from app.models import db, Novel, Character, Chapter
-from app.config_utils import get_effective_config
+from app.config_utils import get_effective_config, get_model_config
 
 generate_bp = Blueprint("generate", __name__, url_prefix="/api")
 
@@ -99,7 +99,8 @@ def generate_stream():
         character_ids = []
 
     # 细纲硬门禁（戏剧字段，旧格式软通过）：请求未带大纲时回落到章节已存大纲
-    from app.services.outline_drama import write_ready_outline, outline_gate_error
+    from app.services.outline_drama import (
+        write_ready_outline, outline_gate_error, upgrade_freeform_outline)
     if not (outline or "").strip() and novel_id and chapter_number:
         ch = (Chapter.query
               .filter_by(novel_id=novel_id, chapter_number=chapter_number)
@@ -108,8 +109,34 @@ def generate_stream():
             outline = ch.outline.strip()
     ready = write_ready_outline(outline)
     if not ready["ok"]:
+        # 自动升级路径：旧格式自由文本大纲 → 一次 LLM 调用改写成 7 字段。
+        # 成功则改写稿落库并继续生成；失败才返回 400 与补全引导。
+        novel_for_upgrade = (Novel.query.get(novel_id)
+                             if novel_id else None)
+        try:
+            cfg_u = (get_effective_config(novel_for_upgrade, agent_type="outline")
+                     if novel_for_upgrade else get_model_config(agent_type="outline"))
+            cfg_u["genre"] = novel_for_upgrade.genre if novel_for_upgrade else ""
+            upgraded = upgrade_freeform_outline(outline, cfg_u)
+        except Exception:
+            upgraded = None
+        if upgraded:
+            ready2 = write_ready_outline(upgraded)
+            if ready2["ok"]:
+                outline = upgraded
+                if novel_id and chapter_number:
+                    ch = (Chapter.query
+                          .filter_by(novel_id=novel_id,
+                                     chapter_number=chapter_number)
+                          .first())
+                    if ch:
+                        ch.outline = upgraded
+                        db.session.commit()
+                ready = ready2
+    if not ready["ok"]:
         return jsonify({
             "error": outline_gate_error(outline),
+            "hint": "点击「重新生成大纲」可自动按固定格式重写后再生成正文",
             "drama": {"blocking": ready["blocking"], "warnings": ready["warnings"],
                       "has": ready["has"]},
         }), 400

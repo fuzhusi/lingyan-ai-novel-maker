@@ -84,6 +84,21 @@ def create_app():
         keys = ("（" + "、".join(p["keys"][:2]) + "）") if p["keys"] else ""
         return p["mode"] + keys
 
+    # 模板过滤器：tojson 的非 ASCII 直出版本——Jinja tojson 默认
+    # ensure_ascii=True，中文全变 \uXXXX，用户在确认框/源码里看到的是
+    # 转义码而非中文。HTML 危险字符（<>&'）仍转义，安全性不变。
+    @app.template_filter("tojson_cn")
+    def _tojson_cn(value, indent=None):
+        import json as _json
+        from markupsafe import Markup
+        raw = _json.dumps(value, ensure_ascii=False, indent=indent,
+                          separators=(",", ": "), default=str)
+        return Markup(
+            raw.replace("&", "\\u0026")
+               .replace("<", "\\u003c")
+               .replace(">", "\\u003e")
+               .replace("'", "\\u0027"))
+
     # 模板过滤器：剥掉章节标题自带的「第N章」前缀——模板渲染时都会自行
     # 拼章节号，AI 生成/拆书落库的标题常自带前缀，拼出「第 1 章：第1章 …」
 
